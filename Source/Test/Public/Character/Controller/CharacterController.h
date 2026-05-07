@@ -36,6 +36,8 @@ protected:
 	void Input_SprintEnd();
 	void Input_WalkStart();
 	void Input_WalkEnd();
+	void Input_BlockStart();
+	void Input_BlockEnd();
 
 	/* ================= 增强输入资产声明 ================= */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
@@ -64,6 +66,9 @@ protected:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
 	UInputAction* WalkAction;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
+	UInputAction* BlockAction;
 
 private:
 

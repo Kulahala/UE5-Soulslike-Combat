@@ -6,9 +6,12 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "Items/Weapon/Weapon.h"
+#include "Items/Shield/Shield.h"
+#include "NiagaraFunctionLibrary.h"
 #include "Components/CapsuleComponent.h"
 #include "HUD/PlayerHUDWidget.h"
 #include "AttributeComponent/AttributeComponent.h"
+#include "Kismet/GameplayStatics.h"
 
 // ==================== 生命周期 ====================
 
@@ -54,6 +57,13 @@ void AMyCharacter::Tick(float DeltaTime)
 
 	if (ActionState == EActionState::EAS_Stunning || ActionState == EActionState::EAC_Dead) return;
 
+	// 防御打断检查
+	if (bIsBlocking && (ActionState != EActionState::EAS_UnOccupied || GetCharacterMovement()->IsFalling()))
+	{
+		InterruptBlock(ActionState == EActionState::EAS_Exhausted || ActionState == EActionState::EAC_Dead);
+	}
+	TryResumeBlock();
+
 	UpdateMovementSpeed();
 
 	// 调试：右上角打印生命值和耐力
@@ -76,6 +86,7 @@ void AMyCharacter::Tick(float DeltaTime)
 
 void AMyCharacter::Attack()
 {
+	if (bIsBlocking) return;
 	Super::Attack();
 	if (CanAttack())
 	{
@@ -88,6 +99,7 @@ void AMyCharacter::Attack()
 
 void AMyCharacter::Jump()
 {
+	if (bIsBlocking) return;
 	if (CanJump() && ActionState != EActionState::EAS_Exhausted)
 	{
 		Attributes->UseStamina(10.f);
@@ -100,6 +112,7 @@ void AMyCharacter::GetHit_Implementation(const FVector& ImpactPoint, AActor* Hit
 	Super::GetHit_Implementation(ImpactPoint, HitInstigator);
 	if (Attributes->IsAlive())
 	{
+		InterruptBlock(false);
 		ActionState = EActionState::EAS_Stunning;
 		Attributes->ResumeStaminaRegen();  // 硬直接管，恢复体力暂停
 	}
@@ -107,6 +120,7 @@ void AMyCharacter::GetHit_Implementation(const FVector& ImpactPoint, AActor* Hit
 
 void AMyCharacter::Die()
 {
+	InterruptBlock(true);
 	ActionState = EActionState::EAC_Dead;
 
 	// 停止移动
@@ -127,6 +141,7 @@ void AMyCharacter::Die()
 
 void AMyCharacter::HandleExhausted()
 {
+	InterruptBlock(true);
 	ActionState = EActionState::EAS_Exhausted;
 	GetWorldTimerManager().SetTimer(ExhaustionTimerHandle, this,
 		&AMyCharacter::RecoverFromExhaustion, 5.f, false);
@@ -159,25 +174,120 @@ bool AMyCharacter::CanAttack() const
 		ArmWeaponState == EArmWeaponState::AWS_Arming;
 }
 
+// ==================== 防御 ====================
+
+bool AMyCharacter::CanStartBlock() const
+{
+	return EquippedShield
+		&& ActionState == EActionState::EAS_UnOccupied
+		&& !bIsArming
+		&& ArmWeaponState == EArmWeaponState::AWS_Arming
+		&& !GetCharacterMovement()->IsFalling();
+}
+
+void AMyCharacter::StartBlockInput()
+{
+	bBlockInputHeld = true;
+	bIsSprinting = false;
+	TryResumeBlock();
+}
+
+void AMyCharacter::ReleaseBlockInput()
+{
+	bBlockInputHeld = false;
+	bIsBlocking = false;
+	// TODO: 收盾动画
+}
+
+void AMyCharacter::InterruptBlock(bool bClearHeld)
+{
+	bIsBlocking = false;
+	if (bClearHeld) bBlockInputHeld = false;
+	// TODO: 收盾动画
+}
+
+void AMyCharacter::TryResumeBlock()
+{
+	if (bBlockInputHeld && !bIsBlocking && CanStartBlock())
+	{
+		bIsBlocking = true;
+		// TODO: 举盾动画
+	}
+}
+
+FBlockResult AMyCharacter::TryBlockHit(const FVector& ImpactPoint, float IncomingDamage,
+                                        AActor* Attacker, AActor* DamageCauser)
+{
+	FBlockResult Result;
+	Result.DamageAfterBlock = IncomingDamage;
+
+	if (!bIsBlocking || !EquippedShield || !Attributes || !Attributes->IsAlive())
+		return Result;
+
+	AActor* DirSrc = Attacker ? Attacker : DamageCauser;
+	if (!DirSrc) return Result;
+
+	FVector ToAttacker = (DirSrc->GetActorLocation() - GetActorLocation()).GetSafeNormal2D();
+	float Dot = FVector::DotProduct(GetActorForwardVector().GetSafeNormal2D(), ToAttacker);
+	float CosHalf = FMath::Cos(FMath::DegreesToRadians(EquippedShield->BlockHalfAngleDegrees));
+	if (Dot < CosHalf) return Result;
+
+	float StaminaCost = IncomingDamage * EquippedShield->BlockStaminaCostPerDamage;
+	if (Attributes->GetCurrentStamina() < StaminaCost) return Result;
+
+	Attributes->UseStamina(StaminaCost);
+	Result.bBlocked = true;
+	Result.DamageAfterBlock = IncomingDamage * EquippedShield->BlockedDamageMultiplier;
+	Result.bPlayNormalHitReact = false;
+
+	// 格挡反馈
+	if (EquippedShield->BlockSound)
+	{
+		UGameplayStatics::PlaySoundAtLocation(this, EquippedShield->BlockSound, ImpactPoint);
+	}
+	if (EquippedShield->BlockParticle)
+	{
+		UNiagaraFunctionLibrary::SpawnSystemAtLocation(this, EquippedShield->BlockParticle, ImpactPoint);
+	}
+	return Result;
+}
+
 // ==================== 装备 ====================
 
 void AMyCharacter::Equip()
 {
-	if (OverLapItem && OverLapItem->Implements<UPickupInterface>() && !OverLapItem->GetOwner() && WeaponState == EWeaponState::ECS_Unequipped)
-	{
-		IPickupInterface::Execute_OnPickup(OverLapItem, this);
+	if (bIsBlocking) return;
 
-		if (AWeapon* Weapon = Cast<AWeapon>(OverLapItem))
+	if (OverLapItem && OverLapItem->Implements<UPickupInterface>() && !OverLapItem->GetOwner())
+	{
+		// 盾牌：挂到左手
+		if (AShield* Shield = Cast<AShield>(OverLapItem))
 		{
-			EquippedWeapon = Weapon;
+			if (!EquippedShield)
+			{
+				Shield->EquipToOffhand(GetMesh(), Shield->OffhandSocketName, this);
+				EquippedShield = Shield;
+			}
+			return;
 		}
-		WeaponState = EWeaponState::ECS_OneHandEquipped;
-		ArmWeaponState = EArmWeaponState::AWS_Arming;
+
+		// 武器：继续走原逻辑
+		if (WeaponState == EWeaponState::ECS_Unequipped)
+		{
+			IPickupInterface::Execute_OnPickup(OverLapItem, this);
+			if (AWeapon* Weapon = Cast<AWeapon>(OverLapItem))
+			{
+				EquippedWeapon = Weapon;
+			}
+			WeaponState = EWeaponState::ECS_OneHandEquipped;
+			ArmWeaponState = EArmWeaponState::AWS_Arming;
+		}
 	}
 }
 
 void AMyCharacter::ArmWeapon()
 {
+	if (bIsBlocking) return;
 	if (ActionState != EActionState::EAS_UnOccupied || WeaponState == EWeaponState::ECS_Unequipped)
 	{
 		return;
@@ -200,6 +310,7 @@ void AMyCharacter::ArmWeapon()
 
 void AMyCharacter::Sprint()
 {
+	if (bIsBlocking) return;
 	bIsSprinting = true;
 }
 
@@ -223,8 +334,8 @@ void AMyCharacter::UpdateMovementSpeed()
 	FVector Velocity = GetVelocity();
 	Velocity.Z = 0.f;
 
-	// 奔跑每帧扣耐力（仅地面）
-	if (bIsSprinting && ActionState == EActionState::EAS_UnOccupied && !GetCharacterMovement()->IsFalling() && !Velocity.IsNearlyZero())
+	// 奔跑每帧扣耐力（仅地面，防御中不扣）
+	if (bIsSprinting && ActionState == EActionState::EAS_UnOccupied && !GetCharacterMovement()->IsFalling() && !Velocity.IsNearlyZero() && !bIsBlocking)
 	{
 		FVector Forward = GetActorForwardVector();
 		Forward.Z = 0.f;
@@ -237,7 +348,8 @@ void AMyCharacter::UpdateMovementSpeed()
 		}
 	}
 
-	float SpeedMultiplier = (ArmWeaponState == EArmWeaponState::AWS_Arming) ? 0.875f : 1.0f;
+	float SpeedMultiplier = bIsBlocking ? EquippedShield->BlockMoveSpeedMultiplier
+		: (ArmWeaponState == EArmWeaponState::AWS_Arming) ? 0.875f : 1.0f;
 
 	if (!Velocity.IsNearlyZero())
 	{

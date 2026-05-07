@@ -6,6 +6,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "Kismet/KismetSystemLibrary.h"
 #include "Interfaces/HitInterface.h"
+#include "Interfaces/BlockableInterface.h"
 #include "NiagaraComponent.h"
 #include "GameFramework/PlayerController.h"
 #include "TimerManager.h"
@@ -136,15 +137,28 @@ void AWeapon::ExecuteWeaponTrace()
 			}
 		}
 
-		// 伤害：只有跨阵营才扣血
+		// 格挡判定（仅跨阵营）
+		bool bPlayNormalHitReact = true;
+		float FinalDamage = Damage;
+
 		if (!bSameTeam)
 		{
-			UGameplayStatics::ApplyDamage(HitPoint.GetActor(), Damage, GetInstigatorController(), this,
+			if (IBlockableInterface* Blockable = Cast<IBlockableInterface>(HitActor))
+			{
+				FBlockResult BlockResult = Blockable->TryBlockHit(
+					HitPoint.ImpactPoint, Damage, GetOwner(), this);
+				if (BlockResult.bBlocked)
+				{
+					FinalDamage = BlockResult.DamageAfterBlock;
+					bPlayNormalHitReact = BlockResult.bPlayNormalHitReact;
+				}
+			}
+			UGameplayStatics::ApplyDamage(HitActor, FinalDamage, GetInstigatorController(), this,
 			                              UDamageType::StaticClass());
 		}
 
-		// 受击反应+特效：所有命中都触发（同类有反应但不扣血）
-		if (HitActor->Implements<UHitInterface>())
+		// 受击反应+特效：所有命中都触发，但格挡成功时跳过
+		if (bPlayNormalHitReact && HitActor->Implements<UHitInterface>())
 		{
 			IHitInterface::Execute_GetHit(HitActor, HitPoint.ImpactPoint, GetOwner());
 		}

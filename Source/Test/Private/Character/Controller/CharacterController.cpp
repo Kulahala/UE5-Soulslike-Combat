@@ -40,6 +40,9 @@ void ACharacterController::SetupInputComponent()
 
 		EnhancedInputComponent->BindAction(WalkAction, ETriggerEvent::Started, this, &ACharacterController::Input_WalkStart);
 		EnhancedInputComponent->BindAction(WalkAction, ETriggerEvent::Completed, this, &ACharacterController::Input_WalkEnd);
+
+		EnhancedInputComponent->BindAction(BlockAction, ETriggerEvent::Started, this, &ACharacterController::Input_BlockStart);
+		EnhancedInputComponent->BindAction(BlockAction, ETriggerEvent::Completed, this, &ACharacterController::Input_BlockEnd);
 	}
 }
 
@@ -147,5 +150,21 @@ void ACharacterController::Input_WalkEnd()
 	if (AMyCharacter* MyCharacter = Cast<AMyCharacter>(GetPawn()))
 	{
 		MyCharacter->StopWalking();
+	}
+}
+
+void ACharacterController::Input_BlockStart()
+{
+	if (AMyCharacter* MyCharacter = Cast<AMyCharacter>(GetPawn()))
+	{
+		MyCharacter->StartBlockInput();
+	}
+}
+
+void ACharacterController::Input_BlockEnd()
+{
+	if (AMyCharacter* MyCharacter = Cast<AMyCharacter>(GetPawn()))
+	{
+		MyCharacter->ReleaseBlockInput();
 	}
 }
