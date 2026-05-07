@@ -311,8 +311,10 @@ void AEnemy::CheckCombatTarget()
 	}
 	else
 	{
+		LastKnownLocation = ChasingTarget->GetActorLocation();
 		ChasingTarget = nullptr;
-		SetEnemyState(EEnemyState::EES_Patrolling);
+		bSearchingLostTarget = true;
+		SetEnemyState(EEnemyState::EES_Searching);
 	}
 }
 
@@ -327,6 +329,7 @@ void AEnemy::SetEnemyState(EEnemyState NewState)
 	if (EnemyState == EEnemyState::EES_Patrolling || EnemyState == EEnemyState::EES_Searching)
 	{
 		ClearPatrolTimers();
+		bSearchingLostTarget = false;
 		GetCharacterMovement()->bOrientRotationToMovement = true;
 	}
 
@@ -341,7 +344,7 @@ void AEnemy::SetEnemyState(EEnemyState NewState)
 		MoveToTarget(PatrolTarget);
 		break;
 	case EEnemyState::EES_Searching:
-		// OnSearching 首次 Tick 时处理启动逻辑
+		// OnSearching / OnLostTargetSearch 首次 Tick 时处理启动逻辑
 		break;
 	case EEnemyState::EES_Chasing:
 		GetCharacterMovement()->MaxWalkSpeed = ChaseSpeed;
@@ -429,7 +432,10 @@ void AEnemy::Tick(float DeltaTime)
 		OnPatrolling(DeltaTime);
 		break;
 	case EEnemyState::EES_Searching:
-		OnSearching(DeltaTime);
+		if (bSearchingLostTarget)
+			OnLostTargetSearch(DeltaTime);
+		else
+			OnSearching(DeltaTime);
 		break;
 	case EEnemyState::EES_Chasing:
 		OnChasing();
@@ -477,6 +483,41 @@ void AEnemy::OnSearching(float DeltaTime)
 		FRotator NewRotation = FMath::RInterpTo(CurrentRotation, PatrolWaitTargetRotation, DeltaTime,
 		                                        PatrolRotationSpeed);
 		SetActorRotation(NewRotation);
+	}
+}
+
+void AEnemy::OnLostTargetSearch(float DeltaTime)
+{
+	if (!GetWorldTimerManager().IsTimerActive(PatrolTimer))
+	{
+		// 首次 Tick：导航到最后已知位置
+		MoveToLocation(LastKnownLocation);
+
+		const float WaitTime = FMath::RandRange(PatrolWaitMin, PatrolWaitMax);
+		GetWorldTimerManager().SetTimer(PatrolTimer, this, &AEnemy::LostTargetSearchFinished, WaitTime);
+		GetWorldTimerManager().SetTimer(LookTimer, this, &AEnemy::GenerateNewLookRotation, SingleLookTime, true);
+		GenerateNewLookRotation();
+	}
+	else
+	{
+		// 等待期间：到达后平滑旋转张望
+		FRotator CurrentRotation = GetActorRotation();
+		FRotator NewRotation = FMath::RInterpTo(CurrentRotation, PatrolWaitTargetRotation, DeltaTime,
+		                                        PatrolRotationSpeed);
+		SetActorRotation(NewRotation);
+	}
+}
+
+void AEnemy::LostTargetSearchFinished()
+{
+	GetWorldTimerManager().ClearTimer(LookTimer);
+	bSearchingLostTarget = false;
+	GetCharacterMovement()->bOrientRotationToMovement = true;
+
+	if (AActor* Target = ChooseRadomTarget(PatrolTargets))
+	{
+		PatrolTarget = Target;
+		SetEnemyState(EEnemyState::EES_Patrolling);
 	}
 }
 
@@ -528,6 +569,21 @@ void AEnemy::MoveToTarget(const AActor* Target)
 		                   : FMath::Max(15.f, PatrolRadius - 50.f);
 
 	MoveRequest.SetAcceptanceRadius(StopRadius);
+	MoveRequest.SetUsePathfinding(true);
+	MoveRequest.SetAllowPartialPath(true);
+	EnemyController->MoveTo(MoveRequest);
+}
+
+void AEnemy::MoveToLocation(const FVector& Location)
+{
+	if (!EnemyController)
+	{
+		return;
+	}
+
+	FAIMoveRequest MoveRequest;
+	MoveRequest.SetGoalLocation(Location);
+	MoveRequest.SetAcceptanceRadius(SearchAcceptanceRadius);
 	MoveRequest.SetUsePathfinding(true);
 	MoveRequest.SetAllowPartialPath(true);
 	EnemyController->MoveTo(MoveRequest);

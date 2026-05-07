@@ -65,12 +65,14 @@ protected:
 
 	/* AI Tick */
 	void OnPatrolling(float DeltaTime); // 巡逻Tick逻辑
-	void OnSearching(float DeltaTime); // 张望搜索Tick逻辑
+	void OnSearching(float DeltaTime); // 巡逻到达点张望Tick逻辑
+	void OnLostTargetSearch(float DeltaTime); // 追丢搜寻Tick逻辑
 	void OnChasing(); // 追逐Tick逻辑
 	void OnCombating(float DeltaTime); // 战斗Tick逻辑
 
 	/* 导航/工具 */
 	void MoveToTarget(const AActor* Target); // 导航移动到目标
+	void MoveToLocation(const FVector& Location); // 导航到坐标点
 	bool BInTargetRange(AActor* Target, double Range) const; // 检查目标是否在范围内
 
 	/* 血条 */
@@ -169,10 +171,18 @@ private:
 	UPROPERTY(EditAnywhere, Category = "Ai Navigation", meta = (AllowPrivateAccess = "true"))
 	float SingleLookTime = 1.5f; // 单次张望持续时间
 
-	void SearchTimerFinished(); // 搜索等待结束回调
+	void SearchTimerFinished(); // 巡逻张望结束回调
+	void LostTargetSearchFinished(); // 追丢搜寻结束回调
 	void GenerateNewLookRotation(); // 生成新的张望方向
 	AActor* ChooseRadomTarget(const TArray<AActor*>& TargetArray); // 随机选择巡逻点
 	FRotator PatrolWaitTargetRotation; // 张望目标旋转
+
+	/* 追丢搜寻 */
+	FVector LastKnownLocation; // 玩家最后已知位置
+	bool bSearchingLostTarget = false; // 区分巡逻张望 vs 追丢搜寻
+
+	UPROPERTY(EditAnywhere, Category = "Combat", meta = (AllowPrivateAccess = "true"))
+	float SearchAcceptanceRadius = 50.f; // 追丢搜寻到达判定半径
 
 	/* 定时器 */
 	FTimerHandle PatrolTimer; // 巡逻等待定时器
