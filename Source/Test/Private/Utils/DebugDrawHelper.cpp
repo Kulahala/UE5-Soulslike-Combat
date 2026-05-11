@@ -52,29 +52,6 @@ void FDebugDrawHelper::AddSphere(UWorld* World, const FVector& Center, float Rad
 	DrawDebugSphere(World, Center, Radius, Segments, Color, false, -1.f, 0, 1.f);
 }
 
-void FDebugDrawHelper::DrawEnemyState(const AEnemy* Enemy, float Dist, EEnemyState State,
-	float GroundSpeed, float ChasingRadius, float CombatingRadius)
-{
-	static const TCHAR* StateNames[] = {
-		TEXT("UnOccupied"), TEXT("Patrolling"), TEXT("Searching"), TEXT("Chasing"),
-		TEXT("Combating"), TEXT("Attacking"), TEXT("Stunned"), TEXT("Dead")
-	};
-
-	if (IsEnemyEnabled())
-	{
-		FColor DistColor = Dist <= CombatingRadius ? FColor::Red
-			: Dist <= ChasingRadius ? FColor::Yellow : FColor::White;
-		Add(FString::Printf(TEXT("%s | Dist: %.0f/%.0f | Speed: %.0f"),
-			StateNames[static_cast<uint8>(State)], Dist, ChasingRadius, GroundSpeed), DistColor);
-	}
-
-	if (IsShapesEnabled())
-	{
-		AddSphere(Enemy->GetWorld(), Enemy->GetActorLocation(), ChasingRadius, FColor::Yellow);
-		AddSphere(Enemy->GetWorld(), Enemy->GetActorLocation(), CombatingRadius, FColor::Red, 16);
-	}
-}
-
 const TArray<FDebugDrawEntry>& FDebugDrawHelper::GetEntries()
 {
 	static const TArray<FDebugDrawEntry> EmptyEntries;

@@ -18,9 +18,6 @@ public:
 	static void AddSphere(UWorld* World, const FVector& Center, float Radius,
 		const FColor& Color = FColor::Yellow, int32 Segments = 24);
 
-	static void DrawEnemyState(const AEnemy* Enemy, float Dist, EEnemyState State,
-		float GroundSpeed, float ChasingRadius, float CombatingRadius);
-
 	static const TArray<FDebugDrawEntry>& GetEntries();
 
 	static bool IsDebugEnabled();

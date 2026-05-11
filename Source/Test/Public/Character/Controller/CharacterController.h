@@ -26,6 +26,7 @@ protected:
 
 	/* ================= 输入回调函数 ================= */
 	void Input_Move(const FInputActionValue& Value);
+	void Input_MoveEnd();  // [调试] 松开清零方向
 	void Input_Look(const FInputActionValue& Value);
 	void Input_Jump();
 	void Input_StopJumping();
@@ -71,5 +72,16 @@ protected:
 	UInputAction* BlockAction;
 
 private:
+	// 输入调试状态
+	FVector2D DebugMoveInput = FVector2D::ZeroVector;
+	bool bDebugSprintHeld = false;
+	bool bDebugWalkHeld = false;
+	bool bDebugBlockHeld = false;
+	float DebugAttackExpireTime = 0.f;
+	float DebugJumpExpireTime = 0.f;
+	float DebugEquipExpireTime = 0.f;
+	float DebugArmExpireTime = 0.f;
 
+public:
+	FString GetDebugInputText() const;
 };

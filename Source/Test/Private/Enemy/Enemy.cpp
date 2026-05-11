@@ -402,6 +402,8 @@ void AEnemy::Tick(float DeltaTime)
 		return;
 	}
 
+	// [调试] 敌人状态 + 距离 + 范围球体
+	// TODO: 多敌人时调试文字会混在一起，加 GetName() 或编号区分
 	if (FDebugDrawHelper::IsEnemyEnabled())
 	{
 		FDebugDrawHelper::Add(FString::Printf(TEXT("EnemyState: %s | Speed: %.0f"),

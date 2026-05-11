@@ -1,6 +1,7 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
 #include "Character/MyCharacter.h"
+#include "Character/Controller/CharacterController.h"
 
 #include "Camera/CameraComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -56,6 +57,16 @@ void AMyCharacter::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 
+	// [调试] 输入状态，不受 Stunning/Dead 限制
+	if (ACharacterController* CC = Cast<ACharacterController>(GetController()))
+	{
+		const FString InputText = CC->GetDebugInputText();
+		if (!InputText.IsEmpty())
+		{
+			FDebugDrawHelper::Add(FString::Printf(TEXT("Input: %s"), *InputText), FColor::White);
+		}
+	}
+
 	if (ActionState == EActionState::EAS_Stunning || ActionState == EActionState::EAC_Dead) return;
 
 	// 防御打断检查
@@ -69,6 +80,7 @@ void AMyCharacter::Tick(float DeltaTime)
 
 	if (Attributes)
 	{
+		// [调试] 角色状态面板
 		FDebugDrawHelper::Add(FString::Printf(TEXT("HP: %.1f / %.1f"), Attributes->GetCurrentHealth(), Attributes->GetMaxHealth()), FColor::Red);
 		FDebugDrawHelper::Add(FString::Printf(TEXT("SP: %.1f / %.1f"), Attributes->GetCurrentStamina(), Attributes->GetMaxStamina()), FColor::Green);
 
@@ -389,7 +401,7 @@ void AMyCharacter::UpdateMovementSpeed()
 		GetCharacterMovement()->MaxWalkSpeed = 300.f * SpeedMultiplier;
 	}
 
-	FDebugDrawHelper::Add(FString::Printf(TEXT("Speed: %.0f"), GetCharacterMovement()->MaxWalkSpeed), FColor::Cyan);
+	FDebugDrawHelper::Add(FString::Printf(TEXT("Speed: %.0f"), GetCharacterMovement()->MaxWalkSpeed), FColor::Cyan);  // [调试]
 }
 
 // ==================== 蒙太奇 ====================
