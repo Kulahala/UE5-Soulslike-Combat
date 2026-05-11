@@ -3,8 +3,8 @@
 UENUM(BlueprintType)
 enum class EWeaponState : uint8
 {
-	ECS_Unequipped UMETA(DisplayName = "Unequipped"), ECS_OneHandEquipped UMETA(DisplayName = "One Hand Equipped"),
-	ECS_TwoHandEquipped UMETA(DisplayName = "Two Hand Equipped")
+	EWS_Unequipped UMETA(DisplayName = "Unequipped"), EWS_OneHandEquipped UMETA(DisplayName = "One Hand Equipped"),
+	EWS_TwoHandEquipped UMETA(DisplayName = "Two Hand Equipped")
 };
 
 UENUM(BlueprintType)

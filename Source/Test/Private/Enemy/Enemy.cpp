@@ -17,18 +17,7 @@
 #include "Navigation/PathFollowingComponent.h"
 #include "Perception/AIPerceptionComponent.h"
 #include "Perception/AISenseConfig_Sight.h"
-
-static void DebugPrintEnemyState(const AEnemy* Enemy, float Dist, EEnemyState State, float GroundSpeed)
-{
-	if (GEngine)
-	{
-		GEngine->AddOnScreenDebugMessage(-1, 0.f, FColor::Yellow,
-		                                 FString::Printf(
-			                                 TEXT("Dist: %.1f | State: %d | GroundSpeed: %.1f"), Dist,
-			                                 static_cast<int32>(State),
-			                                 GroundSpeed));
-	}
-}
+#include "Utils/DebugDrawHelper.h"
 
 // ==================== 生命周期 ====================
 
@@ -413,10 +402,24 @@ void AEnemy::Tick(float DeltaTime)
 		return;
 	}
 
+	if (FDebugDrawHelper::IsEnemyEnabled())
+	{
+		FDebugDrawHelper::Add(FString::Printf(TEXT("EnemyState: %s | Speed: %.0f"),
+			*UEnum::GetValueAsString(EnemyState), GroundSpeed),
+			EnemyState == EEnemyState::EES_Dead ? FColor::Red : FColor::White);
+
+		if (ChasingTarget)
+		{
+			float Dist = FVector::Dist2D(GetActorLocation(), ChasingTarget->GetActorLocation());
+			FDebugDrawHelper::Add(FString::Printf(TEXT("Dist: %.0f / %.0f"), Dist, ChasingRadius),
+				Dist <= CombatingRadius ? FColor::Red : Dist <= ChasingRadius ? FColor::Yellow : FColor::White);
+		}
+	}
+
 	if (ChasingTarget)
 	{
-		float Dist = FVector::Dist2D(GetActorLocation(), ChasingTarget->GetActorLocation());
-		DebugPrintEnemyState(this, Dist, EnemyState, GroundSpeed);
+		FDebugDrawHelper::AddSphere(GetWorld(), GetActorLocation(), ChasingRadius, FColor::Yellow);
+		FDebugDrawHelper::AddSphere(GetWorld(), GetActorLocation(), CombatingRadius, FColor::Red, 16);
 	}
 
 	// 1. 初步判断

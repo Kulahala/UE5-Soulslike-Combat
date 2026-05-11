@@ -12,6 +12,7 @@
 #include "HUD/PlayerHUDWidget.h"
 #include "AttributeComponent/AttributeComponent.h"
 #include "Kismet/GameplayStatics.h"
+#include "Utils/DebugDrawHelper.h"
 
 // ==================== 生命周期 ====================
 
@@ -58,27 +59,28 @@ void AMyCharacter::Tick(float DeltaTime)
 	if (ActionState == EActionState::EAS_Stunning || ActionState == EActionState::EAC_Dead) return;
 
 	// 防御打断检查
-	if (bIsBlocking && (ActionState != EActionState::EAS_UnOccupied || GetCharacterMovement()->IsFalling()))
+	if (bIsBlocking && (!EquippedShield || ActionState != EActionState::EAS_UnOccupied || GetCharacterMovement()->IsFalling()))
 	{
-		InterruptBlock(ActionState == EActionState::EAS_Exhausted || ActionState == EActionState::EAC_Dead);
+		InterruptBlock(!EquippedShield || ActionState == EActionState::EAS_Exhausted || ActionState == EActionState::EAC_Dead);
 	}
 	TryResumeBlock();
 
 	UpdateMovementSpeed();
 
-	// 调试：右上角打印生命值和耐力
-	if (GEngine && Attributes)
+	if (Attributes)
 	{
-		GEngine->AddOnScreenDebugMessage(2, 0.f, FColor::Red,
-			FString::Printf(TEXT("HP: %.1f / %.1f"), Attributes->GetCurrentHealth(), Attributes->GetMaxHealth()));
-		GEngine->AddOnScreenDebugMessage(3, 0.f, FColor::Green,
-			FString::Printf(TEXT("SP: %.1f / %.1f"), Attributes->GetCurrentStamina(), Attributes->GetMaxStamina()));
+		FDebugDrawHelper::Add(FString::Printf(TEXT("HP: %.1f / %.1f"), Attributes->GetCurrentHealth(), Attributes->GetMaxHealth()), FColor::Red);
+		FDebugDrawHelper::Add(FString::Printf(TEXT("SP: %.1f / %.1f"), Attributes->GetCurrentStamina(), Attributes->GetMaxStamina()), FColor::Green);
 
 		static const TCHAR* ActionStateNames[] = {
 			TEXT("UnOccupied"), TEXT("Attacking"), TEXT("Arming"), TEXT("Stunning"), TEXT("Exhausted"), TEXT("Dead")
 		};
-		GEngine->AddOnScreenDebugMessage(4, 0.f, FColor::Yellow,
-			FString::Printf(TEXT("State: %s"), ActionStateNames[static_cast<uint8>(ActionState)]));
+		FDebugDrawHelper::Add(FString::Printf(TEXT("State: %s"), ActionStateNames[static_cast<uint8>(ActionState)]), FColor::Yellow);
+
+		UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
+		UAnimMontage* ActiveMontage = AnimInstance ? AnimInstance->GetCurrentActiveMontage() : nullptr;
+		FString MontageName = ActiveMontage ? ActiveMontage->GetName() : TEXT("None");
+		FDebugDrawHelper::Add(FString::Printf(TEXT("Montage: %s"), *MontageName), FColor::Cyan);
 	}
 }
 
@@ -144,7 +146,7 @@ void AMyCharacter::HandleExhausted()
 	InterruptBlock(true);
 	ActionState = EActionState::EAS_Exhausted;
 	GetWorldTimerManager().SetTimer(ExhaustionTimerHandle, this,
-		&AMyCharacter::RecoverFromExhaustion, 5.f, false);
+		&AMyCharacter::RecoverFromExhaustion, ExhaustedTime, false);
 }
 
 void AMyCharacter::RecoverFromExhaustion()
@@ -170,7 +172,7 @@ float AMyCharacter::TakeDamage(float DamageAmount, const struct FDamageEvent& Da
 
 bool AMyCharacter::CanAttack() const
 {
-	return ActionState == EActionState::EAS_UnOccupied && WeaponState != EWeaponState::ECS_Unequipped &&
+	return ActionState == EActionState::EAS_UnOccupied && WeaponState != EWeaponState::EWS_Unequipped &&
 		ArmWeaponState == EArmWeaponState::AWS_Arming;
 }
 
@@ -272,14 +274,14 @@ void AMyCharacter::Equip()
 		}
 
 		// 武器：继续走原逻辑
-		if (WeaponState == EWeaponState::ECS_Unequipped)
+		if (WeaponState == EWeaponState::EWS_Unequipped)
 		{
 			IPickupInterface::Execute_OnPickup(OverLapItem, this);
 			if (AWeapon* Weapon = Cast<AWeapon>(OverLapItem))
 			{
 				EquippedWeapon = Weapon;
 			}
-			WeaponState = EWeaponState::ECS_OneHandEquipped;
+			WeaponState = EWeaponState::EWS_OneHandEquipped;
 			ArmWeaponState = EArmWeaponState::AWS_Arming;
 		}
 	}
@@ -288,7 +290,7 @@ void AMyCharacter::Equip()
 void AMyCharacter::ArmWeapon()
 {
 	if (bIsBlocking) return;
-	if (ActionState != EActionState::EAS_UnOccupied || WeaponState == EWeaponState::ECS_Unequipped)
+	if (ActionState != EActionState::EAS_UnOccupied || WeaponState == EWeaponState::EWS_Unequipped)
 	{
 		return;
 	}
@@ -348,7 +350,7 @@ void AMyCharacter::UpdateMovementSpeed()
 		}
 	}
 
-	float SpeedMultiplier = bIsBlocking ? EquippedShield->BlockMoveSpeedMultiplier
+	float SpeedMultiplier = (bIsBlocking && EquippedShield) ? EquippedShield->BlockMoveSpeedMultiplier
 		: (ArmWeaponState == EArmWeaponState::AWS_Arming) ? 0.875f : 1.0f;
 
 	if (!Velocity.IsNearlyZero())
@@ -387,11 +389,7 @@ void AMyCharacter::UpdateMovementSpeed()
 		GetCharacterMovement()->MaxWalkSpeed = 300.f * SpeedMultiplier;
 	}
 
-	if (GEngine)
-	{
-		FString DebugMsg = FString::Printf(TEXT("Current Max Speed: %f"), GetCharacterMovement()->MaxWalkSpeed);
-		GEngine->AddOnScreenDebugMessage(1, 0.f, FColor::Cyan, DebugMsg);
-	}
+	FDebugDrawHelper::Add(FString::Printf(TEXT("Speed: %.0f"), GetCharacterMovement()->MaxWalkSpeed), FColor::Cyan);
 }
 
 // ==================== 蒙太奇 ====================

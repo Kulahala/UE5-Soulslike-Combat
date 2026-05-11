@@ -23,6 +23,7 @@ plugins/
 .learnings/
 AGENTS.md
 GEMINI.md
+plan.md
 .geminiignore
 CLAUDE.md
 .claude/

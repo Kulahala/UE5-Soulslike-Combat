@@ -51,7 +51,7 @@ protected:
 
 	/* 状态 */
 	UPROPERTY(BlueprintReadOnly, Category = "State", meta = (AllowPrivateAccess = "true"))
-	EWeaponState WeaponState = EWeaponState::ECS_Unequipped; // 装备状态
+	EWeaponState WeaponState = EWeaponState::EWS_Unequipped; // 装备状态
 
 	UPROPERTY(BlueprintReadOnly, Category = "State", meta = (AllowPrivateAccess = "true"))
 	EArmWeaponState ArmWeaponState = EArmWeaponState::AWS_Disarming; // 拔刀/收刀状态
