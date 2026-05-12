@@ -26,6 +26,8 @@ void ACharacterController::SetupInputComponent()
 	if (UEnhancedInputComponent* EnhancedInputComponent = CastChecked<UEnhancedInputComponent>(InputComponent))
 	{
 		EnhancedInputComponent->BindAction(MoveAction, ETriggerEvent::Triggered, this, &ACharacterController::Input_Move);
+		EnhancedInputComponent->BindAction(MoveAction, ETriggerEvent::Completed, this, &ACharacterController::Input_MoveEnd);  // [调试] 松开清零
+		EnhancedInputComponent->BindAction(MoveAction, ETriggerEvent::Canceled, this, &ACharacterController::Input_MoveEnd);  // [调试] 取消清零
 		EnhancedInputComponent->BindAction(LookAction, ETriggerEvent::Triggered, this, &ACharacterController::Input_Look);
 
 		EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Started, this, &ACharacterController::Input_Jump);
@@ -37,22 +39,29 @@ void ACharacterController::SetupInputComponent()
 
 		EnhancedInputComponent->BindAction(SprintAction, ETriggerEvent::Started, this, &ACharacterController::Input_SprintStart);
 		EnhancedInputComponent->BindAction(SprintAction, ETriggerEvent::Completed, this, &ACharacterController::Input_SprintEnd);
+		EnhancedInputComponent->BindAction(SprintAction, ETriggerEvent::Canceled, this, &ACharacterController::Input_SprintEnd);  // [调试] 防止 held 挂住
 
 		EnhancedInputComponent->BindAction(WalkAction, ETriggerEvent::Started, this, &ACharacterController::Input_WalkStart);
 		EnhancedInputComponent->BindAction(WalkAction, ETriggerEvent::Completed, this, &ACharacterController::Input_WalkEnd);
+		EnhancedInputComponent->BindAction(WalkAction, ETriggerEvent::Canceled, this, &ACharacterController::Input_WalkEnd);  // [调试] 防止 held 挂住
+
+		EnhancedInputComponent->BindAction(BlockAction, ETriggerEvent::Started, this, &ACharacterController::Input_BlockStart);
+		EnhancedInputComponent->BindAction(BlockAction, ETriggerEvent::Completed, this, &ACharacterController::Input_BlockEnd);
+		EnhancedInputComponent->BindAction(BlockAction, ETriggerEvent::Canceled, this, &ACharacterController::Input_BlockEnd);  // [调试] 防止 held 挂住
 	}
 }
 
 void ACharacterController::Input_Move(const FInputActionValue& Value)
 {
+	FVector2D MovementVector = Value.Get<FVector2D>();
+	DebugMoveInput = MovementVector;  // [调试] 先采样，不受 gameplay gate 限制
+
 	AMyCharacter* MyCharacter = Cast<AMyCharacter>(GetPawn());
 	if (!MyCharacter) return;
 
 	EActionState State = MyCharacter->GetActionState();
 	if (State != EActionState::EAS_UnOccupied && State != EActionState::EAS_Exhausted) return;
 	if (MyCharacter->GetCharacterMovement()->IsFalling()) return;
-
-	FVector2D MovementVector = Value.Get<FVector2D>();
 
 	const FRotator Rotation = GetControlRotation();
 	const FRotator YawRotation(0, Rotation.Yaw, 0);
@@ -63,7 +72,12 @@ void ACharacterController::Input_Move(const FInputActionValue& Value)
 
 	// Y 轴对应前后 (W/S/摇杆上下)，X 轴对应左右 (A/D/摇杆左右)
 	MyCharacter->AddMovementInput(ForwardDirection, MovementVector.Y); 
-	MyCharacter->AddMovementInput(RightDirection, MovementVector.X);   
+	MyCharacter->AddMovementInput(RightDirection, MovementVector.X);
+}
+
+void ACharacterController::Input_MoveEnd()
+{
+	DebugMoveInput = FVector2D::ZeroVector;
 }
 
 void ACharacterController::Input_Look(const FInputActionValue& Value)
@@ -79,6 +93,8 @@ void ACharacterController::Input_Look(const FInputActionValue& Value)
 
 void ACharacterController::Input_Jump()
 {
+	DebugJumpExpireTime = GetWorld()->GetTimeSeconds() + 0.15f;  // [调试]
+
 	if (AMyCharacter* MyCharacter = Cast<AMyCharacter>(GetPawn()))
 	{
 		if (MyCharacter->GetActionState() != EActionState::EAS_UnOccupied) return;
@@ -98,16 +114,18 @@ void ACharacterController::Input_Equip()
 {
 	if (AMyCharacter* MyCharacter = Cast<AMyCharacter>(GetPawn()))
 	{
-		MyCharacter->Equip(); 
+		MyCharacter->Equip();
 	}
+	DebugEquipExpireTime = GetWorld()->GetTimeSeconds() + 0.15f;  // [调试]
 }
 
 void ACharacterController::Input_Attack()
 {
 	if (AMyCharacter* MyCharacter = Cast<AMyCharacter>(GetPawn()))
 	{
-		MyCharacter->Attack(); 
+		MyCharacter->Attack();
 	}
+	DebugAttackExpireTime = GetWorld()->GetTimeSeconds() + 0.15f;  // [调试]
 }
 
 void ACharacterController::Input_Arm()
@@ -116,6 +134,7 @@ void ACharacterController::Input_Arm()
 	{
 		MyCharacter->ArmWeapon();
 	}
+	DebugArmExpireTime = GetWorld()->GetTimeSeconds() + 0.15f;  // [调试]
 }
 
 void ACharacterController::Input_SprintStart()
@@ -124,6 +143,7 @@ void ACharacterController::Input_SprintStart()
 	{
 		MyCharacter->Sprint();
 	}
+	bDebugSprintHeld = true;  // [调试]
 }
 
 void ACharacterController::Input_SprintEnd()
@@ -132,6 +152,7 @@ void ACharacterController::Input_SprintEnd()
 	{
 		MyCharacter->StopSprinting();
 	}
+	bDebugSprintHeld = false;  // [调试]
 }
 
 void ACharacterController::Input_WalkStart()
@@ -140,6 +161,7 @@ void ACharacterController::Input_WalkStart()
 	{
 		MyCharacter->Walk();
 	}
+	bDebugWalkHeld = true;  // [调试]
 }
 
 void ACharacterController::Input_WalkEnd()
@@ -148,4 +170,43 @@ void ACharacterController::Input_WalkEnd()
 	{
 		MyCharacter->StopWalking();
 	}
+	bDebugWalkHeld = false;  // [调试]
+}
+
+void ACharacterController::Input_BlockStart()
+{
+	if (AMyCharacter* MyCharacter = Cast<AMyCharacter>(GetPawn()))
+	{
+		MyCharacter->StartBlockInput();
+	}
+	bDebugBlockHeld = true;  // [调试]
+}
+
+void ACharacterController::Input_BlockEnd()
+{
+	if (AMyCharacter* MyCharacter = Cast<AMyCharacter>(GetPawn()))
+	{
+		MyCharacter->ReleaseBlockInput();
+	}
+	bDebugBlockHeld = false;  // [调试]
+}
+
+FString ACharacterController::GetDebugInputText() const
+{
+	const float Now = GetWorld()->GetTimeSeconds();
+	FString Result;
+
+	if (bDebugSprintHeld) Result += TEXT("[Sprint] ");
+	if (bDebugWalkHeld)   Result += TEXT("[Walk] ");
+	if (bDebugBlockHeld)  Result += TEXT("[Block] ");
+
+	if (Now < DebugAttackExpireTime) Result += TEXT("Attack ");
+	if (Now < DebugJumpExpireTime)   Result += TEXT("Jump ");
+	if (Now < DebugEquipExpireTime)  Result += TEXT("Equip ");
+	if (Now < DebugArmExpireTime)    Result += TEXT("Arm ");
+
+	if (!DebugMoveInput.IsNearlyZero())
+		Result += FString::Printf(TEXT("Move(%.1f, %.1f) "), DebugMoveInput.X, DebugMoveInput.Y);
+
+	return Result;
 }

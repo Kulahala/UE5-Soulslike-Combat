@@ -5,15 +5,17 @@
 #include "CoreMinimal.h"
 #include "BaseCharacter.h"
 #include "Character/CharacterTypes.h"
+#include "Interfaces/BlockableInterface.h"
 #include "MyCharacter.generated.h"
 
 class Aitem;
+class AShield;
 class USpringArmComponent;
 class UCameraComponent;
 class UPlayerHUDWidget;
 
 UCLASS()
-class TEST_API AMyCharacter : public ABaseCharacter
+class TEST_API AMyCharacter : public ABaseCharacter, public IBlockableInterface
 {
 	GENERATED_BODY()
 
@@ -38,6 +40,15 @@ public:
 	virtual void Equip() override;
 	void ArmWeapon(); // 切换拔刀/收刀
 
+	/* 防御 */
+	void StartBlockInput();
+	void ReleaseBlockInput();
+	void InterruptBlock(bool bClearHeld);
+	void TryResumeBlock();
+	bool CanStartBlock() const;
+	virtual FBlockResult TryBlockHit(const FVector& ImpactPoint, float IncomingDamage,
+	                                 AActor* Attacker, AActor* DamageCauser) override;
+
 	/* 移动状态 */
 	void Sprint();
 	void StopSprinting();
@@ -49,12 +60,16 @@ protected:
 	/* 蒙太奇 */
 	virtual void PlayAttackMontage(const FName& SectionName) override;
 	void PlayArmMontage(const FName& SectionName); // 播放拔刀/收刀动画
+	void PlayBlockMontage(const FName& SectionName); // 播放防御蒙太奇
 	virtual bool CanAttack() const override;
 	virtual void OnAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted) override;
 	void OnArmMontageEnded(UAnimMontage* Montage, bool bInterrupted);
 
 	UPROPERTY(EditDefaultsOnly, Category = "Montages")
 	UAnimMontage* ArmMontage; // 拔刀/收刀蒙太奇
+
+	UPROPERTY(EditDefaultsOnly, Category = "Montages")
+	UAnimMontage* BlockMontage; // 防御蒙太奇（Section: BlockRaise, BlockIdle）
 
 	/* 动作状态 */
 	UPROPERTY(BlueprintReadOnly, Category = "State")
@@ -91,6 +106,12 @@ private:
 	UPROPERTY(VisibleInstanceOnly, Category = "State", meta = (AllowPrivateAccess = "true"))
 	bool bIsArming = false; // 是否正在播放切刀/拔刀蒙太奇（短暂状态）
 
+	/* 防御 */
+	bool bIsBlocking = false;
+	bool bBlockInputHeld = false;
+	UPROPERTY()
+	AShield* EquippedShield;
+
 	FTimerHandle ExhaustionTimerHandle;
 
 public:
@@ -102,4 +123,6 @@ public:
 	FORCEINLINE USpringArmComponent* GetSpringArm() const { return SpringArm; }
 	FORCEINLINE EActionState GetActionState() const { return ActionState; }
 	FORCEINLINE bool IsArming() const { return bIsArming; }
+	FORCEINLINE bool IsBlocking() const { return bIsBlocking; }
+	FORCEINLINE AShield* GetEquippedShield() const { return EquippedShield; }
 };

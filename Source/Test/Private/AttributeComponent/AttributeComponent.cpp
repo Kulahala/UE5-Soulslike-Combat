@@ -38,6 +38,12 @@ void UAttributeComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 		CurrentStamina = FMath::Clamp(CurrentStamina + StaminaRegenRate * DeltaTime, 0.f, MaxStamina);
 		OnStaminaChanged.Broadcast(GetStaminaPercent());
 	}
+
+	// 生命恢复
+	if (bHealthRegenActive && IsAlive() && CurrentHealth < MaxHealth)
+	{
+		AddHealth(HealthRegenRate * DeltaTime);
+	}
 }
 
 void UAttributeComponent::UseStamina(float Amount)
@@ -81,4 +87,20 @@ void UAttributeComponent::ResumeStaminaRegen()
 {
 	bStaminaRegenPaused = false;
 	StaminaRegenCooldown = StaminaRegenDelay;
+}
+
+void UAttributeComponent::AddHealth(float Amount)
+{
+	CurrentHealth = FMath::Clamp(CurrentHealth + Amount, 0.f, MaxHealth);
+	OnHealthChanged.Broadcast(GetHealthPercent());
+}
+
+void UAttributeComponent::EnableHealthRegen()
+{
+	bHealthRegenActive = true;
+}
+
+void UAttributeComponent::DisableHealthRegen()
+{
+	bHealthRegenActive = false;
 }

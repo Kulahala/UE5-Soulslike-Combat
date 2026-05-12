@@ -39,12 +39,18 @@ private:
 	float Direction;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "State", meta = (AllowPrivateAccess = "true"))
-	EWeaponState WeaponState = EWeaponState::ECS_Unequipped;
+	EWeaponState WeaponState = EWeaponState::EWS_Unequipped;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "State", meta = (AllowPrivateAccess = "true"))
 	EArmWeaponState ArmWeaponState = EArmWeaponState::AWS_Disarming;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "State", meta = (AllowPrivateAccess = "true"))
 	bool bIsArming = false; // 是否正在播放切刀/拔刀蒙太奇
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "State", meta = (AllowPrivateAccess = "true"))
+	bool bIsBlocking = false; // 是否正在防御
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "State", meta = (AllowPrivateAccess = "true"))
+	bool bIsStunning = false; // 是否处于受击硬直
 
 };

@@ -1,14 +1,19 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
 #include "Character/MyCharacter.h"
+#include "Character/Controller/CharacterController.h"
 
 #include "Camera/CameraComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "Items/Weapon/Weapon.h"
+#include "Items/Shield/Shield.h"
+#include "NiagaraFunctionLibrary.h"
 #include "Components/CapsuleComponent.h"
 #include "HUD/PlayerHUDWidget.h"
 #include "AttributeComponent/AttributeComponent.h"
+#include "Kismet/GameplayStatics.h"
+#include "Utils/DebugDrawHelper.h"
 
 // ==================== 生命周期 ====================
 
@@ -34,6 +39,7 @@ void AMyCharacter::BeginPlay()
 	if (Attributes)
 	{
 		Attributes->OnExhausted.AddDynamic(this, &AMyCharacter::HandleExhausted);
+		Attributes->EnableHealthRegen();
 	}
 
 	// 玩家 HUD
@@ -52,23 +58,74 @@ void AMyCharacter::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 
+	// [调试] 输入状态，不受 Stunning/Dead 限制
+	if (ACharacterController* CC = Cast<ACharacterController>(GetController()))
+	{
+		const FString InputText = CC->GetDebugInputText();
+		if (!InputText.IsEmpty())
+		{
+			FDebugDrawHelper::Add(FString::Printf(TEXT("Input: %s"), *InputText), FColor::White);
+		}
+	}
+
 	if (ActionState == EActionState::EAS_Stunning || ActionState == EActionState::EAC_Dead) return;
+
+	// 防御打断检查
+	if (bIsBlocking && (!EquippedShield || ActionState != EActionState::EAS_UnOccupied || GetCharacterMovement()->IsFalling()))
+	{
+		InterruptBlock(!EquippedShield || ActionState == EActionState::EAS_Exhausted || ActionState == EActionState::EAC_Dead);
+	}
+	TryResumeBlock();
 
 	UpdateMovementSpeed();
 
-	// 调试：右上角打印生命值和耐力
-	if (GEngine && Attributes)
+	if (Attributes)
 	{
-		GEngine->AddOnScreenDebugMessage(2, 0.f, FColor::Red,
-			FString::Printf(TEXT("HP: %.1f / %.1f"), Attributes->GetCurrentHealth(), Attributes->GetMaxHealth()));
-		GEngine->AddOnScreenDebugMessage(3, 0.f, FColor::Green,
-			FString::Printf(TEXT("SP: %.1f / %.1f"), Attributes->GetCurrentStamina(), Attributes->GetMaxStamina()));
+		// [调试] 角色状态面板
+		FDebugDrawHelper::Add(FString::Printf(TEXT("HP: %.1f / %.1f"), Attributes->GetCurrentHealth(), Attributes->GetMaxHealth()), FColor::Red);
+		FDebugDrawHelper::Add(FString::Printf(TEXT("SP: %.1f / %.1f"), Attributes->GetCurrentStamina(), Attributes->GetMaxStamina()), FColor::Green);
 
 		static const TCHAR* ActionStateNames[] = {
 			TEXT("UnOccupied"), TEXT("Attacking"), TEXT("Arming"), TEXT("Stunning"), TEXT("Exhausted"), TEXT("Dead")
 		};
-		GEngine->AddOnScreenDebugMessage(4, 0.f, FColor::Yellow,
-			FString::Printf(TEXT("State: %s"), ActionStateNames[static_cast<uint8>(ActionState)]));
+		FDebugDrawHelper::Add(FString::Printf(TEXT("State: %s"), ActionStateNames[static_cast<uint8>(ActionState)]), FColor::Yellow);
+
+		UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
+		UAnimMontage* ActiveMontage = AnimInstance ? AnimInstance->GetCurrentActiveMontage() : nullptr;
+
+		// [调试] 蒙太奇 — 仅播放时显示
+		if (ActiveMontage)
+		{
+			const FName ActiveSection = AnimInstance->Montage_GetCurrentSection(ActiveMontage);
+			FDebugDrawHelper::Add(FString::Printf(TEXT("Montage: %s [%s]"),
+				*ActiveMontage->GetName(),
+				ActiveSection.IsNone() ? TEXT("?") : *ActiveSection.ToString()),
+				FColor::Cyan);
+		}
+
+		// [调试] 防御门卫 — 仅激活时显示
+		FString BlockDebug;
+		if (bBlockInputHeld) BlockDebug += TEXT("[held] ");
+		if (bIsBlocking) BlockDebug += TEXT("[blocking] ");
+		if (CanStartBlock()) BlockDebug += TEXT("[canStart] ");
+		if (!EquippedShield) BlockDebug += TEXT("[noShield] ");
+		if (bIsArming) BlockDebug += TEXT("[isArming] ");
+		if (GetCharacterMovement()->IsFalling()) BlockDebug += TEXT("[falling] ");
+		if (!BlockDebug.IsEmpty())
+		{
+			FDebugDrawHelper::Add(FString::Printf(TEXT("Block: %s"), *BlockDebug),
+				bIsBlocking ? FColor::Green : FColor::White);
+		}
+
+		// [调试] 防御蒙太奇 — 仅播放时显示
+		if (AnimInstance && BlockMontage && AnimInstance->Montage_IsPlaying(BlockMontage))
+		{
+			const FName BlockSection = AnimInstance->Montage_GetCurrentSection(BlockMontage);
+			FDebugDrawHelper::Add(FString::Printf(TEXT("BlockMontage: %s [%s]"),
+				*BlockMontage->GetName(),
+				BlockSection.IsNone() ? TEXT("?") : *BlockSection.ToString()),
+				FColor::Green);
+		}
 	}
 }
 
@@ -76,6 +133,7 @@ void AMyCharacter::Tick(float DeltaTime)
 
 void AMyCharacter::Attack()
 {
+	if (bIsBlocking) return;
 	Super::Attack();
 	if (CanAttack())
 	{
@@ -88,6 +146,7 @@ void AMyCharacter::Attack()
 
 void AMyCharacter::Jump()
 {
+	if (bIsBlocking) return;
 	if (CanJump() && ActionState != EActionState::EAS_Exhausted)
 	{
 		Attributes->UseStamina(10.f);
@@ -100,6 +159,7 @@ void AMyCharacter::GetHit_Implementation(const FVector& ImpactPoint, AActor* Hit
 	Super::GetHit_Implementation(ImpactPoint, HitInstigator);
 	if (Attributes->IsAlive())
 	{
+		InterruptBlock(false);
 		ActionState = EActionState::EAS_Stunning;
 		Attributes->ResumeStaminaRegen();  // 硬直接管，恢复体力暂停
 	}
@@ -107,6 +167,7 @@ void AMyCharacter::GetHit_Implementation(const FVector& ImpactPoint, AActor* Hit
 
 void AMyCharacter::Die()
 {
+	InterruptBlock(true);
 	ActionState = EActionState::EAC_Dead;
 
 	// 停止移动
@@ -127,9 +188,10 @@ void AMyCharacter::Die()
 
 void AMyCharacter::HandleExhausted()
 {
+	InterruptBlock(true);
 	ActionState = EActionState::EAS_Exhausted;
 	GetWorldTimerManager().SetTimer(ExhaustionTimerHandle, this,
-		&AMyCharacter::RecoverFromExhaustion, 5.f, false);
+		&AMyCharacter::RecoverFromExhaustion, ExhaustedTime, false);
 }
 
 void AMyCharacter::RecoverFromExhaustion()
@@ -155,30 +217,134 @@ float AMyCharacter::TakeDamage(float DamageAmount, const struct FDamageEvent& Da
 
 bool AMyCharacter::CanAttack() const
 {
-	return ActionState == EActionState::EAS_UnOccupied && WeaponState != EWeaponState::ECS_Unequipped &&
+	return ActionState == EActionState::EAS_UnOccupied && WeaponState != EWeaponState::EWS_Unequipped &&
 		ArmWeaponState == EArmWeaponState::AWS_Arming;
+}
+
+// ==================== 防御 ====================
+
+bool AMyCharacter::CanStartBlock() const
+{
+	return EquippedShield
+		&& ActionState == EActionState::EAS_UnOccupied
+		&& !bIsArming
+		&& !GetCharacterMovement()->IsFalling();
+}
+
+void AMyCharacter::StartBlockInput()
+{
+	bBlockInputHeld = true;
+	bIsSprinting = false;
+	TryResumeBlock();
+}
+
+void AMyCharacter::ReleaseBlockInput()
+{
+	bBlockInputHeld = false;
+	bIsBlocking = false;
+
+	if (UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
+		AnimInstance && BlockMontage && AnimInstance->Montage_IsPlaying(BlockMontage))
+	{
+		AnimInstance->Montage_Stop(0.2f, BlockMontage);
+	}
+}
+
+void AMyCharacter::InterruptBlock(bool bClearHeld)
+{
+	bIsBlocking = false;
+	if (bClearHeld) bBlockInputHeld = false;
+
+	if (UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
+		AnimInstance && BlockMontage && AnimInstance->Montage_IsPlaying(BlockMontage))
+	{
+		AnimInstance->Montage_Stop(0.1f, BlockMontage);
+	}
+}
+
+void AMyCharacter::TryResumeBlock()
+{
+	if (bBlockInputHeld && !bIsBlocking && CanStartBlock())
+	{
+		bIsBlocking = true;
+		PlayBlockMontage(FName("BlockRaise"));
+	}
+}
+
+FBlockResult AMyCharacter::TryBlockHit(const FVector& ImpactPoint, float IncomingDamage,
+                                        AActor* Attacker, AActor* DamageCauser)
+{
+	FBlockResult Result;
+	Result.DamageAfterBlock = IncomingDamage;
+
+	if (!bIsBlocking || !EquippedShield || !Attributes || !Attributes->IsAlive())
+		return Result;
+
+	AActor* DirSrc = Attacker ? Attacker : DamageCauser;
+	if (!DirSrc) return Result;
+
+	FVector ToAttacker = (DirSrc->GetActorLocation() - GetActorLocation()).GetSafeNormal2D();
+	float Dot = FVector::DotProduct(GetActorForwardVector().GetSafeNormal2D(), ToAttacker);
+	float CosHalf = FMath::Cos(FMath::DegreesToRadians(EquippedShield->BlockHalfAngleDegrees));
+	if (Dot < CosHalf) return Result;
+
+	float StaminaCost = IncomingDamage * EquippedShield->BlockStaminaCostPerDamage;
+	if (Attributes->GetCurrentStamina() < StaminaCost) return Result;
+
+	Attributes->UseStamina(StaminaCost);
+	Result.bBlocked = true;
+	Result.DamageAfterBlock = IncomingDamage * EquippedShield->BlockedDamageMultiplier;
+	Result.bPlayNormalHitReact = false;
+
+	// 格挡反馈
+	if (EquippedShield->BlockSound)
+	{
+		UGameplayStatics::PlaySoundAtLocation(this, EquippedShield->BlockSound, ImpactPoint);
+	}
+	if (EquippedShield->BlockParticle)
+	{
+		UNiagaraFunctionLibrary::SpawnSystemAtLocation(this, EquippedShield->BlockParticle, ImpactPoint);
+	}
+	return Result;
 }
 
 // ==================== 装备 ====================
 
 void AMyCharacter::Equip()
 {
-	if (OverLapItem && OverLapItem->Implements<UPickupInterface>() && !OverLapItem->GetOwner() && WeaponState == EWeaponState::ECS_Unequipped)
-	{
-		IPickupInterface::Execute_OnPickup(OverLapItem, this);
+	if (bIsBlocking) return;
 
-		if (AWeapon* Weapon = Cast<AWeapon>(OverLapItem))
+	if (OverLapItem && OverLapItem->Implements<UPickupInterface>() && !OverLapItem->GetOwner())
+	{
+		// 盾牌：挂到左手
+		if (AShield* Shield = Cast<AShield>(OverLapItem))
 		{
-			EquippedWeapon = Weapon;
+			if (!EquippedShield)
+			{
+				Shield->EquipToOffhand(GetMesh(), Shield->OffhandSocketName, this);
+				EquippedShield = Shield;
+			}
+			return;
 		}
-		WeaponState = EWeaponState::ECS_OneHandEquipped;
-		ArmWeaponState = EArmWeaponState::AWS_Arming;
+
+		// 武器：继续走原逻辑
+		if (WeaponState == EWeaponState::EWS_Unequipped)
+		{
+			IPickupInterface::Execute_OnPickup(OverLapItem, this);
+			if (AWeapon* Weapon = Cast<AWeapon>(OverLapItem))
+			{
+				EquippedWeapon = Weapon;
+			}
+			WeaponState = EWeaponState::EWS_OneHandEquipped;
+			ArmWeaponState = EArmWeaponState::AWS_Arming;
+		}
 	}
 }
 
 void AMyCharacter::ArmWeapon()
 {
-	if (ActionState != EActionState::EAS_UnOccupied || WeaponState == EWeaponState::ECS_Unequipped)
+	if (bIsBlocking) return;
+	if (ActionState != EActionState::EAS_UnOccupied || WeaponState == EWeaponState::EWS_Unequipped)
 	{
 		return;
 	}
@@ -200,6 +366,7 @@ void AMyCharacter::ArmWeapon()
 
 void AMyCharacter::Sprint()
 {
+	if (bIsBlocking) return;
 	bIsSprinting = true;
 }
 
@@ -223,8 +390,8 @@ void AMyCharacter::UpdateMovementSpeed()
 	FVector Velocity = GetVelocity();
 	Velocity.Z = 0.f;
 
-	// 奔跑每帧扣耐力（仅地面）
-	if (bIsSprinting && ActionState == EActionState::EAS_UnOccupied && !GetCharacterMovement()->IsFalling() && !Velocity.IsNearlyZero())
+	// 奔跑每帧扣耐力（仅地面，防御中不扣）
+	if (bIsSprinting && ActionState == EActionState::EAS_UnOccupied && !GetCharacterMovement()->IsFalling() && !Velocity.IsNearlyZero() && !bIsBlocking)
 	{
 		FVector Forward = GetActorForwardVector();
 		Forward.Z = 0.f;
@@ -237,7 +404,8 @@ void AMyCharacter::UpdateMovementSpeed()
 		}
 	}
 
-	float SpeedMultiplier = (ArmWeaponState == EArmWeaponState::AWS_Arming) ? 0.875f : 1.0f;
+	float SpeedMultiplier = (bIsBlocking && EquippedShield) ? EquippedShield->BlockMoveSpeedMultiplier
+		: (ArmWeaponState == EArmWeaponState::AWS_Arming) ? 0.875f : 1.0f;
 
 	if (!Velocity.IsNearlyZero())
 	{
@@ -275,11 +443,7 @@ void AMyCharacter::UpdateMovementSpeed()
 		GetCharacterMovement()->MaxWalkSpeed = 300.f * SpeedMultiplier;
 	}
 
-	if (GEngine)
-	{
-		FString DebugMsg = FString::Printf(TEXT("Current Max Speed: %f"), GetCharacterMovement()->MaxWalkSpeed);
-		GEngine->AddOnScreenDebugMessage(1, 0.f, FColor::Cyan, DebugMsg);
-	}
+	FDebugDrawHelper::Add(FString::Printf(TEXT("Speed: %.0f"), GetCharacterMovement()->MaxWalkSpeed), FColor::Cyan);  // [调试]
 }
 
 // ==================== 蒙太奇 ====================
@@ -300,6 +464,16 @@ void AMyCharacter::PlayArmMontage(const FName& SectionName)
 		FOnMontageEnded EndDelegate;
 		EndDelegate.BindUObject(this, &AMyCharacter::OnArmMontageEnded);
 		AnimInstance->Montage_SetEndDelegate(EndDelegate, ArmMontage);
+	}
+}
+
+void AMyCharacter::PlayBlockMontage(const FName& SectionName)
+{
+	UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
+	if (AnimInstance && BlockMontage)
+	{
+		AnimInstance->Montage_Play(BlockMontage);
+		AnimInstance->Montage_JumpToSection(SectionName, BlockMontage);
 	}
 }
 

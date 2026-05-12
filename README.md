@@ -22,6 +22,7 @@ The project follows a decoupled, component-based architecture to ensure scalabil
    - **Interface-Driven Interaction**: Uses `IHitInterface` to handle combat interactions across different actor types.
    - **Enemy AI**: Full `EEnemyState` FSM with perception, facing verification before attack, attack cooldown system, and 2D BlendSpace-driven locomotion. See [State Machine Flow](#state-machine-flow) below.
    - **Combat Distance System**: Three radii (`ChasingRadius`/`CombatingRadius`/`PatrolRadius`) control AI behavior transitions, with `AcceptanceRadius` compensating for target capsule radius.
+   - **Shield Blocking System**: Hold-to-block defense via `IBlockableInterface`. DotProduct angle check (default ±60°) determines if an incoming attack is within block arc. Successful block reduces damage by 80%, costs stamina, and skips hit-react. Supports auto-resume after interruption, air-block prevention, and exhaustion-forced unblock.
 
 ### 🧠 Key Technical & Algorithmic Highlights
 
@@ -30,6 +31,7 @@ The project follows a decoupled, component-based architecture to ensure scalabil
 - **Health Buffer Visuals**: Implements a delayed buffer bar effect for better visual clarity on damage received.
 - **Enemy Attack Pipeline**: Combat state facing verification (DotProduct ±15°) before attack, with full movement lock during attack montage.
 - **Upper Body Animation Layering**: Layered Blend Per Bone + Slot node for weapon arming/disarming while moving, controlled by transient `bIsArming` state.
+- **Shield Blocking Algorithm**: Block check executes after weapon trace hits but before damage is applied. Uses `DotProduct(character forward, to-attacker)` vs `Cos(BlockHalfAngleDegrees)` for arc detection. Stamina cost scales with damage. Successful block reduces damage to 20% and suppresses hit-react. Exhaustion triggers synchronous block-break via `OnExhausted` delegate chain.
 
 ---
 
@@ -51,6 +53,7 @@ The project follows a decoupled, component-based architecture to ensure scalabil
    - **接口驱动交互**：利用 `IHitInterface` 统一处理不同类型 Actor（敌人、可破坏物）的受击效果、粒子与音效。
    - **敌人 AI**：基于 `EEnemyState` 状态机，支持完整的战斗流程：感知追击 → 面朝校验 → 攻击 → 冷却等待 → 硬直恢复。巡逻阶段使用平滑旋转张望，追击阶段使用 2D BlendSpace（Speed × Direction）驱动移动动画。攻击冷却从攻击开始计算，让追击时间重叠冷却，体感更紧凑。
    - **战斗距离系统**：三个半径（`ChasingRadius`/`CombatingRadius`/`PatrolRadius`）控制 AI 行为切换，`MoveToTarget` 的 `AcceptanceRadius` 补偿目标胶囊体半径以精确停在战斗范围内。
+   - **盾牌防御系统**：基于 `IBlockableInterface` 的格挡判定，按住按键举盾，通过 DotProduct 角度检测判断攻击是否在格挡范围内（默认 ±60°），成功格挡减伤 80% 并消耗体力，跳过受击硬直。支持中断自动恢复、空中禁止防御、体力耗尽强制解除等边界处理。
 
 3. **环境与效果**
    - **破碎系统**：集成 Chaos 物理几何体集（Geometry Collections），实现环境的真实破坏效果。
@@ -62,7 +65,7 @@ The project follows a decoupled, component-based architecture to ensure scalabil
 
 | 状态 | 说明 |
 |------|------|
-| `EAS_UnOccupied` | 正常态，可移动/攻击/跳跃/奔跑 |
+| `EAS_UnOccupied` | 正常态，可移动/攻击/跳跃/奔跑/防御（防御为子状态，用 `bIsBlocking` 标志） |
 | `EAS_Attacking` | 攻击蒙太奇播放中，锁定攻击输入 |
 | `EAS_Arming` | 拔刀/收刀蒙太奇播放中 |
 | `EAS_Stunning` | 受击硬直，短暂锁定 |
@@ -77,6 +80,12 @@ stateDiagram-v2
     UnOccupied --> Arming : 拔刀/收刀
     UnOccupied --> Stunning : 受击
     UnOccupied --> Exhausted : 体力归零
+
+    note right of UnOccupied
+        防御子状态 (bIsBlocking):
+        按住举盾，松开/受击取消
+        耗尽/死亡强制解除
+    end note
 
     Attacking --> UnOccupied : 蒙太奇结束
     Arming --> UnOccupied : 蒙太奇结束
@@ -142,6 +151,9 @@ stateDiagram-v2
 
 - **上半身动画分层 (Upper Body Animation Layering)**
   通过 Layered Blend Per Bone + Slot 节点实现移动中拔刀/收刀动画，由瞬态变量 `bIsArming` 控制混合权重，与持久状态 `ArmWeaponState` 分离。
+
+- **盾牌格挡算法 (Shield Blocking)**
+  防御判定在 `ExecuteWeaponTrace` 命中后、`ApplyDamage` 前执行。通过 `DotProduct(角色前方, 到攻击者方向)` 与 `Cos(BlockHalfAngleDegrees)` 比较判断角度范围，体力不足时格挡自动失败。成功格挡减伤至 20% 并跳过受击硬直，体力耗尽触发同步掉盾。
 
 ---
 

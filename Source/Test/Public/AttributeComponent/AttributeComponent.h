@@ -61,6 +61,11 @@ private:
 	bool bStaminaRegenPaused = false; // 攻击期间暂停恢复
 	bool bStaminaJustDepleted = false; // 防止重复广播耗尽
 
+	UPROPERTY(EditAnywhere, Category = "Actor Attributes", meta = (AllowPrivateAccess = "true"))
+	float HealthRegenRate = 1.f; // 每秒恢复量
+
+	bool bHealthRegenActive = false;
+
 public:
 	UFUNCTION(BlueprintCallable, Category = "Actor Attributes")
 	FORCEINLINE void AddGold(int32 Amount) { Gold += Amount; }
@@ -88,4 +93,8 @@ public:
 	void ResumeStaminaRegen();
 	void ResetExhaustionFlag();
 	FORCEINLINE bool CheckStamina(float RequiredAmount) const { return CurrentStamina >= RequiredAmount; }
+
+	void AddHealth(float Amount);
+	void EnableHealthRegen();
+	void DisableHealthRegen();
 };
