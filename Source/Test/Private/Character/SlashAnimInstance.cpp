@@ -35,4 +35,6 @@ void USlashAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 	WeaponState = MyCharacter->GetCharacterState();
 	ArmWeaponState = MyCharacter->GetArmWeaponState();
 	bIsArming = MyCharacter->IsArming();
+	bIsBlocking = MyCharacter->IsBlocking();
+	bIsStunning = MyCharacter->GetActionState() == EActionState::EAS_Stunning;
 }

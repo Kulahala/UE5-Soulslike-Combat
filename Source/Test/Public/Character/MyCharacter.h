@@ -60,12 +60,16 @@ protected:
 	/* 蒙太奇 */
 	virtual void PlayAttackMontage(const FName& SectionName) override;
 	void PlayArmMontage(const FName& SectionName); // 播放拔刀/收刀动画
+	void PlayBlockMontage(const FName& SectionName); // 播放防御蒙太奇
 	virtual bool CanAttack() const override;
 	virtual void OnAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted) override;
 	void OnArmMontageEnded(UAnimMontage* Montage, bool bInterrupted);
 
 	UPROPERTY(EditDefaultsOnly, Category = "Montages")
 	UAnimMontage* ArmMontage; // 拔刀/收刀蒙太奇
+
+	UPROPERTY(EditDefaultsOnly, Category = "Montages")
+	UAnimMontage* BlockMontage; // 防御蒙太奇（Section: BlockRaise, BlockIdle）
 
 	/* 动作状态 */
 	UPROPERTY(BlueprintReadOnly, Category = "State")

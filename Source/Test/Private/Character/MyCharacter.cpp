@@ -39,6 +39,7 @@ void AMyCharacter::BeginPlay()
 	if (Attributes)
 	{
 		Attributes->OnExhausted.AddDynamic(this, &AMyCharacter::HandleExhausted);
+		Attributes->EnableHealthRegen();
 	}
 
 	// 玩家 HUD
@@ -91,8 +92,40 @@ void AMyCharacter::Tick(float DeltaTime)
 
 		UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
 		UAnimMontage* ActiveMontage = AnimInstance ? AnimInstance->GetCurrentActiveMontage() : nullptr;
-		FString MontageName = ActiveMontage ? ActiveMontage->GetName() : TEXT("None");
-		FDebugDrawHelper::Add(FString::Printf(TEXT("Montage: %s"), *MontageName), FColor::Cyan);
+
+		// [调试] 蒙太奇 — 仅播放时显示
+		if (ActiveMontage)
+		{
+			const FName ActiveSection = AnimInstance->Montage_GetCurrentSection(ActiveMontage);
+			FDebugDrawHelper::Add(FString::Printf(TEXT("Montage: %s [%s]"),
+				*ActiveMontage->GetName(),
+				ActiveSection.IsNone() ? TEXT("?") : *ActiveSection.ToString()),
+				FColor::Cyan);
+		}
+
+		// [调试] 防御门卫 — 仅激活时显示
+		FString BlockDebug;
+		if (bBlockInputHeld) BlockDebug += TEXT("[held] ");
+		if (bIsBlocking) BlockDebug += TEXT("[blocking] ");
+		if (CanStartBlock()) BlockDebug += TEXT("[canStart] ");
+		if (!EquippedShield) BlockDebug += TEXT("[noShield] ");
+		if (bIsArming) BlockDebug += TEXT("[isArming] ");
+		if (GetCharacterMovement()->IsFalling()) BlockDebug += TEXT("[falling] ");
+		if (!BlockDebug.IsEmpty())
+		{
+			FDebugDrawHelper::Add(FString::Printf(TEXT("Block: %s"), *BlockDebug),
+				bIsBlocking ? FColor::Green : FColor::White);
+		}
+
+		// [调试] 防御蒙太奇 — 仅播放时显示
+		if (AnimInstance && BlockMontage && AnimInstance->Montage_IsPlaying(BlockMontage))
+		{
+			const FName BlockSection = AnimInstance->Montage_GetCurrentSection(BlockMontage);
+			FDebugDrawHelper::Add(FString::Printf(TEXT("BlockMontage: %s [%s]"),
+				*BlockMontage->GetName(),
+				BlockSection.IsNone() ? TEXT("?") : *BlockSection.ToString()),
+				FColor::Green);
+		}
 	}
 }
 
@@ -195,7 +228,6 @@ bool AMyCharacter::CanStartBlock() const
 	return EquippedShield
 		&& ActionState == EActionState::EAS_UnOccupied
 		&& !bIsArming
-		&& ArmWeaponState == EArmWeaponState::AWS_Arming
 		&& !GetCharacterMovement()->IsFalling();
 }
 
@@ -210,14 +242,24 @@ void AMyCharacter::ReleaseBlockInput()
 {
 	bBlockInputHeld = false;
 	bIsBlocking = false;
-	// TODO: 收盾动画
+
+	if (UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
+		AnimInstance && BlockMontage && AnimInstance->Montage_IsPlaying(BlockMontage))
+	{
+		AnimInstance->Montage_Stop(0.2f, BlockMontage);
+	}
 }
 
 void AMyCharacter::InterruptBlock(bool bClearHeld)
 {
 	bIsBlocking = false;
 	if (bClearHeld) bBlockInputHeld = false;
-	// TODO: 收盾动画
+
+	if (UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
+		AnimInstance && BlockMontage && AnimInstance->Montage_IsPlaying(BlockMontage))
+	{
+		AnimInstance->Montage_Stop(0.1f, BlockMontage);
+	}
 }
 
 void AMyCharacter::TryResumeBlock()
@@ -225,7 +267,7 @@ void AMyCharacter::TryResumeBlock()
 	if (bBlockInputHeld && !bIsBlocking && CanStartBlock())
 	{
 		bIsBlocking = true;
-		// TODO: 举盾动画
+		PlayBlockMontage(FName("BlockRaise"));
 	}
 }
 
@@ -422,6 +464,16 @@ void AMyCharacter::PlayArmMontage(const FName& SectionName)
 		FOnMontageEnded EndDelegate;
 		EndDelegate.BindUObject(this, &AMyCharacter::OnArmMontageEnded);
 		AnimInstance->Montage_SetEndDelegate(EndDelegate, ArmMontage);
+	}
+}
+
+void AMyCharacter::PlayBlockMontage(const FName& SectionName)
+{
+	UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
+	if (AnimInstance && BlockMontage)
+	{
+		AnimInstance->Montage_Play(BlockMontage);
+		AnimInstance->Montage_JumpToSection(SectionName, BlockMontage);
 	}
 }
 

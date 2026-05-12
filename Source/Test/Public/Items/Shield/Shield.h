@@ -21,13 +21,13 @@ public:
 	float BlockHalfAngleDegrees = 60.f;
 
 	UPROPERTY(EditAnywhere, Category = "Block")
-	float BlockedDamageMultiplier = 0.2f;
+	float BlockedDamageMultiplier = 0.05f;
 
 	UPROPERTY(EditAnywhere, Category = "Block")
 	float BlockStaminaCostPerDamage = 1.0f;
 
 	UPROPERTY(EditAnywhere, Category = "Block")
-	float BlockMoveSpeedMultiplier = 0.55f;
+	float BlockMoveSpeedMultiplier = 1.0f;
 
 	UPROPERTY(EditAnywhere, Category = "Equip")
 	FName OffhandSocketName = FName("LeftHandSocket");
