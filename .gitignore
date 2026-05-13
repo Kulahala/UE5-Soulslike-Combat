@@ -21,11 +21,8 @@ plugins/
 # AI CLI Configs
 .playwright-mcp/
 .learnings/
-AGENTS.md
-GEMINI.md
 plan.md
 .geminiignore
-CLAUDE.md
 .claude/
 .claudeignore
 
