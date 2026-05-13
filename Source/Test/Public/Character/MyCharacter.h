@@ -13,6 +13,7 @@ class AShield;
 class USpringArmComponent;
 class UCameraComponent;
 class UPlayerHUDWidget;
+class UCameraShakeBase;
 
 UCLASS()
 class TEST_API AMyCharacter : public ABaseCharacter, public IBlockableInterface
@@ -114,6 +115,13 @@ private:
 
 	FTimerHandle ExhaustionTimerHandle;
 
+	// 受击相机晃动
+	UPROPERTY(EditDefaultsOnly, Category = "Combat")
+	TSubclassOf<UCameraShakeBase> HitReceivedCameraShake;
+
+	// 受击染红缩放系数（TryBlockHit 设置，SetHealthPercent 消费后归位）
+	float LastDamageFlashScale = 1.f;
+
 public:
 	FORCEINLINE void SetEquippedItem(Aitem* Item) { OverLapItem = Item; }
 	FORCEINLINE Aitem* GetEquippedItem() const { return OverLapItem; }
@@ -125,4 +133,6 @@ public:
 	FORCEINLINE bool IsArming() const { return bIsArming; }
 	FORCEINLINE bool IsBlocking() const { return bIsBlocking; }
 	FORCEINLINE AShield* GetEquippedShield() const { return EquippedShield; }
+	FORCEINLINE float GetLastDamageFlashScale() const { return LastDamageFlashScale; }
+	FORCEINLINE void SetLastDamageFlashScale(float Scale) { LastDamageFlashScale = Scale; }
 };

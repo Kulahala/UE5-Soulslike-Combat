@@ -49,7 +49,7 @@ void AMyCharacter::BeginPlay()
 		if (PlayerHUDWidget)
 		{
 			PlayerHUDWidget->AddToViewport();
-			PlayerHUDWidget->BindToAttributes(Attributes);
+			PlayerHUDWidget->BindToAttributes(Attributes, this);
 		}
 	}
 }
@@ -157,6 +157,16 @@ void AMyCharacter::Jump()
 void AMyCharacter::GetHit_Implementation(const FVector& ImpactPoint, AActor* HitInstigator)
 {
 	Super::GetHit_Implementation(ImpactPoint, HitInstigator);
+
+	// 受击相机晃动
+	if (HitReceivedCameraShake)
+	{
+		if (APlayerController* PC = Cast<APlayerController>(GetController()))
+		{
+			PC->ClientStartCameraShake(HitReceivedCameraShake);
+		}
+	}
+
 	if (Attributes->IsAlive())
 	{
 		InterruptBlock(false);
@@ -208,6 +218,10 @@ float AMyCharacter::TakeDamage(float DamageAmount, const struct FDamageEvent& Da
                                class AController* EventInstigator, AActor* DamageCauser)
 {
 	Attributes->ReceiveDamage(DamageAmount);
+	if (DamageAmount <= 0.f)
+	{
+		LastDamageFlashScale = 1.f;  // 100% 减伤：无掉血，手动归位防串味
+	}
 	if (!Attributes->IsAlive())
 	{
 		Die();
@@ -295,6 +309,7 @@ FBlockResult AMyCharacter::TryBlockHit(const FVector& ImpactPoint, float Incomin
 	Result.bBlocked = true;
 	Result.DamageAfterBlock = IncomingDamage * EquippedShield->BlockedDamageMultiplier;
 	Result.bPlayNormalHitReact = false;
+	LastDamageFlashScale = EquippedShield->BlockedDamageMultiplier;  // 染红按减伤率缩放
 
 	// 格挡反馈
 	if (EquippedShield->BlockSound)

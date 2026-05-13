@@ -1,9 +1,11 @@
 #include "HUD/PlayerHUDWidget.h"
 #include "Components/ProgressBar.h"
 #include "AttributeComponent/AttributeComponent.h"
+#include "Character/MyCharacter.h"
 #include "Utils/DebugDrawHelper.h"
 #include "Styling/CoreStyle.h"
 #include "Rendering/DrawElements.h"
+#include "Engine/Texture2D.h"
 
 void UPlayerHUDWidget::SetHealthPercent(float Percent)
 {
@@ -12,6 +14,11 @@ void UPlayerHUDWidget::SetHealthPercent(float Percent)
 		if (Percent < PB_Health->GetPercent())
 		{
 			CurrentBufferDelay = BufferDelayTime;
+			float FlashScale = OwnerCharacter ? OwnerCharacter->GetLastDamageFlashScale() : 1.f;
+			DamageFlashPeakAlphaScaled = DamageFlashPeakAlpha * FlashScale;
+			DamageFlashTimer = 0.f;
+			bDamageFlashAttacking = true;
+			if (OwnerCharacter) OwnerCharacter->SetLastDamageFlashScale(1.f);
 		}
 		PB_Health->SetPercent(Percent);
 	}
@@ -25,8 +32,9 @@ void UPlayerHUDWidget::SetStaminaPercent(float Percent)
 	}
 }
 
-void UPlayerHUDWidget::BindToAttributes(UAttributeComponent* Attributes)
+void UPlayerHUDWidget::BindToAttributes(UAttributeComponent* Attributes, AMyCharacter* InCharacter)
 {
+	OwnerCharacter = InCharacter;
 	if (Attributes)
 	{
 		Attributes->OnHealthChanged.AddDynamic(this, &UPlayerHUDWidget::SetHealthPercent);
@@ -63,6 +71,28 @@ void UPlayerHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime
 			PB_Buffer->SetPercent(TargetPercent);
 		}
 	}
+
+	// 受击染红：渐入 → 指数衰减
+	if (bDamageFlashAttacking)
+	{
+		DamageFlashTimer += InDeltaTime;
+		if (DamageFlashTimer >= DamageFlashAttackDuration)
+		{
+			DamageFlashAlpha = DamageFlashPeakAlphaScaled;
+			bDamageFlashAttacking = false;
+		}
+		else
+		{
+			DamageFlashAlpha = DamageFlashPeakAlphaScaled * (DamageFlashTimer / DamageFlashAttackDuration);
+		}
+	}
+	else if (DamageFlashAlpha > 0.f)
+	{
+		DamageFlashAlpha *= FMath::Pow(0.01f, InDeltaTime / DamageFlashDuration);
+		if (DamageFlashAlpha < 0.005f) DamageFlashAlpha = 0.f;
+	}
+
+	InitVignetteBrush();
 }
 
 int32 UPlayerHUDWidget::NativePaint(const FPaintArgs& Args, const FGeometry& AllottedGeometry,
@@ -70,6 +100,21 @@ int32 UPlayerHUDWidget::NativePaint(const FPaintArgs& Args, const FGeometry& All
 	int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const
 {
 	int32 MaxLayer = Super::NativePaint(Args, AllottedGeometry, MyCullingRect, OutDrawElements, LayerId, InWidgetStyle, bParentEnabled);
+
+	// 受击染红（边缘红晕：按到最近屏幕边缘的距离渐变，外围 FadeWidth 区域有红晕）
+	if (DamageFlashAlpha > 0.f)
+	{
+		if (VignetteBrush.GetResourceObject())
+		{
+			const FVector2f LocalSize = FVector2f(AllottedGeometry.GetLocalSize());
+			const float EdgeAlpha = DamageFlashAlpha * VignetteEdgeAlpha;
+			const FLinearColor DrawColor(DamageFlashColor.R, DamageFlashColor.G, DamageFlashColor.B, EdgeAlpha);
+			FSlateDrawElement::MakeBox(OutDrawElements, MaxLayer + 1,
+				AllottedGeometry.ToPaintGeometry(LocalSize, FSlateLayoutTransform()),
+				&VignetteBrush, ESlateDrawEffect::None, DrawColor);
+			MaxLayer += 1;
+		}
+	}
 
 	if (FDebugDrawHelper::IsDebugEnabled())
 	{
@@ -94,4 +139,60 @@ int32 UPlayerHUDWidget::NativePaint(const FPaintArgs& Args, const FGeometry& All
 	}
 
 	return MaxLayer;
+}
+
+void UPlayerHUDWidget::InitVignetteBrush()
+{
+	if (bVignetteInitialized && FMath::IsNearlyEqual(CachedFadeWidth, VignetteFadeWidth)) return;
+	bVignetteInitialized = true;
+	CachedFadeWidth = VignetteFadeWidth;
+
+	if (VignetteTexture)
+	{
+		VignetteBrush.SetResourceObject(nullptr);
+		VignetteTexture->ConditionalBeginDestroy();
+		VignetteTexture = nullptr;
+	}
+
+	const int32 Size = 256;
+	VignetteTexture = UTexture2D::CreateTransient(Size, Size, PF_R8G8B8A8);
+	if (!VignetteTexture) return;
+
+	FTexture2DMipMap& Mip = VignetteTexture->GetPlatformData()->Mips[0];
+	uint8* Pixels = static_cast<uint8*>(Mip.BulkData.Lock(LOCK_READ_WRITE));
+
+	for (int32 Y = 0; Y < Size; ++Y)
+	{
+		for (int32 X = 0; X < Size; ++X)
+		{
+			// 归一化坐标：0=边缘, 1=中心
+			const float U = (X + 0.5f) / Size;
+			const float V = (Y + 0.5f) / Size;
+			const float EdgeDist = FMath::Min(
+				FMath::Min(U, 1.f - U),
+				FMath::Min(V, 1.f - V)
+			);
+
+			const float T = 1.f - FMath::Clamp(EdgeDist / CachedFadeWidth, 0.f, 1.f);
+			const float Smooth = T * T * (3.f - 2.f * T);  // smoothstep
+			const uint8 Alpha = static_cast<uint8>(Smooth * 255.f);
+
+			const int32 PixelIndex = (Y * Size + X) * 4;
+			Pixels[PixelIndex + 0] = 255;
+			Pixels[PixelIndex + 1] = 255;
+			Pixels[PixelIndex + 2] = 255;
+			Pixels[PixelIndex + 3] = Alpha;
+		}
+	}
+
+	Mip.BulkData.Unlock();
+	VignetteTexture->SRGB = true;
+	VignetteTexture->NeverStream = true;
+	VignetteTexture->Filter = TF_Bilinear;
+	VignetteTexture->UpdateResource();
+
+	VignetteBrush.SetResourceObject(VignetteTexture);
+	VignetteBrush.ImageSize = FVector2D(Size, Size);
+	VignetteBrush.DrawAs = ESlateBrushDrawType::Image;
+	VignetteBrush.Tiling = ESlateBrushTileType::NoTile;
 }
