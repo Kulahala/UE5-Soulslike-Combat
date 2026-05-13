@@ -172,11 +172,7 @@ void AEnemy::Die()
 {
 	ClearAllTimers();
 
-	// 停止移动
-	if (EnemyController)
-	{
-		EnemyController->StopMovement();
-	}
+	StopEnemyMovementIfPossible();
 
 	// 关闭碰撞
 	GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
@@ -341,18 +337,8 @@ void AEnemy::SetEnemyState(EEnemyState NewState)
 		// 不停止移动，让 AI 导航自然停在 CombatingRadius（AcceptanceRadius）距离
 		break;
 	case EEnemyState::EES_Attacking:
-		// 攻击硬直状态，确保不移动
-		if (EnemyController)
-		{
-			EnemyController->StopMovement();
-		}
-		break;
 	case EEnemyState::EES_Stunned:
-		// 被打出硬直瞬间，立刻刹车防止滑步
-		if (EnemyController)
-		{
-			EnemyController->StopMovement();
-		}
+		StopEnemyMovementIfPossible();
 		break;
 	case EEnemyState::EES_Dead:
 		Die();
@@ -540,7 +526,7 @@ void AEnemy::OnCombating(float DeltaTime)
 	{
 		// 校验是否面朝目标，不够面向就先转
 		FVector ToTarget = (ChasingTarget->GetActorLocation() - GetActorLocation()).GetSafeNormal2D();
-		float Dot = FVector::DotProduct(GetActorForwardVector().GetSafeNormal2D(), ToTarget);
+		float Dot = CalcForwardDot2D(ToTarget);
 		if (Dot > AttackAngleThreshold)
 		{
 			Attack();
@@ -554,6 +540,14 @@ void AEnemy::OnCombating(float DeltaTime)
 }
 
 // ==================== 导航/工具 ====================
+
+void AEnemy::StopEnemyMovementIfPossible()
+{
+	if (EnemyController)
+	{
+		EnemyController->StopMovement();
+	}
+}
 
 void AEnemy::MoveToTarget(const AActor* Target)
 {

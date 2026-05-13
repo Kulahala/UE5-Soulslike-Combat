@@ -184,16 +184,31 @@ void ABaseCharacter::TickHitKnockback(float DeltaTime)
 	}
 }
 
+// ==================== 工具 ====================
+
+float ABaseCharacter::CalcForwardDot2D(const FVector& WorldDirection) const
+{
+	return FVector::DotProduct(GetActorForwardVector().GetSafeNormal2D(), WorldDirection.GetSafeNormal2D());
+}
+
 // ==================== 蒙太奇 ====================
+
+void ABaseCharacter::PlayMontageSection(UAnimMontage* Montage, const FName& Section)
+{
+	UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
+	if (AnimInstance && Montage)
+	{
+		AnimInstance->Montage_Play(Montage);
+		AnimInstance->Montage_JumpToSection(Section, Montage);
+	}
+}
 
 void ABaseCharacter::PlayAttackMontage(const FName& SectionName)
 {
-	UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
-	if (AnimInstance && AttackMontage)
-	{
-		AnimInstance->Montage_Play(AttackMontage);
-		AnimInstance->Montage_JumpToSection(SectionName, AttackMontage);
+	PlayMontageSection(AttackMontage, SectionName);
 
+	if (UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance(); AnimInstance && AttackMontage)
+	{
 		FOnMontageEnded EndDelegate;
 		EndDelegate.BindUObject(this, &ABaseCharacter::OnAttackMontageEnded);
 		AnimInstance->Montage_SetEndDelegate(EndDelegate, AttackMontage);
@@ -202,12 +217,10 @@ void ABaseCharacter::PlayAttackMontage(const FName& SectionName)
 
 void ABaseCharacter::PlayHitReactMontage(const FName& SectionName)
 {
-	UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
-	if (AnimInstance && HitReactMontage)
-	{
-		AnimInstance->Montage_Play(HitReactMontage);
-		AnimInstance->Montage_JumpToSection(SectionName, HitReactMontage);
+	PlayMontageSection(HitReactMontage, SectionName);
 
+	if (UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance(); AnimInstance && HitReactMontage)
+	{
 		FOnMontageEnded EndDelegate;
 		EndDelegate.BindUObject(this, &ABaseCharacter::OnHitReactMontageEnded);
 		AnimInstance->Montage_SetEndDelegate(EndDelegate, HitReactMontage);

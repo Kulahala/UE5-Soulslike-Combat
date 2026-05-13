@@ -21,32 +21,37 @@ void UBaseHealthBarWidget::SetHealthPercent(float Percent)
 void UBaseHealthBarWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 {
 	Super::NativeTick(MyGeometry, InDeltaTime);
+	TickBufferDelay(InDeltaTime);
+}
 
-	if (PB_Buffer && PB_Health)
+void UBaseHealthBarWidget::TickBufferDelay(float InDeltaTime)
+{
+	TickBufferDelayImpl(PB_Buffer, PB_Health, CurrentBufferDelay, BufferDelayTime, BufferInterpSpeed, InDeltaTime);
+}
+
+void UBaseHealthBarWidget::TickBufferDelayImpl(UProgressBar* Buffer, UProgressBar* Health,
+	float& CurrentDelay, float DelayTime, float InterpSpeed, float InDeltaTime)
+{
+	if (!Buffer || !Health) return;
+
+	const float BufferPercent = Buffer->GetPercent();
+	const float TargetPercent = Health->GetPercent();
+
+	if (BufferPercent > TargetPercent)
 	{
-		const float BufferPercent = PB_Buffer->GetPercent();
-		const float TargetPercent = PB_Health->GetPercent();
-
-		// 如果缓冲条比真实血条高（被砍扣血）
-		if (BufferPercent > TargetPercent)
+		if (CurrentDelay > 0.0f)
 		{
-			// 如果还在延迟等待中，先倒计时
-			if (CurrentBufferDelay > 0.0f)
-			{
-				CurrentBufferDelay -= InDeltaTime;
-			}
-			else
-			{
-				// 延迟结束，使用插值平滑下降
-				const float NewPercent = FMath::FInterpTo(BufferPercent, TargetPercent, InDeltaTime, BufferInterpSpeed);
-				PB_Buffer->SetPercent(NewPercent);
-			}
+			CurrentDelay -= InDeltaTime;
 		}
-		// 如果真实血条反超（比如吃了回血药），缓冲条应该瞬间跟上，不需要动画
-		else if (BufferPercent < TargetPercent)
+		else
 		{
-			PB_Buffer->SetPercent(TargetPercent);
+			const float NewPercent = FMath::FInterpTo(BufferPercent, TargetPercent, InDeltaTime, InterpSpeed);
+			Buffer->SetPercent(NewPercent);
 		}
+	}
+	else if (BufferPercent < TargetPercent)
+	{
+		Buffer->SetPercent(TargetPercent);
 	}
 }
 

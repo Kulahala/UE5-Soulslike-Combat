@@ -30,6 +30,16 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat")
 	TArray<AActor*> IgnoreActors;
 
+	// 命中解析结果（内部用）
+	struct FWeaponHitResult
+	{
+		float FinalDamage = 0.f;
+		bool bPlayNormalHitReact = true;
+		float KnockbackScale = 1.f;
+		bool bApplyStun = true;
+		bool bSameTeam = false;
+	};
+
 protected:
 	/* 拾取 */
 	// 装备武器时播放的音效
@@ -68,6 +78,10 @@ private:
 	// 用于保存上一帧的位置/旋转，防止极高速穿模（扫面检测所需）
 	FVector TraceCenterOld;
 	FRotator TraceRotationOld;
+
+	void BuildIgnoreList(TArray<AActor*>& OutActors);
+	FWeaponHitResult ResolveHit(AActor* HitActor, const FHitResult& HitPoint);
+	void DispatchHitFeedback(AActor* HitActor, const FHitResult& HitPoint, const FWeaponHitResult& Result);
 
 	// 武器基础伤害，格挡时按 BlockedDamageMultiplier 缩放
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat", meta = (AllowPrivateAccess = "true"))

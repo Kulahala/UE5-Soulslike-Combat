@@ -234,7 +234,7 @@ FBlockResult AMyCharacter::TryBlockHit(const FVector& ImpactPoint, float Incomin
 	if (!DirSrc) return Result;
 
 	FVector ToAttacker = (DirSrc->GetActorLocation() - GetActorLocation()).GetSafeNormal2D();
-	float Dot = FVector::DotProduct(GetActorForwardVector().GetSafeNormal2D(), ToAttacker);
+	float Dot = CalcForwardDot2D(ToAttacker);
 	float CosHalf = FMath::Cos(FMath::DegreesToRadians(EquippedShield->BlockHalfAngleDegrees));
 	if (Dot < CosHalf) return Result;
 
@@ -338,42 +338,18 @@ void AMyCharacter::StopWalking()
 
 void AMyCharacter::UpdateMovementSpeed()
 {
+	TickSprintStamina();
+
 	FVector Velocity = GetVelocity();
 	Velocity.Z = 0.f;
-
-	// 奔跑每帧扣耐力（仅地面，防御中不扣）
-	if (bIsSprinting && ActionState == EActionState::EAS_UnOccupied && !GetCharacterMovement()->IsFalling() && !Velocity.IsNearlyZero() && !bIsBlocking)
-	{
-		FVector Forward = GetActorForwardVector();
-		Forward.Z = 0.f;
-		float Dot = FVector::DotProduct(Velocity.GetSafeNormal(), Forward.GetSafeNormal());
-		if (Dot > 0.2f)
-		{
-			float DeltaTime = GetWorld()->GetDeltaSeconds();
-			Attributes->UseStamina(12.f * DeltaTime);
-			Attributes->ResetStaminaRegenCooldown();
-		}
-	}
 
 	float SpeedMultiplier = (bIsBlocking && EquippedShield) ? EquippedShield->BlockMoveSpeedMultiplier
 		: (ArmWeaponState == EArmWeaponState::AWS_Arming) ? 0.875f : 1.0f;
 
 	if (!Velocity.IsNearlyZero())
 	{
-		FVector Forward = GetActorForwardVector();
-		Forward.Z = 0.f;
-		float DotProduct = FVector::DotProduct(Velocity.GetSafeNormal(), Forward.GetSafeNormal());
-
-		float BaseSpeed = 300.f;
-
-		if (bIsSprinting && ActionState == EActionState::EAS_UnOccupied && DotProduct > 0.2f)
-		{
-			BaseSpeed = 450.f;
-		}
-		else if (bIsWalking && ActionState == EActionState::EAS_UnOccupied)
-		{
-			BaseSpeed = 150.f;
-		}
+		float DotProduct = CalcForwardDot2D(Velocity);
+		float BaseSpeed = CalcBaseSpeed(DotProduct);
 
 		// 分段移速缩放：全速(前) -> 80%(侧) -> 65%(后)
 		if (DotProduct > 0.2f)
@@ -397,16 +373,47 @@ void AMyCharacter::UpdateMovementSpeed()
 	FDebugDrawHelper::Add(FString::Printf(TEXT("Speed: %.0f"), GetCharacterMovement()->MaxWalkSpeed), FColor::Cyan);  // [调试]
 }
 
+void AMyCharacter::TickSprintStamina()
+{
+	if (bIsSprinting && ActionState == EActionState::EAS_UnOccupied
+		&& !GetCharacterMovement()->IsFalling() && !bIsBlocking)
+	{
+		FVector Velocity = GetVelocity();
+		Velocity.Z = 0.f;
+		if (!Velocity.IsNearlyZero())
+		{
+			float Dot = CalcForwardDot2D(Velocity);
+			if (Dot > 0.2f)
+			{
+				float DeltaTime = GetWorld()->GetDeltaSeconds();
+				Attributes->UseStamina(12.f * DeltaTime);
+				Attributes->ResetStaminaRegenCooldown();
+			}
+		}
+	}
+}
+
+float AMyCharacter::CalcBaseSpeed(float DotProduct) const
+{
+	if (bIsSprinting && ActionState == EActionState::EAS_UnOccupied && DotProduct > 0.2f)
+	{
+		return 450.f;
+	}
+	if (bIsWalking && ActionState == EActionState::EAS_UnOccupied)
+	{
+		return 150.f;
+	}
+	return 300.f;
+}
+
 // ==================== 蒙太奇 ====================
 
 void AMyCharacter::PlayArmMontage(const FName& SectionName)
 {
-	UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
-	if (AnimInstance && ArmMontage)
-	{
-		AnimInstance->Montage_Play(ArmMontage);
-		AnimInstance->Montage_JumpToSection(SectionName, ArmMontage);
+	PlayMontageSection(ArmMontage, SectionName);
 
+	if (UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance(); AnimInstance && ArmMontage)
+	{
 		FOnMontageEnded EndDelegate;
 		EndDelegate.BindUObject(this, &AMyCharacter::OnArmMontageEnded);
 		AnimInstance->Montage_SetEndDelegate(EndDelegate, ArmMontage);
@@ -415,12 +422,7 @@ void AMyCharacter::PlayArmMontage(const FName& SectionName)
 
 void AMyCharacter::PlayBlockMontage(const FName& SectionName)
 {
-	UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
-	if (AnimInstance && BlockMontage)
-	{
-		AnimInstance->Montage_Play(BlockMontage);
-		AnimInstance->Montage_JumpToSection(SectionName, BlockMontage);
-	}
+	PlayMontageSection(BlockMontage, SectionName);
 }
 
 void AMyCharacter::OnAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted)

@@ -21,6 +21,9 @@ public:
 	UFUNCTION(BlueprintImplementableEvent, Category = "UI")
 	void PlayFadeOutAnim();
 
+	// 缓冲条追赶逻辑：掉血延迟后追赶，回血瞬间跟上（static，供外部复用）
+	static void TickBufferDelayImpl(UProgressBar* Buffer, UProgressBar* Health,
+		float& CurrentDelay, float DelayTime, float InterpSpeed, float InDeltaTime);
 
 	UPROPERTY(meta = (BindWidget))
 	UProgressBar* PB_Health;
@@ -32,6 +35,7 @@ protected:
 	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
 
 private:
+	void TickBufferDelay(float InDeltaTime);
 	// 缓冲条追赶真实血条的速度
 	UPROPERTY(EditAnywhere, Category = "Health Bar")
 	float BufferInterpSpeed = 3.0f;

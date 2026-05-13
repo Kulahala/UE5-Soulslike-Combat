@@ -69,6 +69,7 @@ protected:
 	void OnCombating(float DeltaTime); // 战斗Tick逻辑
 
 	/* 导航/工具 */
+	void StopEnemyMovementIfPossible(); // 收敛：AI 停止移动
 	void MoveToTarget(const AActor* Target); // 导航移动到目标
 	void MoveToLocation(const FVector& Location); // 导航到坐标点
 	bool BInTargetRange(AActor* Target, double Range) const; // 检查目标是否在范围内

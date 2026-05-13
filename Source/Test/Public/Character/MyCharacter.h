@@ -84,6 +84,8 @@ private:
 	void DrawDebugInfo() const;
 	void StopBlockMontage(float BlendOutTime);
 	bool ShouldInterruptBlock() const;
+	void TickSprintStamina();
+	float CalcBaseSpeed(float DotProduct) const;
 
 	/* 相机组件 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true"))

@@ -48,6 +48,10 @@ public:
 
 protected:
 	/* 蒙太奇 */
+	void PlayMontageSection(UAnimMontage* Montage, const FName& Section);
+
+	// 前向向量与给定方向的 2D 点积（纯数学，调用方自行转换方向）
+	float CalcForwardDot2D(const FVector& WorldDirection) const;
 	virtual void PlayAttackMontage(const FName& SectionName);
 	virtual void PlayHitReactMontage(const FName& SectionName);
 	virtual bool CanAttack() const;

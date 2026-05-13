@@ -87,17 +87,7 @@ void AWeapon::ExecuteWeaponTrace()
 	FVector BoxHalfExtent = BoxTrace->GetScaledBoxExtent();
 
 	TArray<AActor*> ActorsToIgnore;
-	ActorsToIgnore.Add(this);
-
-	if (GetOwner())
-	{
-		ActorsToIgnore.AddUnique(GetOwner());
-	}
-
-	for (AActor* ToIgnore : IgnoreActors)
-	{
-		ActorsToIgnore.AddUnique(ToIgnore);
-	}
+	BuildIgnoreList(ActorsToIgnore);
 
 	FHitResult HitPoint;
 
@@ -115,65 +105,92 @@ void AWeapon::ExecuteWeaponTrace()
 	{
 		AActor* HitActor = HitPoint.GetActor();
 
-		// 同类豁免：武器持有者和命中目标共享标签 → 跳过
-		bool bSameTeam = false;
-		if (GetOwner())
-		{
-			for (const FName& Tag : GetOwner()->Tags)
-			{
-				if (HitActor->ActorHasTag(Tag))
-				{
-					bSameTeam = true;
-					break;
-				}
-			}
-		}
+		// 命中解析：同阵营判定 + 格挡结算 + 伤害计算
+		FWeaponHitResult Result = ResolveHit(HitActor, HitPoint);
 
-		// 格挡判定（仅跨阵营）
-		bool bPlayNormalHitReact = true;
-		float FinalDamage = Damage;
-		float KnockbackScale = 1.f;
-		bool bApplyStun = true;
-
-		if (!bSameTeam)
+		// 非同阵营才扣血
+		if (!Result.bSameTeam)
 		{
-			if (IBlockableInterface* Blockable = Cast<IBlockableInterface>(HitActor))
-			{
-				FBlockResult BlockResult = Blockable->TryBlockHit(
-					HitPoint.ImpactPoint, Damage, GetOwner(), this);
-				if (BlockResult.bBlocked)
-				{
-					FinalDamage = BlockResult.DamageAfterBlock;
-					bPlayNormalHitReact = BlockResult.bPlayNormalHitReact;
-					KnockbackScale = Damage > 0.f ? BlockResult.DamageAfterBlock / Damage : 0.f;
-					bApplyStun = BlockResult.bPlayNormalHitReact;
-				}
-			}
-			UGameplayStatics::ApplyDamage(HitActor, FinalDamage, GetInstigatorController(), this,
+			UGameplayStatics::ApplyDamage(HitActor, Result.FinalDamage, GetInstigatorController(), this,
 			                              UDamageType::StaticClass());
 		}
 
-		// 写入命中上下文（所有命中，含格挡）
-		if (ABaseCharacter* HitChar = Cast<ABaseCharacter>(HitActor))
-		{
-			HitChar->CachePendingHitContext(GetOwner(), KnockbackScale, !bPlayNormalHitReact, bApplyStun);
-		}
-
-		// 受击反应+特效：所有命中都走 GetHit（内部按上下文分流）
-		if (HitActor->Implements<UHitInterface>())
-		{
-			IHitInterface::Execute_GetHit(HitActor, HitPoint.ImpactPoint, GetOwner());
-		}
-
-		// 触发摄像机震动反馈
-		CameraShake();
-
-		// 触发卡肉感 (Hit Stop)
-		SetEnableHitStop(true);
-		HitStop(HitActor);
-		// 击中一次后加入黑名单，防止同一刀造成多次伤害（同类也加入，避免每帧重复判断）
-		IgnoreActors.AddUnique(HitActor);
+		// 反馈派发：上下文写入 + 受击反应 + 相机震动 + 卡肉 + 黑名单
+		DispatchHitFeedback(HitActor, HitPoint, Result);
 	}
+}
+
+void AWeapon::BuildIgnoreList(TArray<AActor*>& OutActors)
+{
+	OutActors.Add(this);
+
+	if (GetOwner())
+	{
+		OutActors.AddUnique(GetOwner());
+	}
+
+	for (AActor* ToIgnore : IgnoreActors)
+	{
+		OutActors.AddUnique(ToIgnore);
+	}
+}
+
+AWeapon::FWeaponHitResult AWeapon::ResolveHit(AActor* HitActor, const FHitResult& HitPoint)
+{
+	FWeaponHitResult Result;
+	Result.FinalDamage = Damage;
+
+	// 同类豁免：武器持有者和命中目标共享标签
+	if (GetOwner())
+	{
+		for (const FName& Tag : GetOwner()->Tags)
+		{
+			if (HitActor->ActorHasTag(Tag))
+			{
+				Result.bSameTeam = true;
+				return Result;
+			}
+		}
+	}
+
+	// 格挡判定（仅跨阵营）
+	if (IBlockableInterface* Blockable = Cast<IBlockableInterface>(HitActor))
+	{
+		FBlockResult BlockResult = Blockable->TryBlockHit(
+			HitPoint.ImpactPoint, Damage, GetOwner(), this);
+		if (BlockResult.bBlocked)
+		{
+			Result.FinalDamage = BlockResult.DamageAfterBlock;
+			Result.bPlayNormalHitReact = BlockResult.bPlayNormalHitReact;
+			Result.KnockbackScale = Damage > 0.f ? BlockResult.DamageAfterBlock / Damage : 0.f;
+			Result.bApplyStun = BlockResult.bPlayNormalHitReact;
+		}
+	}
+
+	return Result;
+}
+
+void AWeapon::DispatchHitFeedback(AActor* HitActor, const FHitResult& HitPoint, const FWeaponHitResult& Result)
+{
+	// 写入命中上下文（所有命中，含格挡）
+	if (ABaseCharacter* HitChar = Cast<ABaseCharacter>(HitActor))
+	{
+		HitChar->CachePendingHitContext(GetOwner(), Result.KnockbackScale, !Result.bPlayNormalHitReact, Result.bApplyStun);
+	}
+
+	// 受击反应+特效：所有命中都走 GetHit（内部按上下文分流）
+	if (HitActor->Implements<UHitInterface>())
+	{
+		IHitInterface::Execute_GetHit(HitActor, HitPoint.ImpactPoint, GetOwner());
+	}
+
+	CameraShake();
+
+	SetEnableHitStop(true);
+	HitStop(HitActor);
+
+	// 击中一次后加入黑名单，防止同一刀造成多次伤害（同类也加入，避免每帧重复判断）
+	IgnoreActors.AddUnique(HitActor);
 }
 
 // ==================== 卡肉感 ====================
