@@ -31,6 +31,8 @@ void ABaseCharacter::Tick(float DeltaTime)
 
 	GroundSpeed = GetVelocity().Size2D();
 	Direction = UKismetAnimationLibrary::CalculateDirection(GetVelocity(), GetActorRotation());
+
+	TickHitKnockback(DeltaTime);
 }
 
 // ==================== 受击/战斗 ====================
@@ -38,12 +40,22 @@ void ABaseCharacter::Tick(float DeltaTime)
 void ABaseCharacter::GetHit_Implementation(const FVector& ImpactPoint, AActor* HitInstigator)
 {
 	IHitInterface::GetHit_Implementation(ImpactPoint, HitInstigator);
-	if (Attributes->IsAlive()) //存活
+
+	if (Attributes->IsAlive())
 	{
-		DirectionalHitReact(ImpactPoint, HitInstigator);
+		ConsumePendingHitKnockback();  // 仅存活时后退（Die() 会立刻停移动+关碰撞）
+
+		if (!PendingHitContext.bWasBlocked)
+		{
+			DirectionalHitReact(ImpactPoint, HitInstigator);  // 仅普通受击
+		}
 	}
 
-	PlayHitEffects(ImpactPoint);
+	if (!PendingHitContext.bWasBlocked)
+	{
+		PlayHitEffects(ImpactPoint);  // 仅普通受击（格挡由 TryBlockHit 播放 BlockSound/BlockParticle）
+	}
+	// 注意：不清理 PendingHitContext，子类还需要读 bApplyStun
 }
 
 void ABaseCharacter::PlayHitEffects(const FVector& ImpactPoint)
@@ -110,6 +122,66 @@ void ABaseCharacter::Attack()
 
 void ABaseCharacter::Equip()
 {
+}
+
+// ==================== 命中上下文 + 后退 ====================
+
+void ABaseCharacter::CachePendingHitContext(AActor* InInstigator, float InScale, bool bInBlocked, bool bInStun)
+{
+	ResetPendingHitContext();  // 先清再写，防 stale context 残留
+	PendingHitContext.HitInstigator = InInstigator;
+	PendingHitContext.KnockbackScale = InScale;
+	PendingHitContext.bWasBlocked = bInBlocked;
+	PendingHitContext.bApplyStun = bInStun;
+}
+
+void ABaseCharacter::ResetPendingHitContext()
+{
+	PendingHitContext = FPendingHitContext{};
+}
+
+void ABaseCharacter::ConsumePendingHitKnockback()
+{
+	StartHitKnockback(PendingHitContext.HitInstigator, PendingHitContext.KnockbackScale);
+}
+
+void ABaseCharacter::StartHitKnockback(AActor* HitInstigator, float Scale)
+{
+	// 先清旧状态，再决定是否开新后退（零缩放 = 终止旧 knockback）
+	bKnockbackActive = false;
+	KnockbackElapsed = 0.f;
+	KnockbackAppliedDistance = 0.f;
+	KnockbackTargetDistance = 0.f;
+
+	if (!HitInstigator || BaseHitKnockbackDistance <= 0.f || Scale <= 0.f) return;
+
+	bKnockbackActive = true;
+	KnockbackDirection = (GetActorLocation() - HitInstigator->GetActorLocation()).GetSafeNormal2D();
+	KnockbackTargetDistance = BaseHitKnockbackDistance * Scale;
+}
+
+void ABaseCharacter::TickHitKnockback(float DeltaTime)
+{
+	if (!bKnockbackActive) return;
+
+	KnockbackElapsed += DeltaTime;
+	const float Alpha = FMath::Clamp(KnockbackElapsed / HitKnockbackDuration, 0.f, 1.f);
+	const float EasedAlpha = 1.f - (1.f - Alpha) * (1.f - Alpha);  // quadratic ease-out
+	const float NewTarget = KnockbackTargetDistance * EasedAlpha;
+	const float Delta = NewTarget - KnockbackAppliedDistance;
+
+	if (FMath::Abs(Delta) > 0.01f)
+	{
+		const FVector OldLocation = GetActorLocation();
+		FHitResult Hit;
+		AddActorWorldOffset(KnockbackDirection * Delta, true, &Hit);
+		KnockbackAppliedDistance += FVector::Dist2D(OldLocation, GetActorLocation());
+	}
+
+	if (Alpha >= 1.f)
+	{
+		bKnockbackActive = false;
+	}
 }
 
 // ==================== 蒙太奇 ====================

@@ -11,6 +11,17 @@
 class UAttributeComponent;
 class AWeapon;
 
+USTRUCT()
+struct FPendingHitContext
+{
+	GENERATED_BODY()
+
+	AActor* HitInstigator = nullptr;
+	float KnockbackScale = 1.f;
+	bool bWasBlocked = false;
+	bool bApplyStun = true;
+};
+
 UCLASS()
 class TEST_API ABaseCharacter : public ACharacter, public IHitInterface
 {
@@ -30,6 +41,10 @@ public:
 	virtual void DirectionalHitReact(const FVector& ImpactPoint, const AActor* HitInstigator); // 方向性受击反应
 	virtual void Attack();
 	virtual void Equip();
+
+	/* 命中上下文 + 后退 */
+	void CachePendingHitContext(AActor* HitInstigator, float KnockbackScale, bool bWasBlocked, bool bApplyStun);
+	void ResetPendingHitContext();
 
 protected:
 	/* 蒙太奇 */
@@ -77,6 +92,24 @@ protected:
 	/* 武器 */
 	UPROPERTY()
 	AWeapon* EquippedWeapon; // 当前装备的武器
+
+	/* 受击后退 */
+	UPROPERTY(EditAnywhere, Category = "Combat|Knockback")
+	float BaseHitKnockbackDistance = 0.f;  // 子类在构造函数中覆写（Player=10, Enemy=5）
+
+	UPROPERTY(EditAnywhere, Category = "Combat|Knockback")
+	float HitKnockbackDuration = 0.12f;
+
+	FPendingHitContext PendingHitContext;
+	bool bKnockbackActive = false;
+	FVector KnockbackDirection = FVector::ZeroVector;
+	float KnockbackElapsed = 0.f;
+	float KnockbackAppliedDistance = 0.f;
+	float KnockbackTargetDistance = 0.f;
+
+	void ConsumePendingHitKnockback();
+	void StartHitKnockback(AActor* HitInstigator, float Scale);
+	void TickHitKnockback(float DeltaTime);
 
 public:
 	FORCEINLINE AWeapon* GetWeapon() const { return EquippedWeapon; }

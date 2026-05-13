@@ -24,7 +24,7 @@ public:
 	float BlockedDamageMultiplier = 0.05f;
 
 	UPROPERTY(EditAnywhere, Category = "Block")
-	float BlockStaminaCostPerDamage = 1.0f;
+	float BlockStaminaCostPerDamage = 0.7f;
 
 	UPROPERTY(EditAnywhere, Category = "Block")
 	float BlockMoveSpeedMultiplier = 1.0f;

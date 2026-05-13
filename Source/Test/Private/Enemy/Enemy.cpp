@@ -33,6 +33,9 @@ AEnemy::AEnemy()
 	// 移动设置
 	GetCharacterMovement()->MaxWalkSpeed = PatrolSpeed;
 
+	// 受击后退
+	BaseHitKnockbackDistance = 5.f;
+
 	// 血条组件
 	HealthBarWidgetComp = CreateDefaultSubobject<UHealthBarComponent>(TEXT("HealthBar"));
 	HealthBarWidgetComp->SetupAttachment(RootComponent);
@@ -143,8 +146,13 @@ void AEnemy::GetHit_Implementation(const FVector& ImpactPoint, AActor* HitInstig
 		{
 			ChasingTarget = HitInstigator;
 		}
-		SetEnemyState(EEnemyState::EES_Stunned);
+		if (PendingHitContext.bApplyStun)
+		{
+			SetEnemyState(EEnemyState::EES_Stunned);
+		}
 	}
+
+	ResetPendingHitContext();
 }
 
 float AEnemy::TakeDamage(float DamageAmount, const struct FDamageEvent& DamageEvent, class AController* EventInstigator,

@@ -22,6 +22,9 @@ AMyCharacter::AMyCharacter()
 	// 移动设置
 	GetCharacterMovement()->RotationRate = FRotator(0.f, 600.f, 0.f);
 
+	// 受击后退
+	BaseHitKnockbackDistance = 10.f;
+
 	// 相机组件
 	SpringArm = CreateDefaultSubobject<USpringArmComponent>(TEXT("SpringArm"));
 	SpringArm->SetupAttachment(GetRootComponent());
@@ -167,12 +170,14 @@ void AMyCharacter::GetHit_Implementation(const FVector& ImpactPoint, AActor* Hit
 		}
 	}
 
-	if (Attributes->IsAlive())
+	if (Attributes->IsAlive() && PendingHitContext.bApplyStun)
 	{
 		InterruptBlock(false);
 		ActionState = EActionState::EAS_Stunning;
 		Attributes->ResumeStaminaRegen();  // 硬直接管，恢复体力暂停
 	}
+
+	ResetPendingHitContext();  // 最末层清理
 }
 
 void AMyCharacter::Die()

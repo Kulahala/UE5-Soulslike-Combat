@@ -24,6 +24,7 @@ The project follows a decoupled, component-based architecture to ensure scalabil
    - **Combat Distance System**: Three radii (`ChasingRadius`/`CombatingRadius`/`PatrolRadius`) control AI behavior transitions, with `AcceptanceRadius` compensating for target capsule radius.
    - **Shield Blocking System**: Hold-to-block defense via `IBlockableInterface`. DotProduct angle check (default ±60°) determines if an incoming attack is within block arc. Successful block reduces damage by 80%, costs stamina, and skips hit-react. Supports auto-resume after interruption, air-block prevention, and exhaustion-forced unblock.
    - **Hit Feedback System**: Two-layer victim-side feedback: (1) Screen edge red vignette flash — programmatic 256x256 texture generated via edge-distance formula with smoothstep, intensity scales with damage reduction rate (full flash on unblocked, scaled on partial block, none on 100% block). Fade-in + exponential decay curve for natural feel. (2) Camera shake on hit-react path via `ClientStartCameraShake`.
+   - **Hit Knockback System**: Tick-driven displacement on hit, distance scaled by damage reduction rate (Player=10cm, Enemy=5cm). Uses `PendingHitContext` written by weapon hit chain to decouple knockback from stun/block state. Quadratic ease-out curve for natural deceleration. `AddActorWorldOffset` with sweep prevents wall penetration; actual displacement tracked to handle partial blocks. Same-team hits trigger knockback but no damage.
 
 ### 🧠 Key Technical & Algorithmic Highlights
 
@@ -34,6 +35,7 @@ The project follows a decoupled, component-based architecture to ensure scalabil
 - **Upper Body Animation Layering**: Layered Blend Per Bone + Slot node for weapon arming/disarming while moving, controlled by transient `bIsArming` state.
 - **Shield Blocking Algorithm**: Block check executes after weapon trace hits but before damage is applied. Uses `DotProduct(character forward, to-attacker)` vs `Cos(BlockHalfAngleDegrees)` for arc detection. Stamina cost scales with damage. Successful block reduces damage to 20% and suppresses hit-react. Exhaustion triggers synchronous block-break via `OnExhausted` delegate chain.
 - **Hit Feedback Visuals**: Edge vignette uses `UTexture2D::CreateTransient` to procedurally generate a 256x256 RGBA texture. Alpha formula: `EdgeDist = Min(U, 1-U, V, 1-V)` (distance to nearest screen edge), then smoothstep interpolation within configurable `VignetteFadeWidth` (default 0.2 = outer 20%). Flash intensity scales via `LastDamageFlashScale` (set by `TryBlockHit`, consumed by `SetHealthPercent`, zero-damage fallback in `TakeDamage`). Decay uses exponential falloff `pow(0.01, dt/Duration)` for natural trailing.
+- **Hit Knockback Algorithm**: Tick-driven `AddActorWorldOffset` with quadratic ease-out (`1 - (1-α)²`). Distance = `BaseHitKnockbackDistance * KnockbackScale` where Scale = `DamageAfterBlock / Damage`. Wall collision handled by tracking actual displacement via `FVector::Dist2D(OldLocation, NewLocation)` instead of target distance. `PendingHitContext` pattern: weapon writes context → `GetHit` consumes knockback → subclass reads bApplyStun → subclass clears context. Zero-scale hits clear active knockback state, ensuring new hits always override.
 
 ---
 
@@ -57,6 +59,7 @@ The project follows a decoupled, component-based architecture to ensure scalabil
    - **战斗距离系统**：三个半径（`ChasingRadius`/`CombatingRadius`/`PatrolRadius`）控制 AI 行为切换，`MoveToTarget` 的 `AcceptanceRadius` 补偿目标胶囊体半径以精确停在战斗范围内。
    - **盾牌防御系统**：基于 `IBlockableInterface` 的格挡判定，按住按键举盾，通过 DotProduct 角度检测判断攻击是否在格挡范围内（默认 ±60°），成功格挡减伤 80% 并消耗体力，跳过受击硬直。支持中断自动恢复、空中禁止防御、体力耗尽强制解除等边界处理。
    - **受击视觉反馈系统**：双层受击方反馈——(1) 屏幕边缘红晕闪烁，程序化生成 256×256 边缘距离渐变纹理（smoothstep），强度按减伤率缩放（未格挡=满闪，部分格挡=缩放，100%格挡=不闪），渐入 + 指数衰减曲线模拟自然冲击余韵；(2) 受击相机晃动，仅在 `GetHit` 受击反应路径触发，致死一击也有反馈。
+   - **受击后退系统**：Tick 驱动位移，距离按减伤率缩放（玩家=10cm，敌人=5cm）。通过 `PendingHitContext` 模式将后退与硬直/格挡状态解耦——武器命中链写入上下文，`GetHit` 统一消费。Quadratic ease-out 曲线（`1 - (1-α)²`）实现先快后慢的自然减速。`AddActorWorldOffset` 带 sweep 防穿墙，撞墙时按实际位移累计保留剩余距离。同阵营命中触发后退但不扣血。
 
 3. **环境与效果**
    - **破碎系统**：集成 Chaos 物理几何体集（Geometry Collections），实现环境的真实破坏效果。
@@ -161,6 +164,9 @@ stateDiagram-v2
 - **受击视觉反馈 (Hit Feedback Visuals)**
   边缘红晕通过 `UTexture2D::CreateTransient` 程序化生成 256×256 RGBA 纹理，Alpha 公式：`EdgeDist = Min(U, 1-U, V, 1-V)`（到最近屏幕边缘的距离），在可配置的 `VignetteFadeWidth`（默认 0.2 = 外围 20%）范围内 smoothstep 插值。闪烁强度通过 `LastDamageFlashScale` 缩放（`TryBlockHit` 设置 → `SetHealthPercent` 消费 → `TakeDamage` 零伤害兜底归位）。衰减采用指数曲线 `pow(0.01, dt/Duration)`，前快后慢自然拖尾。
 
+- **受击后退算法 (Hit Knockback)**
+  Tick 驱动 `AddActorWorldOffset`，使用 quadratic ease-out 曲线（`1 - (1-α)²`）实现先快后慢位移。距离 = `BaseHitKnockbackDistance × KnockbackScale`，其中 Scale = `DamageAfterBlock / Damage`。撞墙处理：通过 `FVector::Dist2D(OldLocation, NewLocation)` 累计实际位移而非目标位移，保留剩余距离。`PendingHitContext` 模式：武器写入上下文 → `GetHit` 消费后退 → 子类读取 bApplyStun → 子类清理上下文。零缩放命中清空旧 knockback 状态，确保新命中总是覆盖旧的。
+
 ---
 
 <a name="state-machine-flow"></a>
@@ -250,7 +256,7 @@ flowchart LR
 | `CheckCombatTarget()` | Tick / 蒙太奇结束 | 根据距离决定 Patrolling/Chasing/Combating |
 | `SetEnemyState()` | 状态切换时 | 退出旧状态清理 + 进入新状态初始化 |
 | `Attack()` | Combating 状态下面朝目标 | 启动冷却 + 切 Attacking + 播蒙太奇 |
-| `TakeDamage()` | 被攻击时 | 扣血 + 切 Stunned 或 Dead |
+| `TakeDamage()` | 被攻击时 | 扣血 + 切 Dead（硬直由 GetHit 按 bApplyStun 控制） |
 | `Die()` | 进入 Dead 状态 | 清 Timer + 停移动 + 关碰撞 + 播死亡动画 |
 
 ---
