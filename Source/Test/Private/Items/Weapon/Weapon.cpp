@@ -69,15 +69,6 @@ void AWeapon::OnPickup_Implementation(AActor* Picker)
 	}
 }
 
-// ==================== 拾取碰撞 ====================
-
-void AWeapon::SphereOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
-                            UPrimitiveComponent* OtherComp,
-                            int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
-{
-	Super::SphereOverlap(OverlappedComponent, OtherActor, OtherComp, OtherBodyIndex, bFromSweep, SweepResult);
-}
-
 // ==================== 武器碰撞检测 ====================
 
 void AWeapon::StartWeaponTrace()

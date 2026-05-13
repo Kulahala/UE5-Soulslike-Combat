@@ -56,7 +56,7 @@ void ACharacterController::Input_Move(const FInputActionValue& Value)
 	FVector2D MovementVector = Value.Get<FVector2D>();
 	DebugMoveInput = MovementVector;  // [调试] 先采样，不受 gameplay gate 限制
 
-	AMyCharacter* MyCharacter = Cast<AMyCharacter>(GetPawn());
+	AMyCharacter* MyCharacter = GetMyCharacter();
 	if (!MyCharacter) return;
 
 	EActionState State = MyCharacter->GetActionState();
@@ -95,7 +95,7 @@ void ACharacterController::Input_Jump()
 {
 	DebugJumpExpireTime = GetWorld()->GetTimeSeconds() + 0.15f;  // [调试]
 
-	if (AMyCharacter* MyCharacter = Cast<AMyCharacter>(GetPawn()))
+	if (AMyCharacter* MyCharacter = GetMyCharacter())
 	{
 		if (MyCharacter->GetActionState() != EActionState::EAS_UnOccupied) return;
 		MyCharacter->Jump();
@@ -104,7 +104,7 @@ void ACharacterController::Input_Jump()
 
 void ACharacterController::Input_StopJumping()
 {
-	if (AMyCharacter* MyCharacter = Cast<AMyCharacter>(GetPawn()))
+	if (AMyCharacter* MyCharacter = GetMyCharacter())
 	{
 		MyCharacter->StopJumping();
 	}
@@ -112,7 +112,7 @@ void ACharacterController::Input_StopJumping()
 
 void ACharacterController::Input_Equip()
 {
-	if (AMyCharacter* MyCharacter = Cast<AMyCharacter>(GetPawn()))
+	if (AMyCharacter* MyCharacter = GetMyCharacter())
 	{
 		MyCharacter->Equip();
 	}
@@ -121,7 +121,7 @@ void ACharacterController::Input_Equip()
 
 void ACharacterController::Input_Attack()
 {
-	if (AMyCharacter* MyCharacter = Cast<AMyCharacter>(GetPawn()))
+	if (AMyCharacter* MyCharacter = GetMyCharacter())
 	{
 		MyCharacter->Attack();
 	}
@@ -130,7 +130,7 @@ void ACharacterController::Input_Attack()
 
 void ACharacterController::Input_Arm()
 {
-	if (AMyCharacter* MyCharacter = Cast<AMyCharacter>(GetPawn()))
+	if (AMyCharacter* MyCharacter = GetMyCharacter())
 	{
 		MyCharacter->ArmWeapon();
 	}
@@ -139,7 +139,7 @@ void ACharacterController::Input_Arm()
 
 void ACharacterController::Input_SprintStart()
 {
-	if (AMyCharacter* MyCharacter = Cast<AMyCharacter>(GetPawn()))
+	if (AMyCharacter* MyCharacter = GetMyCharacter())
 	{
 		MyCharacter->Sprint();
 	}
@@ -148,7 +148,7 @@ void ACharacterController::Input_SprintStart()
 
 void ACharacterController::Input_SprintEnd()
 {
-	if (AMyCharacter* MyCharacter = Cast<AMyCharacter>(GetPawn()))
+	if (AMyCharacter* MyCharacter = GetMyCharacter())
 	{
 		MyCharacter->StopSprinting();
 	}
@@ -157,7 +157,7 @@ void ACharacterController::Input_SprintEnd()
 
 void ACharacterController::Input_WalkStart()
 {
-	if (AMyCharacter* MyCharacter = Cast<AMyCharacter>(GetPawn()))
+	if (AMyCharacter* MyCharacter = GetMyCharacter())
 	{
 		MyCharacter->Walk();
 	}
@@ -166,7 +166,7 @@ void ACharacterController::Input_WalkStart()
 
 void ACharacterController::Input_WalkEnd()
 {
-	if (AMyCharacter* MyCharacter = Cast<AMyCharacter>(GetPawn()))
+	if (AMyCharacter* MyCharacter = GetMyCharacter())
 	{
 		MyCharacter->StopWalking();
 	}
@@ -175,7 +175,7 @@ void ACharacterController::Input_WalkEnd()
 
 void ACharacterController::Input_BlockStart()
 {
-	if (AMyCharacter* MyCharacter = Cast<AMyCharacter>(GetPawn()))
+	if (AMyCharacter* MyCharacter = GetMyCharacter())
 	{
 		MyCharacter->StartBlockInput();
 	}
@@ -184,11 +184,16 @@ void ACharacterController::Input_BlockStart()
 
 void ACharacterController::Input_BlockEnd()
 {
-	if (AMyCharacter* MyCharacter = Cast<AMyCharacter>(GetPawn()))
+	if (AMyCharacter* MyCharacter = GetMyCharacter())
 	{
 		MyCharacter->ReleaseBlockInput();
 	}
 	bDebugBlockHeld = false;  // [调试]
+}
+
+AMyCharacter* ACharacterController::GetMyCharacter() const
+{
+	return Cast<AMyCharacter>(GetPawn());
 }
 
 FString ACharacterController::GetDebugInputText() const

@@ -56,15 +56,19 @@ private:
 	float DamageFlashTimer = 0.0f;
 	bool bDamageFlashAttacking = false;
 
+	// 受击染红渐入时间（秒），从 0 渐入到 PeakAlpha
 	UPROPERTY(EditAnywhere, Category = "Damage Flash")
 	float DamageFlashAttackDuration = 0.3f;
 
+	// 受击染红衰减时间（秒），指数衰减到 1% 的时间
 	UPROPERTY(EditAnywhere, Category = "Damage Flash")
 	float DamageFlashDuration = 0.5f;
 
+	// 受击染红峰值透明度（受 DamageFlashScale 缩放）
 	UPROPERTY(EditAnywhere, Category = "Damage Flash")
 	float DamageFlashPeakAlpha = 0.3f;
 
+	// 受击染红颜色
 	UPROPERTY(EditAnywhere, Category = "Damage Flash")
 	FLinearColor DamageFlashColor = FLinearColor(1.f, 0.f, 0.f, 1.f);
 

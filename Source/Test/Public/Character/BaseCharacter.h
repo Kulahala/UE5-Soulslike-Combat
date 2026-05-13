@@ -55,12 +55,15 @@ protected:
 	virtual void OnHitReactMontageEnded(UAnimMontage* Montage, bool bInterrupted);
 
 	/* 蒙太奇资源 */
+	// 攻击蒙太奇（含 Section：Attack1, Attack2 等）
 	UPROPERTY(EditDefaultsOnly, Category = "Montages")
 	UAnimMontage* AttackMontage;
 
+	// 受击反应蒙太奇（含 Section：FromFront, FromBack, FromLeft, FromRight）
 	UPROPERTY(EditDefaultsOnly, Category = "Montages")
 	UAnimMontage* HitReactMontage;
 
+	// 死亡蒙太奇
 	UPROPERTY(EditDefaultsOnly, Category = "Montages")
 	UAnimMontage* DeathMontage;
 
@@ -83,20 +86,24 @@ protected:
 	UAttributeComponent* Attributes; // 属性组件（血量、金币等）
 
 	/* 受击效果 */
+	// 普通受击音效（格挡时不播放，由 Shield::BlockSound 替代）
 	UPROPERTY(EditAnywhere, Category = "Effect")
-	USoundBase* HitSound; // 受击音效
+	USoundBase* HitSound;
 
+	// 普通受击粒子（格挡时不播放，由 Shield::BlockParticle 替代）
 	UPROPERTY(EditAnywhere, Category = "Effect")
-	UParticleSystem* HitParticle; // 受击粒子
+	UParticleSystem* HitParticle;
 
 	/* 武器 */
 	UPROPERTY()
 	AWeapon* EquippedWeapon; // 当前装备的武器
 
 	/* 受击后退 */
+	// 受击后退基础距离（cm），实际距离 = 此值 × KnockbackScale。子类构造函数覆写：Player=10, Enemy=5
 	UPROPERTY(EditAnywhere, Category = "Combat|Knockback")
-	float BaseHitKnockbackDistance = 0.f;  // 子类在构造函数中覆写（Player=10, Enemy=5）
+	float BaseHitKnockbackDistance = 0.f;
 
+	// 后退完成时间（秒），quadratic ease-out 曲线
 	UPROPERTY(EditAnywhere, Category = "Combat|Knockback")
 	float HitKnockbackDuration = 0.12f;
 

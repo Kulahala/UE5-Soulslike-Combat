@@ -31,11 +31,8 @@ public:
 	TArray<AActor*> IgnoreActors;
 
 protected:
-	virtual void SphereOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
-	                           UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep,
-	                           const FHitResult& SweepResult) override;
-
 	/* 拾取 */
+	// 装备武器时播放的音效
 	UPROPERTY(EditAnywhere, Category = "Weapon Properties")
 	USoundBase* EquipSound;
 
@@ -47,6 +44,7 @@ protected:
 	UFUNCTION()
 	void RestoreTimeDilation(AActor* Attacker, AActor* Victim);
 
+	// 命中时给攻击者本地玩家播放的相机震动
 	UPROPERTY(EditAnywhere, Category = "Combat")
 	TSubclassOf<class UCameraShakeBase> HitCameraShake;
 
@@ -71,6 +69,7 @@ private:
 	FVector TraceCenterOld;
 	FRotator TraceRotationOld;
 
+	// 武器基础伤害，格挡时按 BlockedDamageMultiplier 缩放
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat", meta = (AllowPrivateAccess = "true"))
 	float Damage = 10.f;
 

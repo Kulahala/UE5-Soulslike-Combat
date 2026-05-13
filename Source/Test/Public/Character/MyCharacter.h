@@ -59,7 +59,6 @@ public:
 
 protected:
 	/* 蒙太奇 */
-	virtual void PlayAttackMontage(const FName& SectionName) override;
 	void PlayArmMontage(const FName& SectionName); // 播放拔刀/收刀动画
 	void PlayBlockMontage(const FName& SectionName); // 播放防御蒙太奇
 	virtual bool CanAttack() const override;
@@ -80,6 +79,12 @@ protected:
 	float ExhaustedTime = 5.f; // 体力耗尽后恢复时间
 
 private:
+	/* 提取方法 */
+	void InitializePlayerHUD();
+	void DrawDebugInfo() const;
+	void StopBlockMontage(float BlendOutTime);
+	bool ShouldInterruptBlock() const;
+
 	/* 相机组件 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true"))
 	UCameraComponent* Camera;
@@ -88,6 +93,7 @@ private:
 	USpringArmComponent* SpringArm;
 
 	/* HUD */
+	// 玩家 HUD 控件类，BeginPlay 时创建并绑定到视口
 	UPROPERTY(EditDefaultsOnly, Category = "HUD")
 	TSubclassOf<UPlayerHUDWidget> PlayerHUDClass;
 
@@ -115,7 +121,7 @@ private:
 
 	FTimerHandle ExhaustionTimerHandle;
 
-	// 受击相机晃动
+	// 受击相机晃动（所有受击路径触发，含格挡）
 	UPROPERTY(EditDefaultsOnly, Category = "Combat")
 	TSubclassOf<UCameraShakeBase> HitReceivedCameraShake;
 

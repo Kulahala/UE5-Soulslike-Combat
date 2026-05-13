@@ -84,4 +84,5 @@ private:
 
 public:
 	FString GetDebugInputText() const;
+	class AMyCharacter* GetMyCharacter() const;
 };

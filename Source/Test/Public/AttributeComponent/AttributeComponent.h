@@ -39,30 +39,37 @@ private:
 	UPROPERTY(VisibleAnywhere, Category = "Actor Attributes", meta = (AllowPrivateAccess = "true"))
 	int32 Gold;
 
+	// 当前生命值
 	UPROPERTY(EditAnywhere, Category = "Actor Attributes", meta = (AllowPrivateAccess = "true"))
 	float CurrentHealth = 100.f;
 
+	// 最大生命值
 	UPROPERTY(EditAnywhere, Category = "Actor Attributes", meta = (AllowPrivateAccess = "true"))
 	float MaxHealth = 100.f;
 
+	// 当前体力值
 	UPROPERTY(EditAnywhere, Category = "Actor Attributes", meta = (AllowPrivateAccess = "true"))
 	float CurrentStamina = 100.f;
 
+	// 最大体力值
 	UPROPERTY(EditAnywhere, Category = "Actor Attributes", meta = (AllowPrivateAccess = "true"))
 	float MaxStamina = 100.f;
 
+	// 体力每秒恢复量
 	UPROPERTY(EditAnywhere, Category = "Actor Attributes", meta = (AllowPrivateAccess = "true"))
 	float StaminaRegenRate = 10.f;
 
+	// 体力消耗后冷却时间（秒），冷却结束才开始恢复
 	UPROPERTY(EditAnywhere, Category = "Actor Attributes", meta = (AllowPrivateAccess = "true"))
-	float StaminaRegenDelay = 1.f; // 消耗后多久开始恢复
+	float StaminaRegenDelay = 1.f;
 
 	float StaminaRegenCooldown = 0.f; // 当前剩余冷却
 	bool bStaminaRegenPaused = false; // 攻击期间暂停恢复
 	bool bStaminaJustDepleted = false; // 防止重复广播耗尽
 
+	// 生命值每秒恢复量（需调用 EnableHealthRegen() 启用）
 	UPROPERTY(EditAnywhere, Category = "Actor Attributes", meta = (AllowPrivateAccess = "true"))
-	float HealthRegenRate = 1.f; // 每秒恢复量
+	float HealthRegenRate = 1.f;
 
 	bool bHealthRegenActive = false;
 

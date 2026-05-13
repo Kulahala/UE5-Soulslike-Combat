@@ -45,16 +45,7 @@ void AMyCharacter::BeginPlay()
 		Attributes->EnableHealthRegen();
 	}
 
-	// 玩家 HUD
-	if (PlayerHUDClass)
-	{
-		PlayerHUDWidget = CreateWidget<UPlayerHUDWidget>(GetWorld(), PlayerHUDClass);
-		if (PlayerHUDWidget)
-		{
-			PlayerHUDWidget->AddToViewport();
-			PlayerHUDWidget->BindToAttributes(Attributes, this);
-		}
-	}
+	InitializePlayerHUD();
 }
 
 void AMyCharacter::Tick(float DeltaTime)
@@ -73,63 +64,13 @@ void AMyCharacter::Tick(float DeltaTime)
 
 	if (ActionState == EActionState::EAS_Stunning || ActionState == EActionState::EAC_Dead) return;
 
-	// 防御打断检查
-	if (bIsBlocking && (!EquippedShield || ActionState != EActionState::EAS_UnOccupied || GetCharacterMovement()->IsFalling()))
+	if (bIsBlocking && ShouldInterruptBlock())
 	{
 		InterruptBlock(!EquippedShield || ActionState == EActionState::EAS_Exhausted || ActionState == EActionState::EAC_Dead);
 	}
 	TryResumeBlock();
-
 	UpdateMovementSpeed();
-
-	if (Attributes)
-	{
-		// [调试] 角色状态面板
-		FDebugDrawHelper::Add(FString::Printf(TEXT("HP: %.1f / %.1f"), Attributes->GetCurrentHealth(), Attributes->GetMaxHealth()), FColor::Red);
-		FDebugDrawHelper::Add(FString::Printf(TEXT("SP: %.1f / %.1f"), Attributes->GetCurrentStamina(), Attributes->GetMaxStamina()), FColor::Green);
-
-		static const TCHAR* ActionStateNames[] = {
-			TEXT("UnOccupied"), TEXT("Attacking"), TEXT("Arming"), TEXT("Stunning"), TEXT("Exhausted"), TEXT("Dead")
-		};
-		FDebugDrawHelper::Add(FString::Printf(TEXT("State: %s"), ActionStateNames[static_cast<uint8>(ActionState)]), FColor::Yellow);
-
-		UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
-		UAnimMontage* ActiveMontage = AnimInstance ? AnimInstance->GetCurrentActiveMontage() : nullptr;
-
-		// [调试] 蒙太奇 — 仅播放时显示
-		if (ActiveMontage)
-		{
-			const FName ActiveSection = AnimInstance->Montage_GetCurrentSection(ActiveMontage);
-			FDebugDrawHelper::Add(FString::Printf(TEXT("Montage: %s [%s]"),
-				*ActiveMontage->GetName(),
-				ActiveSection.IsNone() ? TEXT("?") : *ActiveSection.ToString()),
-				FColor::Cyan);
-		}
-
-		// [调试] 防御门卫 — 仅激活时显示
-		FString BlockDebug;
-		if (bBlockInputHeld) BlockDebug += TEXT("[held] ");
-		if (bIsBlocking) BlockDebug += TEXT("[blocking] ");
-		if (CanStartBlock()) BlockDebug += TEXT("[canStart] ");
-		if (!EquippedShield) BlockDebug += TEXT("[noShield] ");
-		if (bIsArming) BlockDebug += TEXT("[isArming] ");
-		if (GetCharacterMovement()->IsFalling()) BlockDebug += TEXT("[falling] ");
-		if (!BlockDebug.IsEmpty())
-		{
-			FDebugDrawHelper::Add(FString::Printf(TEXT("Block: %s"), *BlockDebug),
-				bIsBlocking ? FColor::Green : FColor::White);
-		}
-
-		// [调试] 防御蒙太奇 — 仅播放时显示
-		if (AnimInstance && BlockMontage && AnimInstance->Montage_IsPlaying(BlockMontage))
-		{
-			const FName BlockSection = AnimInstance->Montage_GetCurrentSection(BlockMontage);
-			FDebugDrawHelper::Add(FString::Printf(TEXT("BlockMontage: %s [%s]"),
-				*BlockMontage->GetName(),
-				BlockSection.IsNone() ? TEXT("?") : *BlockSection.ToString()),
-				FColor::Green);
-		}
-	}
+	DrawDebugInfo();  // [调试] 角色状态面板，放在更新之后读取本帧最终状态
 }
 
 // ==================== 战斗 ====================
@@ -261,24 +202,14 @@ void AMyCharacter::ReleaseBlockInput()
 {
 	bBlockInputHeld = false;
 	bIsBlocking = false;
-
-	if (UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
-		AnimInstance && BlockMontage && AnimInstance->Montage_IsPlaying(BlockMontage))
-	{
-		AnimInstance->Montage_Stop(0.2f, BlockMontage);
-	}
+	StopBlockMontage(0.2f);
 }
 
 void AMyCharacter::InterruptBlock(bool bClearHeld)
 {
 	bIsBlocking = false;
 	if (bClearHeld) bBlockInputHeld = false;
-
-	if (UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
-		AnimInstance && BlockMontage && AnimInstance->Montage_IsPlaying(BlockMontage))
-	{
-		AnimInstance->Montage_Stop(0.1f, BlockMontage);
-	}
+	StopBlockMontage(0.1f);
 }
 
 void AMyCharacter::TryResumeBlock()
@@ -468,11 +399,6 @@ void AMyCharacter::UpdateMovementSpeed()
 
 // ==================== 蒙太奇 ====================
 
-void AMyCharacter::PlayAttackMontage(const FName& SectionName)
-{
-	Super::PlayAttackMontage(SectionName);
-}
-
 void AMyCharacter::PlayArmMontage(const FName& SectionName)
 {
 	UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
@@ -521,4 +447,84 @@ void AMyCharacter::OnArmMontageEnded(UAnimMontage* Montage, bool bInterrupted)
 	{
 		ArmWeaponState = EArmWeaponState::AWS_Arming;
 	}
+}
+
+// ==================== 提取方法 ====================
+
+void AMyCharacter::InitializePlayerHUD()
+{
+	if (PlayerHUDClass)
+	{
+		PlayerHUDWidget = CreateWidget<UPlayerHUDWidget>(GetWorld(), PlayerHUDClass);
+		if (PlayerHUDWidget)
+		{
+			PlayerHUDWidget->AddToViewport();
+			PlayerHUDWidget->BindToAttributes(Attributes, this);
+		}
+	}
+}
+
+void AMyCharacter::DrawDebugInfo() const
+{
+	if (!Attributes) return;
+
+	// [调试] 角色状态面板
+	FDebugDrawHelper::Add(FString::Printf(TEXT("HP: %.1f / %.1f"), Attributes->GetCurrentHealth(), Attributes->GetMaxHealth()), FColor::Red);
+	FDebugDrawHelper::Add(FString::Printf(TEXT("SP: %.1f / %.1f"), Attributes->GetCurrentStamina(), Attributes->GetMaxStamina()), FColor::Green);
+
+	static const TCHAR* ActionStateNames[] = {
+		TEXT("UnOccupied"), TEXT("Attacking"), TEXT("Arming"), TEXT("Stunning"), TEXT("Exhausted"), TEXT("Dead")
+	};
+	FDebugDrawHelper::Add(FString::Printf(TEXT("State: %s"), ActionStateNames[static_cast<uint8>(ActionState)]), FColor::Yellow);
+
+	UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
+	UAnimMontage* ActiveMontage = AnimInstance ? AnimInstance->GetCurrentActiveMontage() : nullptr;
+
+	// [调试] 蒙太奇 — 仅播放时显示
+	if (ActiveMontage)
+	{
+		const FName ActiveSection = AnimInstance->Montage_GetCurrentSection(ActiveMontage);
+		FDebugDrawHelper::Add(FString::Printf(TEXT("Montage: %s [%s]"),
+			*ActiveMontage->GetName(),
+			ActiveSection.IsNone() ? TEXT("?") : *ActiveSection.ToString()),
+			FColor::Cyan);
+	}
+
+	// [调试] 防御门卫 — 仅激活时显示
+	FString BlockDebug;
+	if (bBlockInputHeld) BlockDebug += TEXT("[held] ");
+	if (bIsBlocking) BlockDebug += TEXT("[blocking] ");
+	if (CanStartBlock()) BlockDebug += TEXT("[canStart] ");
+	if (!EquippedShield) BlockDebug += TEXT("[noShield] ");
+	if (bIsArming) BlockDebug += TEXT("[isArming] ");
+	if (GetCharacterMovement()->IsFalling()) BlockDebug += TEXT("[falling] ");
+	if (!BlockDebug.IsEmpty())
+	{
+		FDebugDrawHelper::Add(FString::Printf(TEXT("Block: %s"), *BlockDebug),
+			bIsBlocking ? FColor::Green : FColor::White);
+	}
+
+	// [调试] 防御蒙太奇 — 仅播放时显示
+	if (AnimInstance && BlockMontage && AnimInstance->Montage_IsPlaying(BlockMontage))
+	{
+		const FName BlockSection = AnimInstance->Montage_GetCurrentSection(BlockMontage);
+		FDebugDrawHelper::Add(FString::Printf(TEXT("BlockMontage: %s [%s]"),
+			*BlockMontage->GetName(),
+			BlockSection.IsNone() ? TEXT("?") : *BlockSection.ToString()),
+			FColor::Green);
+	}
+}
+
+void AMyCharacter::StopBlockMontage(float BlendOutTime)
+{
+	if (UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
+		AnimInstance && BlockMontage && AnimInstance->Montage_IsPlaying(BlockMontage))
+	{
+		AnimInstance->Montage_Stop(BlendOutTime, BlockMontage);
+	}
+}
+
+bool AMyCharacter::ShouldInterruptBlock() const
+{
+	return !EquippedShield || ActionState != EActionState::EAS_UnOccupied || GetCharacterMovement()->IsFalling();
 }

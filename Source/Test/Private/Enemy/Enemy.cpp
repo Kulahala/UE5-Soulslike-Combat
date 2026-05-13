@@ -168,11 +168,6 @@ float AEnemy::TakeDamage(float DamageAmount, const struct FDamageEvent& DamageEv
 	return Super::TakeDamage(DamageAmount, DamageEvent, EventInstigator, DamageCauser);
 }
 
-void AEnemy::DirectionalHitReact(const FVector& ImpactPoint, const AActor* HitInstigator)
-{
-	Super::DirectionalHitReact(ImpactPoint, HitInstigator);
-}
-
 void AEnemy::Die()
 {
 	ClearAllTimers();
@@ -234,11 +229,6 @@ void AEnemy::Attack()
 bool AEnemy::CanAttack() const
 {
 	return EnemyState == EEnemyState::EES_Combating && !bAttackOnCooldown;
-}
-
-void AEnemy::PlayHitReactMontage(const FName& SectionName)
-{
-	Super::PlayHitReactMontage(SectionName);
 }
 
 // ==================== 蒙太奇回调 ====================

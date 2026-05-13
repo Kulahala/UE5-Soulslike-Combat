@@ -35,7 +35,6 @@ public:
 	virtual void GetHit_Implementation(const FVector& ImpactPoint, AActor* HitInstigator) override;
 	virtual float TakeDamage(float DamageAmount, const struct FDamageEvent& DamageEvent,
 	                         class AController* EventInstigator, AActor* DamageCauser) override;
-	virtual void DirectionalHitReact(const FVector& ImpactPoint, const AActor* HitInstigator) override;
 	void Die(); // 死亡演出
 
 	/* 攻击 */
@@ -52,7 +51,6 @@ public:
 protected:
 	/* 攻击 */
 	virtual bool CanAttack() const override;
-	virtual void PlayHitReactMontage(const FName& SectionName) override;
 	void OnAttackCooldownEnd(); // 攻击冷却到期回调
 
 	/* 状态机 */
