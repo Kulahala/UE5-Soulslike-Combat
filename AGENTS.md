@@ -157,8 +157,9 @@ UInterface → UBlockableInterface (weapon hit interception before final damage 
 - `OnCombating()` now separates **attack distance** from **cooldown spacing**:
   `CombatAttackMaxRadius` gates whether the enemy may start an attack, while `CombatPreferredMinRadius` / `CombatPreferredMaxRadius` define the cooldown spacing ring used for retreat, diagonal retreat, strafe, and press.
 - Current code defaults are:
-  `CombatTooCloseRadius(90) < CombatAttackMaxRadius(170) <= CombatPreferredMinRadius(210) <= CombatPreferredMaxRadius(250) < CombatingRadius(300) < ChasingRadius(1000)`.
+  `CombatTooCloseRadius(90) < CombatAttackMaxRadius(170) <= CombatPreferredMinRadius(210) <= CombatPreferredMaxRadius(270) < CombatingRadius(300) < ChasingRadius(1000)`.
   Keep this ordering intact when tuning; if `CombatPreferredMaxRadius >= CombatingRadius`, retreat/strafe targets will push the enemy out of `EES_Combating` and immediately back into `EES_Chasing`.
+- Keep `CombatPressMargin(25)` greater than `CombatRepositionAcceptanceRadius(12)`. If the margin is smaller, press movement can be considered complete while the enemy is still just outside `CombatAttackMaxRadius`, producing a stand-still-at-edge bug.
 - During cooldown, `UpdateCombatMovement()` chooses `Retreat` / `BackDiag` / `Strafe` / `Press` based on current distance. `MoveToCombatLocation()` only marks `bRepositionInProgress` on `RequestSuccessful`, retries quickly on failure, and relies on `ReceiveMoveCompleted` → `OnRepositionMoveCompleted(...)` to clear the in-progress flag.
 - `MoveToCombatLocation()` intentionally uses `FAIMoveRequest` with `SetReachTestIncludesAgentRadius(false)` and `SetReachTestIncludesGoalRadius(false)`. Do not reintroduce manual `ProjectPointToNavigation(...)` here; `AAIController::MoveTo()` already performs goal projection with the AI's nav agent properties.
 - `EES_Attacking`, `EES_Stunned`, and `EES_Dead` are hard-stop states for Tick-driven AI reactions.

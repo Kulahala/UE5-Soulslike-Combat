@@ -48,8 +48,8 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "Destruction|Drops", meta = (ToolTip = "掉落宝物的基类。"))
 	TSubclassOf<class ATreasure> BaseTreasureClass;
 
-	// 可能会掉落的”物品卡片”池
-	UPROPERTY(EditAnywhere, Category = “Destruction|Drops”, meta = (ToolTip = “可掉落的宝物数据资产池，随机从列表中选取。”))
+	// 可能会掉落的物品卡片池
+	UPROPERTY(EditAnywhere, Category = "Destruction|Drops", meta = (ToolTip = "可掉落的宝物数据资产池，随机从列表中选取。"))
 	TArray<class UTreasureData*> PossibleDrops;
 
 	UPROPERTY(EditAnywhere, Category = "Destruction|Drops", meta = (ToolTip = "最少掉落宝物数量。"))

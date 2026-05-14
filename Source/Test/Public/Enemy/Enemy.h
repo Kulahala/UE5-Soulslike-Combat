@@ -131,24 +131,25 @@ private:
 	// 距离关系提醒：
 	// CombatTooCloseRadius < CombatAttackMaxRadius <= CombatPreferredMinRadius <= CombatPreferredMaxRadius < CombatingRadius < ChasingRadius
 	// CombatAttackMaxRadius 控制可出手距离；CombatPreferredMin/Max 控制冷却期想保持的距离环。
+	// CombatPressMargin 必须大于 CombatRepositionAcceptanceRadius，避免前压到攻击边缘时被导航提前判定到达。
 	UPROPERTY(EditAnywhere, Category = "Combat|Spacing", meta = (ClampMin = "0.0", ToolTip = "过近阈值。必须小于 CombatAttackMaxRadius。攻击CD期间，距离低于此值触发后撤。"))
 	float CombatTooCloseRadius = 90.f;
 	UPROPERTY(EditAnywhere, Category = "Combat|Spacing", meta = (ClampMin = "0.0", ToolTip = "可出手的最大距离。贴近实际武器射程即可，不要为了增大后撤距离而调高此值。"))
 	float CombatAttackMaxRadius = 170.f;
 	UPROPERTY(EditAnywhere, Category = "Combat|Spacing", meta = (ClampMin = "0.0", ToolTip = "冷却期拉扯距离环内圈。必须 >= CombatAttackMaxRadius 且 <= CombatPreferredMaxRadius。"))
 	float CombatPreferredMinRadius = 210.f;
-	UPROPERTY(EditAnywhere, Category = "Combat|Spacing", meta = (ClampMin = "0.0", ToolTip = "冷却期拉扯距离环外圈。必须 > CombatPreferredMinRadius 且 < CombatingRadius。默认250留出较大后撤空间。"))
-	float CombatPreferredMaxRadius = 250.f;
+	UPROPERTY(EditAnywhere, Category = "Combat|Spacing", meta = (ClampMin = "0.0", ToolTip = "冷却期拉扯距离环外圈。必须 > CombatPreferredMinRadius 且 < CombatingRadius。默认270留出更大后撤空间。"))
+	float CombatPreferredMaxRadius = 270.f;
 	UPROPERTY(EditAnywhere, Category = "Combat|Spacing", meta = (ClampMin = "0.0", ClampMax = "90.0", ToolTip = "冷却期在拉扯距离环内的横移角度（绕目标旋转）。"))
 	float CombatStrafeAngleDegrees = 25.f;
-	UPROPERTY(EditAnywhere, Category = "Combat|Spacing", meta = (ClampMin = "0.0", ToolTip = "战斗位移的导航到达判定半径。保持较小值，避免短距离移动被误判为已到达。"))
+	UPROPERTY(EditAnywhere, Category = "Combat|Spacing", meta = (ClampMin = "0.0", ToolTip = "战斗位移的导航到达判定半径。必须小于 CombatPressMargin，避免前压时停在攻击范围外。"))
 	float CombatRepositionAcceptanceRadius = 12.f;
 	UPROPERTY(EditAnywhere, Category = "Combat|Spacing", meta = (ClampMin = "0.0", ToolTip = "战斗位移请求的最短间隔（秒）。必须 <= CombatRepositionIntervalMax。"))
 	float CombatRepositionIntervalMin = 0.8f;
 	UPROPERTY(EditAnywhere, Category = "Combat|Spacing", meta = (ClampMin = "0.0", ToolTip = "战斗位移请求的最长间隔（秒）。必须 >= CombatRepositionIntervalMin。"))
 	float CombatRepositionIntervalMax = 1.4f;
-	UPROPERTY(EditAnywhere, Category = "Combat|Spacing", meta = (ClampMin = "0.0", ToolTip = "前压时从目标距离环扣减的余量。必须小于 CombatAttackMaxRadius 和 CombatPreferredMaxRadius。"))
-	float CombatPressMargin = 10.f;
+	UPROPERTY(EditAnywhere, Category = "Combat|Spacing", meta = (ClampMin = "0.0", ToolTip = "前压时从目标距离环扣减的余量。必须大于 CombatRepositionAcceptanceRadius，并小于 CombatAttackMaxRadius 和 CombatPreferredMaxRadius。"))
+	float CombatPressMargin = 25.f;
 	UPROPERTY(EditAnywhere, Category = "Combat|Spacing", meta = (ClampMin = "0.0", ToolTip = "攻击CD期间后撤、斜退、横移的移动速度。"))
 	float CombatRepositionSpeed = 200.f;
 	UPROPERTY(EditAnywhere, Category = "Combat|Spacing", meta = (ClampMin = "0.0", ToolTip = "前压目标时的移动速度。建议低于 ChaseSpeed，让战斗逼近和追击有体感差异。"))
