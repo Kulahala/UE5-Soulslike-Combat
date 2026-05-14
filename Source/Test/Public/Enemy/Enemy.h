@@ -5,8 +5,9 @@
 #include "CoreMinimal.h"
 #include "Character/BaseCharacter.h"
 #include "Character/CharacterTypes.h"
-#include "Perception/AIPerceptionTypes.h"
 #include "Enemy.generated.h"
+
+struct FAIRequestID;
 
 namespace EPathFollowingResult
 {
@@ -77,6 +78,7 @@ protected:
 	void MoveToTarget(const AActor* Target); // 导航移动到目标
 	void MoveToLocation(const FVector& Location); // 导航到坐标点
 	bool BInTargetRange(AActor* Target, double Range) const; // 检查目标是否在范围内
+	bool IsValidCombatTarget(const AActor* Target) const; // 目标有效且存活
 
 	/* 血条 */
 	void ShowHealthBar();
@@ -109,7 +111,6 @@ private:
 	float ChasingRadius = 1000.f;
 
 	// 视野锥角（半角，总FOV = 此值 × 2）
-	// 视野锥角（半角，总FOV = 此值 × 2）
 	UPROPERTY(EditAnywhere, Category = "Combat", meta = (ClampMin = "10", ClampMax = "180", ToolTip = "视野锥半角。总FOV = 此值 × 2。"))
 	float VisionAngleDegrees = 75.f;
 
@@ -118,7 +119,6 @@ private:
 	UPROPERTY(EditAnywhere, Category = "Combat", meta = (ClampMin = "0.0", ToolTip = "必须大于 CombatPreferredMaxRadius，建议至少多 30cm 防止拉扯后立刻切回追击，且小于 ChasingRadius。"))
 	float CombatingRadius = 300.f;
 
-	// 攻击面朝阈值：DotProduct > 此值才允许攻击（0.965 ≈ ±15°）
 	// 攻击面朝阈值：DotProduct > 此值才允许攻击（0.965 ≈ ±15°）
 	UPROPERTY(EditAnywhere, Category = "Combat", meta = (ClampMin = "0.5", ClampMax = "1.0", ToolTip = "DotProduct > 此值才允许攻击。0.965 ≈ ±15°。"))
 	float AttackAngleThreshold = 0.965f;
@@ -150,10 +150,8 @@ private:
 	float CombatRepositionIntervalMax = 1.4f;
 	UPROPERTY(EditAnywhere, Category = "Combat|Spacing", meta = (ClampMin = "0.0", ToolTip = "前压时从目标距离环扣减的余量。必须大于 CombatRepositionAcceptanceRadius，并小于 CombatAttackMaxRadius 和 CombatPreferredMaxRadius。"))
 	float CombatPressMargin = 25.f;
-	UPROPERTY(EditAnywhere, Category = "Combat|Spacing", meta = (ClampMin = "0.0", ToolTip = "攻击CD期间后撤、斜退、横移的移动速度。"))
-	float CombatRepositionSpeed = 200.f;
-	UPROPERTY(EditAnywhere, Category = "Combat|Spacing", meta = (ClampMin = "0.0", ToolTip = "前压目标时的移动速度。建议低于 ChaseSpeed，让战斗逼近和追击有体感差异。"))
-	float CombatPressSpeed = 280.f;
+	UPROPERTY(EditAnywhere, Category = "Combat|Spacing", meta = (ClampMin = "0.1", ClampMax = "1.0", ToolTip = "后撤/斜后撤接近目标点时的最低速度倍率。上限使用 PatrolSpeed，默认末段降到 55%。"))
+	float CombatRetreatMinSpeedRatio = 0.55f;
 
 	// 巡逻移动速度
 	UPROPERTY(EditAnywhere, Category = "Combat", meta = (ToolTip = "巡逻状态的移动速度（cm/s）。"))
@@ -232,10 +230,16 @@ private:
 	void UpdateCombatMovement(float DeltaTime, float DistanceToTarget, const FVector& ToTarget);
 	bool MoveToCombatLocation(const FVector& Location);
 	void ResetCombatReposition();
+	void StartCombatRetreatSpeedEase(const FVector& GoalLocation);
+	void UpdateCombatRetreatSpeedEase();
+	void ClearCombatRetreatSpeedEase();
 	UFUNCTION()
 	void OnRepositionMoveCompleted(FAIRequestID RequestID, EPathFollowingResult::Type Result);
 	float NextCombatRepositionTime = 0.f;
 	bool bRepositionInProgress = false;
+	bool bRetreatSpeedEaseActive = false;
+	FVector RetreatSpeedEaseGoalLocation = FVector::ZeroVector;
+	float RetreatSpeedEaseTotalDistance = 0.f;
 	FString LastCombatMoveDebug;
 
 	/* 定时器 */

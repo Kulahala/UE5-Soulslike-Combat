@@ -11,6 +11,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Module: `Test` (Runtime), `SmartBPCreator` (Editor plugin). Targets: `TestEditor` (Editor), `Test` (Game).
 - `Test.Build.cs` pulls in: `Core`, `CoreUObject`, `Engine`, `InputCore`, `EnhancedInput`, `AnimGraphRuntime`, `Niagara`, `GeometryCollectionEngine`, `PCG`, `UMG`, `AIModule`, `Slate`, `SlateCore`.
 
+## Truth Sources
+
+- Source code, `.uproject`, and `.Build.cs` are the primary truth source.
+- When markdown documents disagree, use this precedence: **source code > AGENTS.md > CLAUDE.md > GEMINI.md**.
+- Verify behavior-critical claims against actual C++ before editing gameplay logic.
+
 ## Architecture
 
 ### State Machine System (`CharacterTypes.h`)
@@ -24,6 +30,8 @@ All gameplay states are defined as `UENUM` enums in `CharacterTypes.h`. This is 
 | `EEnemyState` | UnOccupied, Patrolling, Searching, Chasing, Combating, Attacking, Stunned, Dead | `AEnemy` |
 
 **State transition pattern**: Mixed C++ + AnimNotify driven. Entry states are set directly in C++ (`Attack()`, `GetHit_Implementation()`, `Die()`). Recovery transitions use `FOnMontageEnded` delegates with `bInterrupted` guards as primary path. `UAnimNotify_CharacterHitReactEnd` is the exception — used for player hit react recovery so designers can tune stun duration in the animation editor. Enemy recovery has double coverage (delegate + AnimNotify with state guards).
+
+**Montage Helper**: `ABaseCharacter::PlayMontageSection(UAnimMontage*, const FName&)` 只做 `Montage_Play()` + `Montage_JumpToSection()`。End-delegate 绑定留在语义调用方（`PlayAttackMontage()`、`PlayHitReactMontage()`、`PlayArmMontage()`）。不要合并成"通用蒙太奇入口"，除非恢复语义真正收敛。
 
 ### Class Hierarchy
 ```
@@ -54,27 +62,55 @@ UDataAsset → UTreasureData (static mesh, gold value, pickup sound, scale)
 2. `PlayAttackMontage()` plays attack animation with `UAnimNotifyState_WeaponCollision` baked in
 3. **NotifyBegin** → `AWeapon::StartWeaponTrace()` (records old box positions)
 4. **NotifyTick** → `AWeapon::ExecuteWeaponTrace()` (sweeps from old→new center to prevent ghost swings)
-5. On hit → 格挡判定（跨阵营时 `Cast<IBlockableInterface>` → `TryBlockHit`）；格挡成功：减伤 + 跳过 GetHit 硬直；格挡失败/未防御：原伤害 + GetHit 硬直。`ApplyDamage` → `TakeDamage` → 扣血。
+5. On hit:
+   - 同阵营命中：不 `ApplyDamage`，但仍走 `GetHit` 路径（击退、命中反馈、相机晃动）
+   - 跨阵营命中：`IBlockableInterface::TryBlockHit()` 在 `ApplyDamage` 前拦截；格挡成功：减伤 + 跳过硬直
+   - `ExecuteWeaponTrace()` 通过 `FPendingHitContext` 写入每命中的上下文（instigator、knockback scale、blocked flag、stun flag），然后调用 `GetHit()`
+   - `ABaseCharacter::GetHit_Implementation()` 消费 context 驱动击退/受击反应，子类（`AMyCharacter`、`AEnemy`）在各自硬直逻辑后清空 context
+   - `ExecuteWeaponTrace()` 分解为 `BuildIgnoreList()`、`ResolveHit()`、`DispatchHitFeedback()` 三步，不要膨胀为通用战斗管线
 6. HitStop + CameraShake（所有命中都触发）
 7. **NotifyEnd** → clears `IgnoreActors` blacklist
 8. `OnAttackMontageEnded` delegate fires → `if (bInterrupted) return` guard → sets `EAS_UnOccupied` + resumes stamina regen
 
+### Hit Knockback（受击后退）
+- `ABaseCharacter` 通过 `FPendingHitContext` + `BaseHitKnockbackDistance` + `HitKnockbackDuration` + `TickHitKnockback()` 共享短距离武器命中击退。
+- 击退是**武器命中反馈**，非通用伤害反馈：陷阱/DOT 只调 `TakeDamage()` 不自动触发。
+- 默认值：`AMyCharacter` 10cm，`AEnemy` 5cm。
+- 运动曲线：quadratic ease-out，通过 `AddActorWorldOffset(..., true, &Hit)` sweep 位移，可被墙挡住。
+- 新命中覆盖旧击退；零缩放命中（如满格挡）清除进行中的击退。
+- 格挡成功按减伤比例缩放击退距离（`DamageAfterBlock / Damage`）。
+- 友方武器命中也触发击退和命中反馈，但不造成伤害。
+
+### Player Hit Feedback（受击反馈分离）
+- **相机晃动 = 命中反馈**，**红晕 = 血量损失**。
+- `GetHit_Implementation()` 触发 `HitReceivedCameraShake`（含格挡和友方命中）。
+- `TryBlockHit()` 写入 `LastDamageFlashScale`；`TakeDamage()` 在零伤害/满格挡时归位，防止状态泄漏。
+- `SetHealthPercent()` 仅在血量实际下降时消费 `LastDamageFlashScale`，红晕强度跟踪最终减伤后伤害。
+- 红晕蒙版：程序化生成边缘距离渐变（非径向中心衰减），`VignetteFadeWidth = 0.2` = 外围 20% 红晕。
+
 ### Enemy AI (`AEnemy`)
 - Controlled by `AAIController` via `EEnemyState` FSM.
-- `CheckCombatTarget()` runs before per-state Tick logic: invalid targets return to `EES_Patrolling`, targets inside `CombatingRadius` switch to `EES_Combating`, and targets inside `ChasingRadius` switch to `EES_Chasing`.
+- `CheckCombatTarget()` runs before per-state Tick logic: invalid **or dead** targets return to `EES_Patrolling`（via `IsValidCombatTarget()` helper — checks `IsValid()` + `Cast<ABaseCharacter>` + `IsAlive()`），targets inside `CombatingRadius` switch to `EES_Combating`, and targets inside `ChasingRadius` switch to `EES_Chasing`.
+- `IsValidCombatTarget()` is also used in `TargetPerceptionUpdated()` (prevents dead player re-acquisition) and `CanAttack()` (defense-in-depth).
 - **Patrolling / Searching**: `OnPatrolling()` moves between `PatrolTargets`; once inside `PatrolRadius`, the enemy switches to `EES_Searching`. `OnSearching()` stops movement, starts `PatrolTimer` plus repeating `LookTimer`, and rotates toward `GenerateNewLookRotation()`.
 - **Chasing / Combating**: `OnChasing()` reissues `MoveToTarget()` if path-following falls back to idle. `OnCombating()` rotates toward the target until `DotProduct > AttackAngleThreshold`, then attacks.
 - **Combat Spacing**: `OnCombating()` 三分支：攻击就绪+在范围内→Attack()；攻击就绪+超出范围→前压；攻击CD→`UpdateCombatMovement()` 拉扯位移。`UpdateCombatMovement()` 按距离分 Retreat/BackDiag/Strafe/Press 四种策略，通过 `MoveToCombatLocation()` 发起导航请求，`ReceiveMoveCompleted` 委托回调重置 `bRepositionInProgress`。`RotateAngleAxis` 实现恒定半径横移。
+- **Retreat Speed Ease**: Retreat/BackDiag 使用速度缓动：起始 `PatrolSpeed`(150)，quadratic ease-out 降到 `PatrolSpeed * CombatRetreatMinSpeedRatio`(82.5)。`StartCombatRetreatSpeedEase()` 在导航成功时启动，`UpdateCombatRetreatSpeedEase()` 每帧 Tick 更新，`OnRepositionMoveCompleted` 清理。Strafe 不缓动（保持 `PatrolSpeed`），Press 用 `ChaseSpeed`(330)。
 - `SetEnemyState()` 使用 entry-action 模式：进入 `EES_Combating` 时 `StopMovement` + 关闭 `bOrientRotationToMovement` + 重置拉扯状态；进入 `EES_Attacking`/`EES_Stunned` 时清除 `bRepositionInProgress`。
+- **参数约束**：`CombatTooCloseRadius(90) < CombatAttackMaxRadius(170) <= CombatPreferredMinRadius(210) <= CombatPreferredMaxRadius(270) < CombatingRadius(300) < ChasingRadius(1000)`。`CombatPressMargin(25)` 必须大于 `CombatRepositionAcceptanceRadius(12)`，否则前压会在攻击范围外停住。
+- `MoveToCombatLocation()` 用 `FAIMoveRequest` + `SetReachTestIncludesAgentRadius(false)` + `SetReachTestIncludesGoalRadius(false)`。不要手动 `ProjectPointToNavigation()`，`MoveTo` 已内置目标投影。
+- `OnChasing()` 对 `ChasingTarget` 的 `MoveToTarget()` 同样禁用 agent/goal radius 紧凑测试，避免追击距离过远停下。
 - `PatrolTimer` and `LookTimer` are cleared via `ClearPatrolTimers()` on state transitions and death.
 - `EES_Attacking`, `EES_Stunned`, and `EES_Dead` are hard-stop states for Tick-driven AI reactions.
 - Directional hit react: `GetHitDirection()` returns `DotProduct`-based angle, used to pick `HitReactMontage` section name (Front/Back/Left/Right).
 
 ### Health Bar Buffer System
 - `UBaseHealthBarWidget` has two `UProgressBar`: `PB_Health` (immediate) and `PB_Buffer` (delayed).
-- `SetHealthPercent()` updates PB_Health instantly; PB_Buffer starts a delay timer (`BufferDelayTime`, default 2s) before lerping toward PB_Health at `BufferInterpSpeed`.
+- `SetHealthPercent()` updates PB_Health instantly; when health drops it resets `CurrentBufferDelay` using `BufferDelayTime` before PB_Buffer starts moving; healing snaps buffer bar upward immediately.
+- `TickBufferDelayImpl(...)` 是共享的 buffer 追赶逻辑，`UPlayerHUDWidget` 复用。
 - `UHealthBarComponent::SetHealthPercent()` delegates to the widget.
 - `UAttributeComponent::OnHealthChanged` broadcasts `HealthPercent` — widgets and components bind to this.
+- 敌人血条可见性由 `ShowHealthBar()`/`HideHealthBar()` 定时器驱动，可选蓝图淡出动画 `PlayFadeOutAnim()`。
 
 ### Player HUD (`UPlayerHUDWidget`)
 - 与 `UBaseHealthBarWidget` 共享 buffer delay 逻辑（PB_Health + PB_Buffer + PB_Stamina）。
@@ -94,6 +130,10 @@ UDataAsset → UTreasureData (static mesh, gold value, pickup sound, scale)
 - `HealthRegenRate`（默认 1/s）在 TickComponent 中生效，条件：`bHealthRegenActive && IsAlive() && CurrentHealth < MaxHealth`。
 - 玩家在 `BeginPlay` 中显式启用：`Attributes->EnableHealthRegen()`。敌人默认不启用。
 
+### Shared Direction Helper
+- `ABaseCharacter::CalcForwardDot2D(const FVector& WorldDirection)` — 共享 2D 面朝点积。调用方传世界空间方向向量，**不传目标位置**。
+- 用于移动方向、攻击者方向、目标方向等。`IHitInterface::GetHitDirection()` 单独用于有符号角度的受击反应路由。
+
 ### Movement Speed System
 - 基础移速: Walk=150, Run=300, Sprint=450（仅前方 DotProduct>0.2 时生效）。
 - 方向性缩放: 前(100%) → 侧(80%) → 后(65%)，阈值 DotProduct ±0.2。
@@ -106,12 +146,14 @@ UDataAsset → UTreasureData (static mesh, gold value, pickup sound, scale)
 - `AShield` — 副手装备，参数载体：`BlockHalfAngleDegrees`(角度)、`BlockedDamageMultiplier`(减伤)、`BlockStaminaCostPerDamage`(体力/伤害比)、`BlockMoveSpeedMultiplier`(移速)、`BlockSound`/`BlockParticle`(反馈)。
 - `EquipToOffhand()` 只设 Owner 不设 Instigator（与 `Weapon::Equip()` 不同），因为盾牌不造成伤害。
 - 按住防御：`bBlockInputHeld` + `bIsBlocking` 双标志，不新增 `EActionState`，防御中 `ActionState` 保持 `EAS_UnOccupied`。
-- `CanStartBlock()` 前置条件：有盾 + UnOccupied + 非拔刀中 + 地面。（独立于武器状态）
+- `CanStartBlock()` 前置条件：有盾 + UnOccupied + 非拔刀中 + 地面。（**独立于 `ArmWeaponState`**，不要加武器状态检查）
 - `TryBlockHit()` 判定链：存活 → 方向(`DotProduct` vs `Cos(HalfAngle)`) → 体力成本检查 → 扣体力 + 减伤。
 - 中断规则：`InterruptBlock(false)` = 临时（受击/空中），保留 `bBlockInputHeld` 自动补入；`InterruptBlock(true)` = 永久（耗尽/死亡），必须重按。
 - Tick 自动恢复：每帧 `TryResumeBlock()` 检查 `bBlockInputHeld && !bIsBlocking && CanStartBlock()`。
 - 防御中限制：不能攻击/跳跃/冲刺/拔收刀/拾取，移速由 `BlockMoveSpeedMultiplier` 控制（默认1.0）。
 - 格挡拦截点：`Weapon::ExecuteWeaponTrace()` 命中后、`ApplyDamage()` 前，仅跨阵营触发。格挡成功时 `bPlayNormalHitReact = false` 跳过受击硬直。
+- 格挡命中仍走 `GetHit` → `FPendingHitContext`，所以缩放击退和类特定反馈仍生效。
+- 调参时同步更新 C++ 默认值（`AShield::BlockedDamageMultiplier`）和蓝图覆盖值。
 - 防御移速：`UpdateMovementSpeed()` 中 `SpeedMultiplier` 优先判断 `bIsBlocking` → `Shield->BlockMoveSpeedMultiplier`(默认1.0)，覆盖方向缩放。
 
 ### Content Organization
@@ -127,6 +169,8 @@ UDataAsset → UTreasureData (static mesh, gold value, pickup sound, scale)
 - 跨文件访问：通过 `IsDebugEnabled()`/`IsEnemyEnabled()`/`IsShapesEnabled()` 公开静态方法，不暴露 CVar 变量。
 - 绘制宿主：`UPlayerHUDWidget::NativePaint()` 通过 `FSlateDrawElement::MakeText` 在左侧中部绘制。
 - `NativePaint` 必须使用 `Super::NativePaint()` 返回的 Layer 作为绘制基准，不要用传入的 `LayerId`。
+- 玩家调试内容：输入快照、HP、体力、动作状态、蒙太奇名、移动速度。
+- 敌人调试内容：状态/地速、距离、追逐/战斗半径球、`CombatMove: Ready/Retreat/BackDiag/Strafe/Press/AlreadyAtGoal/MoveFail`。
 
 ### Input Debug System
 - `ACharacterController` 持有输入调试状态（held bools + expire times + move dir），`MyCharacter` 只读显示。
@@ -184,6 +228,36 @@ UDataAsset → UTreasureData (static mesh, gold value, pickup sound, scale)
 当一个函数需要返回 3+ 个值时，定义轻量 `USTRUCT` 替代多个 out 参数或 bool 标志位。
 - 结构体字段带默认值，调用方只关心需要的字段。
 - 本项目实例：`Weapon::ResolveHit()` 返回 `FWeaponHitResult`（FinalDamage, bPlayNormalHitReact, KnockbackScale, bApplyStun, bSameTeam），下游 `DispatchHitFeedback` 按需读取。
+
+## Code Conventions
+
+### Includes
+- System/engine first, then project — forward declare when possible.
+- `.generated.h` must be last include.
+- Project includes use full relative path from `Public/`.
+
+### UPROPERTY / UFUNCTION
+- Components: `VisibleAnywhere, BlueprintReadOnly, Category = "Components"` + `meta = (AllowPrivateAccess = "true")` when private.
+- Editable config: `EditAnywhere` or `EditDefaultsOnly`。Runtime-only: `VisibleInstanceOnly`。
+- ToolTip: `meta = (ToolTip = "...")` — 行注释只帮源码读者，ToolTip 帮编辑器用户。
+- `AddDynamic(...)` 绑定的函数**必须**标记 `UFUNCTION()`，即使不暴露给蓝图。
+- UMG 子控件用 `UPROPERTY(meta = (BindWidget))`；蓝图钩子用 `BlueprintImplementableEvent`。
+- 不做全局 `TObjectPtr` 迁移。跟随文件风格：本项目大多用裸指针，`TObjectPtr` 仅少数位置（如 `AArenaGenerator`）。
+
+### Naming
+| Type | Convention | Example |
+|------|-----------|---------|
+| Classes | `A`/`U` prefix, PascalCase | `AMyCharacter`, `UAttributeComponent` |
+| Enums | `E` prefix, value prefix `ECS_`/`EAS_`/`EES_` | `EActionState::EAS_Attacking` |
+| Interfaces | `I` prefix | `IHitInterface` |
+| Members | PascalCase, no `m_` prefix | `OverLapItem` |
+| Booleans | `b` prefix | `bIsSprinting` |
+| Methods | PascalCase | `GetCharacterState()` |
+
+### Comments
+- 中文注释用于 gameplay 意图。
+- 英文用于 API 文档和技术笔记。
+- `/** */` 仅用于 UFUNCTION/UPROPERTY 文档。
 
 ## User Profile & Preferences (Updated 2026-04-27)
 

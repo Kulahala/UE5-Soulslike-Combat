@@ -232,7 +232,7 @@ void AEnemy::Attack()
 
 bool AEnemy::CanAttack() const
 {
-	return EnemyState == EEnemyState::EES_Combating && !bAttackOnCooldown;
+	return EnemyState == EEnemyState::EES_Combating && !bAttackOnCooldown && IsValidCombatTarget(ChasingTarget);
 }
 
 // ==================== 蒙太奇回调 ====================
@@ -282,7 +282,7 @@ void AEnemy::OnAttackCooldownEnd()
 
 void AEnemy::CheckCombatTarget()
 {
-	if (!IsValid(ChasingTarget))
+	if (!IsValidCombatTarget(ChasingTarget))
 	{
 		ChasingTarget = nullptr;
 		if (EnemyState != EEnemyState::EES_Patrolling && EnemyState != EEnemyState::EES_Searching)
@@ -325,6 +325,7 @@ void AEnemy::SetEnemyState(EEnemyState NewState)
 
 	// --- 切换状态 ---
 	EnemyState = NewState;
+	ClearCombatRetreatSpeedEase();
 
 	// --- 进入新状态的逻辑（一次性动作） ---
 	switch (EnemyState)
@@ -384,6 +385,11 @@ void AEnemy::TargetPerceptionUpdated(AActor* Actor, FAIStimulus Stimulus)
 	{
 		return;
 	}
+	// 存活校验：死亡目标不能重新写入 ChasingTarget
+	if (!IsValidCombatTarget(Actor))
+	{
+		return;
+	}
 	// 锁定新目标
 	APawn* SeenPawn = dynamic_cast<APawn*>(Actor);
 	ChasingTarget = SeenPawn;
@@ -428,7 +434,8 @@ void AEnemy::Tick(float DeltaTime)
 	if (ChasingTarget)
 	{
 		FDebugDrawHelper::AddSphere(GetWorld(), GetActorLocation(), ChasingRadius, FColor::Yellow);
-		FDebugDrawHelper::AddSphere(GetWorld(), GetActorLocation(), CombatingRadius, FColor::Red, 16);
+		FDebugDrawHelper::AddSphere(GetWorld(), GetActorLocation(), CombatingRadius, FColor(255, 165, 0), 16);
+		FDebugDrawHelper::AddSphere(GetWorld(), GetActorLocation(), CombatAttackMaxRadius, FColor::Red, 16);
 	}
 
 	// 1. 初步判断
@@ -551,6 +558,7 @@ void AEnemy::OnCombating(float DeltaTime)
 	// 平滑面向目标
 	FRotator TargetRot = ToTarget.Rotation();
 	SetActorRotation(FMath::RInterpTo(GetActorRotation(), TargetRot, DeltaTime, CombatRotationSpeed));
+	UpdateCombatRetreatSpeedEase();
 
 	if (!bAttackOnCooldown && Dot > AttackAngleThreshold && DistanceToTarget <= CombatAttackMaxRadius)
 	{
@@ -564,7 +572,8 @@ void AEnemy::OnCombating(float DeltaTime)
 		{
 			float TargetDist = CombatAttackMaxRadius - CombatPressMargin;
 			FVector GoalLocation = ChasingTarget->GetActorLocation() - ToTarget * TargetDist;
-			GetCharacterMovement()->MaxWalkSpeed = CombatPressSpeed;
+			ClearCombatRetreatSpeedEase();
+			GetCharacterMovement()->MaxWalkSpeed = ChaseSpeed;
 			if (MoveToCombatLocation(GoalLocation))
 			{
 				LastCombatMoveDebug = TEXT("Press");
@@ -597,13 +606,15 @@ void AEnemy::UpdateCombatMovement(float DeltaTime, float DistanceToTarget, const
 	float TargetDist;
 	FVector Right = FVector::CrossProduct(FVector::UpVector, ToTarget).GetSafeNormal2D();
 	float SideDir = FMath::RandBool() ? 1.f : -1.f;
-	float MoveSpeed = CombatRepositionSpeed;
+	float MoveSpeed = PatrolSpeed;
+	bool bUseRetreatSpeedEase = false;
 
 	if (DistanceToTarget < CombatTooCloseRadius)
 	{
 		// 后撤
 		TargetDist = FMath::FRandRange(CombatPreferredMinRadius, CombatPreferredMaxRadius);
 		GoalLocation = ChasingTarget->GetActorLocation() - ToTarget * TargetDist;
+		bUseRetreatSpeedEase = true;
 		LastCombatMoveDebug = TEXT("Retreat");
 	}
 	else if (DistanceToTarget < CombatPreferredMinRadius)
@@ -613,6 +624,7 @@ void AEnemy::UpdateCombatMovement(float DeltaTime, float DistanceToTarget, const
 		FVector BackOffset = -ToTarget * TargetDist;
 		FVector SideOffset = Right * SideDir * TargetDist * 0.3f;
 		GoalLocation = ChasingTarget->GetActorLocation() + BackOffset + SideOffset;
+		bUseRetreatSpeedEase = true;
 		LastCombatMoveDebug = TEXT("BackDiag");
 	}
 	else if (DistanceToTarget <= CombatPreferredMaxRadius)
@@ -628,13 +640,18 @@ void AEnemy::UpdateCombatMovement(float DeltaTime, float DistanceToTarget, const
 		// 冷却期目标太远时只压回到距离环外侧，不直接压进攻击距离
 		TargetDist = CombatPreferredMaxRadius - CombatPressMargin;
 		GoalLocation = ChasingTarget->GetActorLocation() - ToTarget * TargetDist;
-		MoveSpeed = CombatPressSpeed;
+		MoveSpeed = ChaseSpeed;
 		LastCombatMoveDebug = TEXT("Press");
 	}
 
+	ClearCombatRetreatSpeedEase();
 	GetCharacterMovement()->MaxWalkSpeed = MoveSpeed;
 	if (MoveToCombatLocation(GoalLocation))
 	{
+		if (bUseRetreatSpeedEase)
+		{
+			StartCombatRetreatSpeedEase(GoalLocation);
+		}
 		// 成功：正常节奏间隔
 		const float Interval = FMath::FRandRange(CombatRepositionIntervalMin, CombatRepositionIntervalMax);
 		NextCombatRepositionTime = Now + Interval;
@@ -680,12 +697,42 @@ void AEnemy::ResetCombatReposition()
 {
 	bRepositionInProgress = false;
 	NextCombatRepositionTime = 0.f;
+	ClearCombatRetreatSpeedEase();
 	LastCombatMoveDebug.Empty();
+}
+
+void AEnemy::StartCombatRetreatSpeedEase(const FVector& GoalLocation)
+{
+	RetreatSpeedEaseGoalLocation = GoalLocation;
+	RetreatSpeedEaseTotalDistance = FVector::Dist2D(GetActorLocation(), GoalLocation);
+	bRetreatSpeedEaseActive = RetreatSpeedEaseTotalDistance > KINDA_SMALL_NUMBER;
+}
+
+void AEnemy::UpdateCombatRetreatSpeedEase()
+{
+	if (!bRetreatSpeedEaseActive)
+	{
+		return;
+	}
+
+	const float RemainingDistance = FVector::Dist2D(GetActorLocation(), RetreatSpeedEaseGoalLocation);
+	const float Progress = 1.f - FMath::Clamp(RemainingDistance / RetreatSpeedEaseTotalDistance, 0.f, 1.f);
+	const float SlowAlpha = FMath::Square(Progress);
+	const float MinSpeed = PatrolSpeed * CombatRetreatMinSpeedRatio;
+	GetCharacterMovement()->MaxWalkSpeed = FMath::Lerp(PatrolSpeed, MinSpeed, SlowAlpha);
+}
+
+void AEnemy::ClearCombatRetreatSpeedEase()
+{
+	bRetreatSpeedEaseActive = false;
+	RetreatSpeedEaseGoalLocation = FVector::ZeroVector;
+	RetreatSpeedEaseTotalDistance = 0.f;
 }
 
 void AEnemy::OnRepositionMoveCompleted(FAIRequestID RequestID, EPathFollowingResult::Type Result)
 {
 	bRepositionInProgress = false;
+	ClearCombatRetreatSpeedEase();
 }
 
 // ==================== 导航/工具 ====================
@@ -748,6 +795,21 @@ bool AEnemy::BInTargetRange(AActor* Target, double Range) const
 	}
 	double Distance = (Target->GetActorLocation() - GetActorLocation()).SizeSquared2D();
 	return Distance <= FMath::Square(Range);
+}
+
+bool AEnemy::IsValidCombatTarget(const AActor* Target) const
+{
+	if (!IsValid(Target))
+	{
+		return false;
+	}
+	const ABaseCharacter* Character = Cast<ABaseCharacter>(Target);
+	if (Character)
+	{
+		const UAttributeComponent* Attrs = Character->GetAttributes();
+		return Attrs && Attrs->IsAlive();
+	}
+	return true;
 }
 
 // ==================== 血条 ====================

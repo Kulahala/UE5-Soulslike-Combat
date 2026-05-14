@@ -138,6 +138,7 @@ UInterface → UBlockableInterface (weapon hit interception before final damage 
 
 - `ABaseCharacter::CalcForwardDot2D(const FVector& WorldDirection)` is the shared 2D facing helper. Callers must pass a world-space direction vector, not a target location.
 - Use it for cases like movement-vs-forward, attacker direction, or target direction. Keep `IHitInterface::GetHitDirection()` separate for signed-angle hit-react routing.
+- Locomotion BlendSpaces in this project are driven by `Direction` on X (`-180..180`) and `GroundSpeed` on Y (`0+`). Do not convert Y into signed forward/back speed for the current setup; backward samples belong at `X = ±180` with positive Y speeds, and strafe samples belong at `X = ±90`.
 
 ### Health / Regen
 
@@ -146,10 +147,28 @@ UInterface → UBlockableInterface (weapon hit interception before final damage 
 - `AMyCharacter` explicitly enables health regeneration in `BeginPlay()`; enemies should not auto-enable it.
 - Player regen currently targets **1 HP/s** through `HealthRegenRate`, driven in `TickComponent()` via `AddHealth(...)` and `OnHealthChanged`.
 
+### Stamina / Exhaustion
+
+- `UAttributeComponent::UseStamina()` intentionally allows a brief "last action" overspend by clamping to `[-Amount, MaxStamina]` before flooring back to `0`. Do not remove that transient negative window unless you also redesign exhaustion timing.
+- `OnExhausted` is broadcast once per depletion window; `bStaminaJustDepleted` is the guard that suppresses repeat broadcasts while stamina is already empty.
+- `AMyCharacter::HandleExhausted()` interrupts block, enters `EAS_Exhausted`, and starts the recover timer through `ExhaustedTime` (current default `5.f`).
+- `AMyCharacter::RecoverFromExhaustion()` first checks the state guard, then calls `ResetExhaustionFlag()` before `AddStamina(1.f)` so the player cannot get stuck in a permanently exhausted gate after an overspend.
+- Attack flow pauses stamina regen through `PauseStaminaRegen()`, and montage recovery paths resume it through `ResumeStaminaRegen()`.
+
+### Movement Speed
+
+- Player movement speed is updated continuously in `AMyCharacter::UpdateMovementSpeed()`; keep this logic on the character, not the controller.
+- Current base speeds are walk `150`, run `300`, sprint `450`. Sprint only applies while `ActionState == EAS_UnOccupied` and forward `DotProduct > 0.2`.
+- Directional scaling is intentional: forward `100%`, lateral `80%`, backward `65%`.
+- The state multiplier is chosen before directional scaling: blocking uses `EquippedShield->BlockMoveSpeedMultiplier`, arming uses `0.875f`, otherwise `1.0f`.
+- `TickSprintStamina()` only drains stamina while grounded, unblocked, actually moving, and pushing forward; it also resets the stamina regen cooldown each frame during active sprint drain.
+
 ### Enemy AI (`AEnemy`)
 
 - Controlled by `AAIController` through `SetEnemyState(EEnemyState)` — the real flow is Patrol/Search/Chase/Combat, not just chase/attack.
 - `CheckCombatTarget()` runs before per-state Tick logic: invalid target returns to patrol, targets inside `CombatingRadius` switch to `EES_Combating`, targets inside `ChasingRadius` switch to `EES_Chasing`.
+- `CheckCombatTarget()` validity is no longer just pointer validity: `IsValidCombatTarget()` treats dead `ABaseCharacter` targets as invalid, so corpse targets are cleared and the enemy returns to patrol instead of looping on attacks.
+- `TargetPerceptionUpdated()` and `CanAttack()` also gate on `IsValidCombatTarget()`, preventing sight reacquire or attack start against a dead player even if the Actor still exists.
 - `SetEnemyState(EES_Combating)` is an entry-action boundary: it calls `StopEnemyMovementIfPossible()`, disables orient-to-movement, and resets combat reposition state so old chase moves do not bleed into combat spacing.
 - `OnSearching()` stops movement, disables orient-to-movement, starts `PatrolTimer` and repeating `LookTimer`, then rotates toward `GenerateNewLookRotation()` using `PatrolRotationSpeed`.
 - `ClearPatrolTimers()` must be called when leaving patrol/search states or on death to avoid stale timers firing after state changes.
@@ -161,6 +180,8 @@ UInterface → UBlockableInterface (weapon hit interception before final damage 
   Keep this ordering intact when tuning; if `CombatPreferredMaxRadius >= CombatingRadius`, retreat/strafe targets will push the enemy out of `EES_Combating` and immediately back into `EES_Chasing`.
 - Keep `CombatPressMargin(25)` greater than `CombatRepositionAcceptanceRadius(12)`. If the margin is smaller, press movement can be considered complete while the enemy is still just outside `CombatAttackMaxRadius`, producing a stand-still-at-edge bug.
 - During cooldown, `UpdateCombatMovement()` chooses `Retreat` / `BackDiag` / `Strafe` / `Press` based on current distance. `MoveToCombatLocation()` only marks `bRepositionInProgress` on `RequestSuccessful`, retries quickly on failure, and relies on `ReceiveMoveCompleted` → `OnRepositionMoveCompleted(...)` to clear the in-progress flag.
+- Combat movement speed is intentionally tied to the existing state speeds: `Press` uses `ChaseSpeed`, while `Retreat` / `BackDiag` / `Strafe` use `PatrolSpeed` as their base. Do not reintroduce independent combat press/reposition speed knobs without a real design need.
+- `Retreat` and `BackDiag` add a speed ease on top of path following: they start at `PatrolSpeed` and slow toward `PatrolSpeed * CombatRetreatMinSpeedRatio` as they approach the goal. This only changes `CharacterMovement->MaxWalkSpeed`; navigation and obstacle handling still belong to `MoveToCombatLocation()`.
 - `MoveToCombatLocation()` intentionally uses `FAIMoveRequest` with `SetReachTestIncludesAgentRadius(false)` and `SetReachTestIncludesGoalRadius(false)`. Do not reintroduce manual `ProjectPointToNavigation(...)` here; `AAIController::MoveTo()` already performs goal projection with the AI's nav agent properties.
 - `EES_Attacking`, `EES_Stunned`, and `EES_Dead` are hard-stop states for Tick-driven AI reactions.
 
@@ -172,6 +193,11 @@ UInterface → UBlockableInterface (weapon hit interception before final damage 
 - Shared buffer interpolation math lives in `UBaseHealthBarWidget::TickBufferDelayImpl(...)`; `UPlayerHUDWidget` reuses that helper while keeping player-only `DamageFlash` / `Vignette` behavior local.
 - `UHealthBarComponent::SetHealthPercent()` delegates to the widget instance, and `UAttributeComponent::ReceiveDamage()` broadcasts `OnHealthChanged` for UI bindings.
 - Enemy health bar visibility is timer-driven by `AEnemy::ShowHealthBar()` / `HideHealthBar()`, with optional Blueprint fade-out through `UBaseHealthBarWidget::PlayFadeOutAnim()`.
+
+### Player HUD
+
+- `AMyCharacter::InitializePlayerHUD()` creates `UPlayerHUDWidget`, adds it to the viewport, and binds it to the live `UAttributeComponent`; HUD setup is not owned by the controller.
+- `UPlayerHUDWidget::BindToAttributes()` immediately pushes current health/stamina values after binding, so UI initialization does not wait for the next attribute change event.
 
 ### Player Hit Feedback
 
@@ -187,12 +213,20 @@ UInterface → UBlockableInterface (weapon hit interception before final damage 
 - Runtime debug text is gathered through `FDebugDrawHelper` and rendered by `UPlayerHUDWidget::NativePaint()`.
 - Debug text entries are frame-scoped: `Add()` resets the cache on frame change, and `GetEntries()` returns an empty array when no entries were submitted this frame.
 - `ACharacterController` owns the player input debug snapshot through held-state flags, move vector sampling, and short-lived action markers exposed by `GetDebugInputText()`.
+- `UPlayerHUDWidget::NativePaint()` must use the layer returned by `Super::NativePaint(...)` as its base. Do not draw from the incoming `LayerId` directly.
 - Console variables:
   - `test.Debug.Enable` → master text/shape toggle
   - `test.Debug.Enemy` → enemy text toggle
   - `test.Debug.Shapes` → world debug sphere toggle
 - Player debug currently includes input snapshot text, HP, stamina, action state, montage name, and movement speed.
-- Enemy debug currently includes enemy state / ground speed text, distance text, optional chase/combat radius spheres, and `CombatMove: Ready/Retreat/BackDiag/Strafe/Press/AlreadyAtGoal/MoveFail` while in `EES_Combating`.
+- Enemy debug currently includes enemy state / ground speed text, distance text, optional chase/combat/attack radius spheres, and `CombatMove: Ready/Retreat/BackDiag/Strafe/Press/AlreadyAtGoal/MoveFail` while in `EES_Combating`.
+
+### UE 5.7 Pitfalls
+
+- `GetCurrentActiveMontage()` can be `nullptr`; current debug code null-checks the pointer before reading montage/section names.
+- The current Slate geometry calls use `ToPaintGeometry(Size, FSlateLayoutTransform(...))`; do not reintroduce older deprecated signatures.
+- `UPlayerHUDWidget`'s runtime vignette is a transient texture. When rebuilding it, clear the brush resource first, destroy the old texture with `ConditionalBeginDestroy()`, then recreate it with `UTexture2D::CreateTransient(...)`.
+- `AWeapon::ResolveHit()` returning `FWeaponHitResult` is an established local pattern. Prefer a small result struct over piling on more out params when a combat helper needs to return several coupled values.
 
 ### Content Organization
 
