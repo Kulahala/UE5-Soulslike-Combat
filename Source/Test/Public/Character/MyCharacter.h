@@ -65,18 +65,21 @@ protected:
 	virtual void OnAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted) override;
 	void OnArmMontageEnded(UAnimMontage* Montage, bool bInterrupted);
 
-	UPROPERTY(EditDefaultsOnly, Category = "Montages")
-	UAnimMontage* ArmMontage; // 拔刀/收刀蒙太奇
+	// 拔刀/收刀蒙太奇
+	UPROPERTY(EditDefaultsOnly, Category = "Montages", meta = (ToolTip = "拔刀/收刀蒙太奇，含 Section：Arm, Disarm。"))
+	UAnimMontage* ArmMontage;
 
-	UPROPERTY(EditDefaultsOnly, Category = "Montages")
-	UAnimMontage* BlockMontage; // 防御蒙太奇（Section: BlockRaise, BlockIdle）
+	// 防御蒙太奇（Section: BlockRaise, BlockIdle）
+	UPROPERTY(EditDefaultsOnly, Category = "Montages", meta = (ToolTip = "防御蒙太奇，含 Section：BlockRaise, BlockIdle。"))
+	UAnimMontage* BlockMontage;
 
 	/* 动作状态 */
 	UPROPERTY(BlueprintReadOnly, Category = "State")
 	EActionState ActionState = EActionState::EAS_UnOccupied;
 
-	UPROPERTY(VisibleAnywhere,BlueprintReadWrite ,Category = "State")
-	float ExhaustedTime = 5.f; // 体力耗尽后恢复时间
+	// 体力耗尽后恢复时间
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "State", meta = (ToolTip = "体力耗尽后自动恢复的时间（秒）。"))
+	float ExhaustedTime = 5.f;
 
 private:
 	/* 提取方法 */
@@ -88,23 +91,24 @@ private:
 	float CalcBaseSpeed(float DotProduct) const;
 
 	/* 相机组件 */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true"))
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true", ToolTip = "玩家相机。"))
 	UCameraComponent* Camera;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true"))
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true", ToolTip = "玩家弹簧臂。"))
 	USpringArmComponent* SpringArm;
 
 	/* HUD */
 	// 玩家 HUD 控件类，BeginPlay 时创建并绑定到视口
-	UPROPERTY(EditDefaultsOnly, Category = "HUD")
+	UPROPERTY(EditDefaultsOnly, Category = "HUD", meta = (ToolTip = "玩家 HUD 控件类，BeginPlay 时创建并绑定到视口。"))
 	TSubclassOf<UPlayerHUDWidget> PlayerHUDClass;
 
 	UPROPERTY()
 	UPlayerHUDWidget* PlayerHUDWidget;
 
 	/* 状态 */
-	UPROPERTY(VisibleInstanceOnly, Category = "State", meta = (AllowPrivateAccess = "true"))
-	Aitem* OverLapItem; // 当前重叠的可拾取物品
+	// 当前重叠的可拾取物品
+	UPROPERTY(VisibleInstanceOnly, Category = "State", meta = (AllowPrivateAccess = "true", ToolTip = "当前重叠的可拾取物品。"))
+	Aitem* OverLapItem;
 
 	UPROPERTY(BlueprintReadOnly, Category = "State", meta = (AllowPrivateAccess = "true"))
 	bool bIsSprinting = false;
@@ -112,8 +116,9 @@ private:
 	UPROPERTY(BlueprintReadOnly, Category = "State", meta = (AllowPrivateAccess = "true"))
 	bool bIsWalking = false;
 
-	UPROPERTY(VisibleInstanceOnly, Category = "State", meta = (AllowPrivateAccess = "true"))
-	bool bIsArming = false; // 是否正在播放切刀/拔刀蒙太奇（短暂状态）
+	// 是否正在播放切刀/拔刀蒙太奇（短暂状态）
+	UPROPERTY(VisibleInstanceOnly, Category = "State", meta = (AllowPrivateAccess = "true", ToolTip = "是否正在播放拔刀/收刀蒙太奇。"))
+	bool bIsArming = false;
 
 	/* 防御 */
 	bool bIsBlocking = false;
@@ -124,7 +129,7 @@ private:
 	FTimerHandle ExhaustionTimerHandle;
 
 	// 受击相机晃动（所有受击路径触发，含格挡）
-	UPROPERTY(EditDefaultsOnly, Category = "Combat")
+	UPROPERTY(EditDefaultsOnly, Category = "Combat", meta = (ToolTip = "受击时播放的相机晃动类，含格挡也会触发。"))
 	TSubclassOf<UCameraShakeBase> HitReceivedCameraShake;
 
 	// 受击染红缩放系数（TryBlockHit 设置，SetHealthPercent 消费后归位）

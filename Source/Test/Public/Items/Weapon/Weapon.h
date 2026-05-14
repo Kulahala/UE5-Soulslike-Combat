@@ -27,7 +27,7 @@ public:
 	void ExecuteWeaponTrace(); // 执行检测：每帧调用
 
 	// 防重复受击黑名单
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat", meta = (ToolTip = "本次攻击已命中的 Actor 黑名单，防止重复受击。"))
 	TArray<AActor*> IgnoreActors;
 
 	// 命中解析结果（内部用）
@@ -43,7 +43,7 @@ public:
 protected:
 	/* 拾取 */
 	// 装备武器时播放的音效
-	UPROPERTY(EditAnywhere, Category = "Weapon Properties")
+	UPROPERTY(EditAnywhere, Category = "Weapon Properties", meta = (ToolTip = "装备武器时播放的音效。"))
 	USoundBase* EquipSound;
 
 	/* 战斗效果 */
@@ -55,24 +55,24 @@ protected:
 	void RestoreTimeDilation(AActor* Attacker, AActor* Victim);
 
 	// 命中时给攻击者本地玩家播放的相机震动
-	UPROPERTY(EditAnywhere, Category = "Combat")
+	UPROPERTY(EditAnywhere, Category = "Combat", meta = (ToolTip = "命中时给攻击者本地玩家播放的相机震动类。"))
 	TSubclassOf<class UCameraShakeBase> HitCameraShake;
 
 	// 是否开启卡肉感 (Hit Stop)
-	UPROPERTY(EditAnywhere, Category = "Combat")
+	UPROPERTY(EditAnywhere, Category = "Combat", meta = (ToolTip = "是否开启命中卡肉感（Hit Stop）。"))
 	bool bEnableHitStop = false;
 
 	// 卡肉持续时间（秒）
-	UPROPERTY(EditAnywhere, Category = "Combat", meta = (EditCondition = "bEnableHitStop"))
+	UPROPERTY(EditAnywhere, Category = "Combat", meta = (EditCondition = "bEnableHitStop", ToolTip = "卡肉持续时间（秒）。"))
 	float HitStopDuration = 0.05f;
 
 	// 卡肉时的时间流速（越接近 0 越像静止）
-	UPROPERTY(EditAnywhere, Category = "Combat", meta = (EditCondition = "bEnableHitStop"))
+	UPROPERTY(EditAnywhere, Category = "Combat", meta = (EditCondition = "bEnableHitStop", ToolTip = "卡肉时的时间流速。0=完全静止，1=无效果。"))
 	float HitStopTimeDilation = 0.05f;
 
 private:
 	/* 碰撞检测（在蓝图中调整：X轴=武器长度，Y轴=武器宽度，Z轴=武器厚度） */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Equip", meta = (AllowPrivateAccess = "true"))
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Equip", meta = (AllowPrivateAccess = "true", ToolTip = "武器碰撞检测盒体，X=长度 Y=宽度 Z=厚度。"))
 	UBoxComponent* BoxTrace;
 
 	// 用于保存上一帧的位置/旋转，防止极高速穿模（扫面检测所需）
@@ -84,11 +84,11 @@ private:
 	void DispatchHitFeedback(AActor* HitActor, const FHitResult& HitPoint, const FWeaponHitResult& Result);
 
 	// 武器基础伤害，格挡时按 BlockedDamageMultiplier 缩放
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat", meta = (AllowPrivateAccess = "true"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat", meta = (AllowPrivateAccess = "true", ToolTip = "武器基础伤害，格挡时按盾牌 BlockedDamageMultiplier 缩放。"))
 	float Damage = 10.f;
 
 	/* 装备旋转偏移：修正不同武器模型的本地朝向差异，装备后叠加到Socket旋转上 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Equip", meta = (AllowPrivateAccess = "true"))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Equip", meta = (AllowPrivateAccess = "true", ToolTip = "装备旋转偏移，修正不同武器模型的本地朝向差异。"))
 	FRotator EquipRotationOffset = FRotator::ZeroRotator;
 
 public:

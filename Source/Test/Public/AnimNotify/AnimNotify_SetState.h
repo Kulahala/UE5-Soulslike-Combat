@@ -14,7 +14,8 @@ public:
 	virtual void Notify(USkeletalMeshComponent* MeshComp, UAnimSequenceBase* Animation, const FAnimNotifyEventReference& EventReference) override;
 
 public:
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "State")
+	// 通知触发时设置的目标动作状态
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "State", meta = (ToolTip = "通知触发时设置的目标动作状态。"))
 	EActionState NewActionState = EActionState::EAS_UnOccupied; // 默认给个结束占用的状态
 };
 
@@ -28,7 +29,8 @@ public:
 	virtual void Notify(USkeletalMeshComponent* MeshComp, UAnimSequenceBase* Animation, const FAnimNotifyEventReference& EventReference) override;
 
 public:
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "State")
+	// 通知触发时设置的拔刀/收刀状态
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "State", meta = (ToolTip = "通知触发时设置的拔刀/收刀状态。"))
 	EArmWeaponState NewArmState ;
 
 };

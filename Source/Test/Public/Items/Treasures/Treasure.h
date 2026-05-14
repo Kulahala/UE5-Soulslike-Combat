@@ -28,13 +28,13 @@ protected:
 	virtual void SphereEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex) override;
 	virtual void SphereOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult) override;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Treasure Properties")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Treasure Properties", meta = (ToolTip = "宝物的金币价值。"))
 	int32 GoldValue = 10;
 
-	UPROPERTY(EditAnywhere, Category = "Sounds")
+	UPROPERTY(EditAnywhere, Category = "Sounds", meta = (ToolTip = "拾取宝物时播放的音效。"))
 	USoundBase* PickSound;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Treasure Properties")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Treasure Properties", meta = (ToolTip = "宝物显示名称。"))
 	FString TreasureName = TEXT("宝物");
 
 private:

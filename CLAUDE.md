@@ -64,6 +64,8 @@ UDataAsset → UTreasureData (static mesh, gold value, pickup sound, scale)
 - `CheckCombatTarget()` runs before per-state Tick logic: invalid targets return to `EES_Patrolling`, targets inside `CombatingRadius` switch to `EES_Combating`, and targets inside `ChasingRadius` switch to `EES_Chasing`.
 - **Patrolling / Searching**: `OnPatrolling()` moves between `PatrolTargets`; once inside `PatrolRadius`, the enemy switches to `EES_Searching`. `OnSearching()` stops movement, starts `PatrolTimer` plus repeating `LookTimer`, and rotates toward `GenerateNewLookRotation()`.
 - **Chasing / Combating**: `OnChasing()` reissues `MoveToTarget()` if path-following falls back to idle. `OnCombating()` rotates toward the target until `DotProduct > AttackAngleThreshold`, then attacks.
+- **Combat Spacing**: `OnCombating()` 三分支：攻击就绪+在范围内→Attack()；攻击就绪+超出范围→前压；攻击CD→`UpdateCombatMovement()` 拉扯位移。`UpdateCombatMovement()` 按距离分 Retreat/BackDiag/Strafe/Press 四种策略，通过 `MoveToCombatLocation()` 发起导航请求，`ReceiveMoveCompleted` 委托回调重置 `bRepositionInProgress`。`RotateAngleAxis` 实现恒定半径横移。
+- `SetEnemyState()` 使用 entry-action 模式：进入 `EES_Combating` 时 `StopMovement` + 关闭 `bOrientRotationToMovement` + 重置拉扯状态；进入 `EES_Attacking`/`EES_Stunned` 时清除 `bRepositionInProgress`。
 - `PatrolTimer` and `LookTimer` are cleared via `ClearPatrolTimers()` on state transitions and death.
 - `EES_Attacking`, `EES_Stunned`, and `EES_Dead` are hard-stop states for Tick-driven AI reactions.
 - Directional hit react: `GetHitDirection()` returns `DotProduct`-based angle, used to pick `HitReactMontage` section name (Front/Back/Left/Right).
@@ -143,6 +145,8 @@ UDataAsset → UTreasureData (static mesh, gold value, pickup sound, scale)
 - `FSlateDrawElement::MakeText` 需要 `SlateCore` 模块（Build.cs 中启用）。
 - `ToPaintGeometry` 弃用 `(offset, clippedZone)` 签名，改用 `(size, FSlateLayoutTransform(offset))`。
 - `GetCurrentActiveMontage()` 可能返回 nullptr，即使 `IsAnyMontagePlaying()` 为 true。必须单独 null 检查。
+- `FAIMoveRequest` 默认 `bReachTestIncludesAgentRadius(true)` + `bReachTestIncludesGoalRadius(true)` — 胶囊体半径（~34cm）会被加进 AcceptanceRadius，短距离移动（<50cm）会直接返回 `AlreadyAtGoal`。短距离导航必须 `SetReachTestIncludesAgentRadius(false)` + `SetReachTestIncludesGoalRadius(false)`。
+- `UFUNCTION()` 回调参数不能用 `struct`/`enum` 前向声明（UHT 解析不到）。枚举必须用 namespace 前向声明：`namespace EPathFollowingResult { enum Type : int; }`，参数写 `EPathFollowingResult::Type`。
 
 ### 程序化纹理生成（NativePaint 用）
 - `UTexture2D::CreateTransient(Size, Size, PF_R8G8B8A8)` 创建临时纹理，不需要外部 PNG。

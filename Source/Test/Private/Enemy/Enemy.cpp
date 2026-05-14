@@ -110,6 +110,10 @@ void AEnemy::BeginPlay()
 	SpawnPointInit();
 
 	EnemyController = Cast<AAIController>(GetController());
+	if (EnemyController)
+	{
+		EnemyController->ReceiveMoveCompleted.AddDynamic(this, &AEnemy::OnRepositionMoveCompleted);
+	}
 
 	WeaponInit();
 }
@@ -118,6 +122,10 @@ void AEnemy::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	// 兜底：定时器全量清理，覆盖 Die() 未执行的路径（关卡切换、编辑器 Stop 等）
 	ClearAllTimers();
+	if (EnemyController)
+	{
+		EnemyController->ReceiveMoveCompleted.RemoveDynamic(this, &AEnemy::OnRepositionMoveCompleted);
+	}
 	Super::EndPlay(EndPlayReason);
 }
 
@@ -313,7 +321,6 @@ void AEnemy::SetEnemyState(EEnemyState NewState)
 	{
 		ClearPatrolTimers();
 		bSearchingLostTarget = false;
-		GetCharacterMovement()->bOrientRotationToMovement = true;
 	}
 
 	// --- 切换状态 ---
@@ -324,6 +331,7 @@ void AEnemy::SetEnemyState(EEnemyState NewState)
 	{
 	case EEnemyState::EES_Patrolling:
 		GetCharacterMovement()->MaxWalkSpeed = PatrolSpeed;
+		GetCharacterMovement()->bOrientRotationToMovement = true;
 		MoveToTarget(PatrolTarget);
 		break;
 	case EEnemyState::EES_Searching:
@@ -331,14 +339,18 @@ void AEnemy::SetEnemyState(EEnemyState NewState)
 		break;
 	case EEnemyState::EES_Chasing:
 		GetCharacterMovement()->MaxWalkSpeed = ChaseSpeed;
+		GetCharacterMovement()->bOrientRotationToMovement = true;
 		MoveToTarget(ChasingTarget);
 		break;
 	case EEnemyState::EES_Combating:
-		// 不停止移动，让 AI 导航自然停在 CombatingRadius（AcceptanceRadius）距离
+		StopEnemyMovementIfPossible();
+		GetCharacterMovement()->bOrientRotationToMovement = false;
+		ResetCombatReposition();
 		break;
 	case EEnemyState::EES_Attacking:
 	case EEnemyState::EES_Stunned:
 		StopEnemyMovementIfPossible();
+		bRepositionInProgress = false;
 		break;
 	case EEnemyState::EES_Dead:
 		Die();
@@ -402,6 +414,14 @@ void AEnemy::Tick(float DeltaTime)
 			float Dist = FVector::Dist2D(GetActorLocation(), ChasingTarget->GetActorLocation());
 			FDebugDrawHelper::Add(FString::Printf(TEXT("Dist: %.0f / %.0f"), Dist, ChasingRadius),
 				Dist <= CombatingRadius ? FColor::Red : Dist <= ChasingRadius ? FColor::Yellow : FColor::White);
+		}
+
+		if (EnemyState == EEnemyState::EES_Combating)
+		{
+			const FString MoveState = LastCombatMoveDebug.IsEmpty()
+				? TEXT("Ready")
+				: LastCombatMoveDebug;
+			FDebugDrawHelper::Add(FString::Printf(TEXT("CombatMove: %s"), *MoveState), FColor::Cyan);
 		}
 	}
 
@@ -522,21 +542,150 @@ void AEnemy::OnChasing()
 
 void AEnemy::OnCombating(float DeltaTime)
 {
-	if (ChasingTarget)
+	if (!ChasingTarget) return;
+
+	FVector ToTarget = (ChasingTarget->GetActorLocation() - GetActorLocation()).GetSafeNormal2D();
+	float Dot = CalcForwardDot2D(ToTarget);
+	float DistanceToTarget = FVector::Dist2D(GetActorLocation(), ChasingTarget->GetActorLocation());
+
+	// 平滑面向目标
+	FRotator TargetRot = ToTarget.Rotation();
+	SetActorRotation(FMath::RInterpTo(GetActorRotation(), TargetRot, DeltaTime, CombatRotationSpeed));
+
+	if (!bAttackOnCooldown && Dot > AttackAngleThreshold && DistanceToTarget <= CombatAttackMaxRadius)
 	{
-		// 校验是否面朝目标，不够面向就先转
-		FVector ToTarget = (ChasingTarget->GetActorLocation() - GetActorLocation()).GetSafeNormal2D();
-		float Dot = CalcForwardDot2D(ToTarget);
-		if (Dot > AttackAngleThreshold)
+		// 攻击 ready 且已在攻击距离内 -> 出手
+		Attack();
+	}
+	else if (!bAttackOnCooldown && DistanceToTarget > CombatAttackMaxRadius)
+	{
+		// 攻击 ready 但还在攻击距离外 -> 前压到可出手距离
+		if (!bRepositionInProgress && GetWorld()->GetTimeSeconds() >= NextCombatRepositionTime)
 		{
-			Attack();
-		}
-		else
-		{
-			FRotator TargetRot = ToTarget.Rotation();
-			SetActorRotation(FMath::RInterpTo(GetActorRotation(), TargetRot, DeltaTime, CombatRotationSpeed));
+			float TargetDist = CombatAttackMaxRadius - CombatPressMargin;
+			FVector GoalLocation = ChasingTarget->GetActorLocation() - ToTarget * TargetDist;
+			GetCharacterMovement()->MaxWalkSpeed = CombatPressSpeed;
+			if (MoveToCombatLocation(GoalLocation))
+			{
+				LastCombatMoveDebug = TEXT("Press");
+				const float Interval = FMath::FRandRange(CombatRepositionIntervalMin, CombatRepositionIntervalMax);
+				NextCombatRepositionTime = GetWorld()->GetTimeSeconds() + Interval;
+			}
+			else
+			{
+				NextCombatRepositionTime = GetWorld()->GetTimeSeconds() + 0.15f;
+			}
 		}
 	}
+	else if (bAttackOnCooldown)
+	{
+		// 攻击 CD 中 → 根据距离拉扯
+		UpdateCombatMovement(DeltaTime, DistanceToTarget, ToTarget);
+	}
+}
+
+// ==================== 战斗拉扯 ====================
+
+void AEnemy::UpdateCombatMovement(float DeltaTime, float DistanceToTarget, const FVector& ToTarget)
+{
+	if (bRepositionInProgress) return;
+
+	const float Now = GetWorld()->GetTimeSeconds();
+	if (Now < NextCombatRepositionTime) return;
+
+	FVector GoalLocation;
+	float TargetDist;
+	FVector Right = FVector::CrossProduct(FVector::UpVector, ToTarget).GetSafeNormal2D();
+	float SideDir = FMath::RandBool() ? 1.f : -1.f;
+	float MoveSpeed = CombatRepositionSpeed;
+
+	if (DistanceToTarget < CombatTooCloseRadius)
+	{
+		// 后撤
+		TargetDist = FMath::FRandRange(CombatPreferredMinRadius, CombatPreferredMaxRadius);
+		GoalLocation = ChasingTarget->GetActorLocation() - ToTarget * TargetDist;
+		LastCombatMoveDebug = TEXT("Retreat");
+	}
+	else if (DistanceToTarget < CombatPreferredMinRadius)
+	{
+		// 斜后撤
+		TargetDist = FMath::FRandRange(CombatPreferredMinRadius, CombatPreferredMaxRadius);
+		FVector BackOffset = -ToTarget * TargetDist;
+		FVector SideOffset = Right * SideDir * TargetDist * 0.3f;
+		GoalLocation = ChasingTarget->GetActorLocation() + BackOffset + SideOffset;
+		LastCombatMoveDebug = TEXT("BackDiag");
+	}
+	else if (DistanceToTarget <= CombatPreferredMaxRadius)
+	{
+		// 侧移：围绕目标旋转固定角度，保持当前半径
+		FVector OffsetFromTarget = -ToTarget * DistanceToTarget;
+		FVector RotatedOffset = OffsetFromTarget.RotateAngleAxis(SideDir * CombatStrafeAngleDegrees, FVector::UpVector);
+		GoalLocation = ChasingTarget->GetActorLocation() + RotatedOffset;
+		LastCombatMoveDebug = TEXT("Strafe");
+	}
+	else
+	{
+		// 冷却期目标太远时只压回到距离环外侧，不直接压进攻击距离
+		TargetDist = CombatPreferredMaxRadius - CombatPressMargin;
+		GoalLocation = ChasingTarget->GetActorLocation() - ToTarget * TargetDist;
+		MoveSpeed = CombatPressSpeed;
+		LastCombatMoveDebug = TEXT("Press");
+	}
+
+	GetCharacterMovement()->MaxWalkSpeed = MoveSpeed;
+	if (MoveToCombatLocation(GoalLocation))
+	{
+		// 成功：正常节奏间隔
+		const float Interval = FMath::FRandRange(CombatRepositionIntervalMin, CombatRepositionIntervalMax);
+		NextCombatRepositionTime = Now + Interval;
+	}
+	else
+	{
+		// 失败：短间隔重试
+		NextCombatRepositionTime = Now + 0.15f;
+	}
+}
+
+bool AEnemy::MoveToCombatLocation(const FVector& Location)
+{
+	if (!EnemyController) return false;
+
+	FAIMoveRequest MoveRequest;
+	MoveRequest.SetGoalLocation(Location);
+	MoveRequest.SetAcceptanceRadius(CombatRepositionAcceptanceRadius);
+	MoveRequest.SetReachTestIncludesAgentRadius(false);
+	MoveRequest.SetReachTestIncludesGoalRadius(false);
+	MoveRequest.SetUsePathfinding(true);
+	MoveRequest.SetAllowPartialPath(true);
+	FPathFollowingRequestResult Result = EnemyController->MoveTo(MoveRequest);
+
+	if (Result.Code == EPathFollowingRequestResult::RequestSuccessful)
+	{
+		bRepositionInProgress = true;
+		return true;
+	}
+
+	if (Result.Code == EPathFollowingRequestResult::AlreadyAtGoal)
+	{
+		LastCombatMoveDebug = TEXT("AlreadyAtGoal");
+	}
+	else
+	{
+		LastCombatMoveDebug = TEXT("MoveFail");
+	}
+	return false;
+}
+
+void AEnemy::ResetCombatReposition()
+{
+	bRepositionInProgress = false;
+	NextCombatRepositionTime = 0.f;
+	LastCombatMoveDebug.Empty();
+}
+
+void AEnemy::OnRepositionMoveCompleted(FAIRequestID RequestID, EPathFollowingResult::Type Result)
+{
+	bRepositionInProgress = false;
 }
 
 // ==================== 导航/工具 ====================
@@ -566,6 +715,11 @@ void AEnemy::MoveToTarget(const AActor* Target)
 		                   : FMath::Max(15.f, PatrolRadius - 50.f);
 
 	MoveRequest.SetAcceptanceRadius(StopRadius);
+	if (Target == ChasingTarget)
+	{
+		MoveRequest.SetReachTestIncludesAgentRadius(false);
+		MoveRequest.SetReachTestIncludesGoalRadius(false);
+	}
 	MoveRequest.SetUsePathfinding(true);
 	MoveRequest.SetAllowPartialPath(true);
 	EnemyController->MoveTo(MoveRequest);

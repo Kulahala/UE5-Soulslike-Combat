@@ -8,12 +8,16 @@
 #include "Perception/AIPerceptionTypes.h"
 #include "Enemy.generated.h"
 
+namespace EPathFollowingResult
+{
+	enum Type : int;
+}
+
 class AEnemy;
 class UAIPerceptionComponent;
 class AAIController;
 class UHealthBarComponent;
 class UWidgetComponent;
-
 
 UCLASS()
 class TEST_API AEnemy : public ABaseCharacter
@@ -78,68 +82,101 @@ protected:
 	void ShowHealthBar();
 	void HideHealthBar();
 
-	UPROPERTY(EditDefaultsOnly, Category = "UI")
-	float HealthBarDisplayTime = 4.0f; // 血条显示持续时间
+	// 血条显示持续时间
+	UPROPERTY(EditDefaultsOnly, Category = "UI", meta = (ToolTip = "受击后血条显示的持续时间（秒）。"))
+	float HealthBarDisplayTime = 4.0f;
 
 private:
 	/* 组件 */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true"))
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true", ToolTip = "AI 感知组件，负责视觉/听觉检测。"))
 	UAIPerceptionComponent* AIPerceptionComp;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true"))
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true", ToolTip = "头顶血条组件。"))
 	UHealthBarComponent* HealthBarWidgetComp;
 
 	/* 状态 */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "State", meta = (AllowPrivateAccess = "true"))
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "State", meta = (AllowPrivateAccess = "true", ToolTip = "当前敌人状态。"))
 	EEnemyState EnemyState = EEnemyState::EES_UnOccupied;
 
 	/* 战斗属性 */
-	UPROPERTY(VisibleInstanceOnly)
-	AActor* ChasingTarget; // 当前追击目标
+	// 当前追击目标
+	UPROPERTY(VisibleInstanceOnly, meta = (ToolTip = "当前追击/战斗目标，由 AI 感知系统设置。"))
+	AActor* ChasingTarget;
 
-	// 感知/追击范围：玩家进入此距离 → 追击；超出 → 丢失目标回到巡逻
-	UPROPERTY(EditAnywhere, Category = "Combat")
+	// 感知/追击范围：玩家进入此距离 -> 追击；超出 -> 丢失目标回到巡逻
+	// 调参关系：必须大于 CombatingRadius。
+	UPROPERTY(EditAnywhere, Category = "Combat", meta = (ClampMin = "0.0", ToolTip = "必须大于 CombatingRadius。目标进入此距离后开始追击。"))
 	float ChasingRadius = 1000.f;
 
 	// 视野锥角（半角，总FOV = 此值 × 2）
-	UPROPERTY(EditAnywhere, Category = "Combat", meta = (ClampMin = "10", ClampMax = "180"))
+	// 视野锥角（半角，总FOV = 此值 × 2）
+	UPROPERTY(EditAnywhere, Category = "Combat", meta = (ClampMin = "10", ClampMax = "180", ToolTip = "视野锥半角。总FOV = 此值 × 2。"))
 	float VisionAngleDegrees = 75.f;
 
-	// 战斗范围：目标进入此距离 → 停止追击，开始攻击
-	// 需大于 AI 实际能靠近的最小距离（受导航网格和胶囊体碰撞影响）
-	UPROPERTY(EditAnywhere, Category = "Combat")
-	float CombatingRadius = 200.f;
+	// 战斗范围：目标进入此距离 -> 停止追击，进入战斗拉扯
+	// 调参关系：必须大于 CombatPreferredMaxRadius，建议至少多 30cm 防止后撤/侧移后立刻切回 Chasing。
+	UPROPERTY(EditAnywhere, Category = "Combat", meta = (ClampMin = "0.0", ToolTip = "必须大于 CombatPreferredMaxRadius，建议至少多 30cm 防止拉扯后立刻切回追击，且小于 ChasingRadius。"))
+	float CombatingRadius = 300.f;
 
 	// 攻击面朝阈值：DotProduct > 此值才允许攻击（0.965 ≈ ±15°）
-	UPROPERTY(EditAnywhere, Category = "Combat", meta = (ClampMin = "0.5", ClampMax = "1.0"))
+	// 攻击面朝阈值：DotProduct > 此值才允许攻击（0.965 ≈ ±15°）
+	UPROPERTY(EditAnywhere, Category = "Combat", meta = (ClampMin = "0.5", ClampMax = "1.0", ToolTip = "DotProduct > 此值才允许攻击。0.965 ≈ ±15°。"))
 	float AttackAngleThreshold = 0.965f;
 
 	// 战斗中转向目标的插值速度
-	UPROPERTY(EditAnywhere, Category = "Combat")
+	UPROPERTY(EditAnywhere, Category = "Combat", meta = (ToolTip = "战斗中转向目标的插值速度。值越大转向越快。"))
 	float CombatRotationSpeed = 6.f;
 
+	// --- 战斗拉扯参数 ---
+	// 距离关系提醒：
+	// CombatTooCloseRadius < CombatAttackMaxRadius <= CombatPreferredMinRadius <= CombatPreferredMaxRadius < CombatingRadius < ChasingRadius
+	// CombatAttackMaxRadius 控制可出手距离；CombatPreferredMin/Max 控制冷却期想保持的距离环。
+	UPROPERTY(EditAnywhere, Category = "Combat|Spacing", meta = (ClampMin = "0.0", ToolTip = "过近阈值。必须小于 CombatAttackMaxRadius。攻击CD期间，距离低于此值触发后撤。"))
+	float CombatTooCloseRadius = 90.f;
+	UPROPERTY(EditAnywhere, Category = "Combat|Spacing", meta = (ClampMin = "0.0", ToolTip = "可出手的最大距离。贴近实际武器射程即可，不要为了增大后撤距离而调高此值。"))
+	float CombatAttackMaxRadius = 170.f;
+	UPROPERTY(EditAnywhere, Category = "Combat|Spacing", meta = (ClampMin = "0.0", ToolTip = "冷却期拉扯距离环内圈。必须 >= CombatAttackMaxRadius 且 <= CombatPreferredMaxRadius。"))
+	float CombatPreferredMinRadius = 210.f;
+	UPROPERTY(EditAnywhere, Category = "Combat|Spacing", meta = (ClampMin = "0.0", ToolTip = "冷却期拉扯距离环外圈。必须 > CombatPreferredMinRadius 且 < CombatingRadius。默认250留出较大后撤空间。"))
+	float CombatPreferredMaxRadius = 250.f;
+	UPROPERTY(EditAnywhere, Category = "Combat|Spacing", meta = (ClampMin = "0.0", ClampMax = "90.0", ToolTip = "冷却期在拉扯距离环内的横移角度（绕目标旋转）。"))
+	float CombatStrafeAngleDegrees = 25.f;
+	UPROPERTY(EditAnywhere, Category = "Combat|Spacing", meta = (ClampMin = "0.0", ToolTip = "战斗位移的导航到达判定半径。保持较小值，避免短距离移动被误判为已到达。"))
+	float CombatRepositionAcceptanceRadius = 12.f;
+	UPROPERTY(EditAnywhere, Category = "Combat|Spacing", meta = (ClampMin = "0.0", ToolTip = "战斗位移请求的最短间隔（秒）。必须 <= CombatRepositionIntervalMax。"))
+	float CombatRepositionIntervalMin = 0.8f;
+	UPROPERTY(EditAnywhere, Category = "Combat|Spacing", meta = (ClampMin = "0.0", ToolTip = "战斗位移请求的最长间隔（秒）。必须 >= CombatRepositionIntervalMin。"))
+	float CombatRepositionIntervalMax = 1.4f;
+	UPROPERTY(EditAnywhere, Category = "Combat|Spacing", meta = (ClampMin = "0.0", ToolTip = "前压时从目标距离环扣减的余量。必须小于 CombatAttackMaxRadius 和 CombatPreferredMaxRadius。"))
+	float CombatPressMargin = 10.f;
+	UPROPERTY(EditAnywhere, Category = "Combat|Spacing", meta = (ClampMin = "0.0", ToolTip = "攻击CD期间后撤、斜退、横移的移动速度。"))
+	float CombatRepositionSpeed = 200.f;
+	UPROPERTY(EditAnywhere, Category = "Combat|Spacing", meta = (ClampMin = "0.0", ToolTip = "前压目标时的移动速度。建议低于 ChaseSpeed，让战斗逼近和追击有体感差异。"))
+	float CombatPressSpeed = 280.f;
+
 	// 巡逻移动速度
-	UPROPERTY(EditAnywhere, Category = "Combat")
+	UPROPERTY(EditAnywhere, Category = "Combat", meta = (ToolTip = "巡逻状态的移动速度（cm/s）。"))
 	float PatrolSpeed = 150.f;
 
 	// 追击移动速度
-	UPROPERTY(EditAnywhere, Category = "Combat")
+	UPROPERTY(EditAnywhere, Category = "Combat", meta = (ToolTip = "追击状态的移动速度（cm/s）。"))
 	float ChaseSpeed = 330.f;
 
 	// 死亡后尸体销毁时间（秒）
-	UPROPERTY(EditAnywhere, Category = "Combat")
+	UPROPERTY(EditAnywhere, Category = "Combat", meta = (ToolTip = "死亡后尸体销毁延迟（秒）。"))
 	float CorpseLifespan = 5.f;
 
 	// 攻击最小间隔（秒，从攻击开始算）
-	UPROPERTY(EditAnywhere, Category = "Combat")
+	UPROPERTY(EditAnywhere, Category = "Combat", meta = (ToolTip = "攻击冷却最短间隔（秒），从攻击开始计算。"))
 	float MinAttackInterval = 3.f;
 
 	// 攻击最大间隔（秒，从攻击开始算）
-	UPROPERTY(EditAnywhere, Category = "Combat")
+	UPROPERTY(EditAnywhere, Category = "Combat", meta = (ToolTip = "攻击冷却最长间隔（秒），从攻击开始计算。实际间隔在 Min~Max 之间随机。"))
 	float MaxAttackInterval = 5.f;
 
-	UPROPERTY(EditAnywhere, Category = "Combat")
-	TSubclassOf<AWeapon> WeaponClass; // 选择武器类，BeginPlay自动生成
+	// 选择武器类，BeginPlay自动生成
+	UPROPERTY(EditAnywhere, Category = "Combat", meta = (ToolTip = "敌人使用的武器类，BeginPlay 时自动生成并装备。"))
+	TSubclassOf<AWeapon> WeaponClass;
 
 	/* 巡逻 */
 	UPROPERTY()
@@ -148,27 +185,33 @@ private:
 	UPROPERTY()
 	AAIController* EnemyController;
 
-	UPROPERTY(EditAnywhere, Category = "Ai Navigation", meta = (AllowPrivateAccess = "true"))
-	AActor* PatrolTarget; // 当前巡逻目标点
+	// 当前巡逻目标点
+	UPROPERTY(EditAnywhere, Category = "Ai Navigation", meta = (AllowPrivateAccess = "true", ToolTip = "当前巡逻目标点，运行时自动切换。"))
+	AActor* PatrolTarget;
 
 	// 巡逻到达判定半径：进入此距离 → 视为到达巡逻点，开始等待/张望
-	UPROPERTY(EditAnywhere, Category = "Ai Navigation", meta = (AllowPrivateAccess = "true"))
+	UPROPERTY(EditAnywhere, Category = "Ai Navigation", meta = (AllowPrivateAccess = "true", ToolTip = "巡逻到达判定半径。进入此距离后切换到 Searching 状态。"))
 	float PatrolRadius = 200.f;
 
-	UPROPERTY(EditAnywhere, Category = "Ai Navigation", meta = (AllowPrivateAccess = "true"))
-	TArray<AActor*> PatrolTargets; // 巡逻点列表
+	// 巡逻点列表
+	UPROPERTY(EditAnywhere, Category = "Ai Navigation", meta = (AllowPrivateAccess = "true", ToolTip = "巡逻点列表，敌人在这些点之间循环移动。"))
+	TArray<AActor*> PatrolTargets;
 
-	UPROPERTY(EditAnywhere, Category = "Ai Navigation", meta = (AllowPrivateAccess = "true"))
-	float PatrolWaitMin = 4.f; // 到达巡逻点后最短等待时间
+	// 到达巡逻点后最短等待时间
+	UPROPERTY(EditAnywhere, Category = "Ai Navigation", meta = (AllowPrivateAccess = "true", ToolTip = "到达巡逻点后最短等待时间（秒）。"))
+	float PatrolWaitMin = 4.f;
 
-	UPROPERTY(EditAnywhere, Category = "Ai Navigation", meta = (AllowPrivateAccess = "true"))
-	float PatrolWaitMax = 6.f; // 到达巡逻点后最长等待时间
+	// 到达巡逻点后最长等待时间
+	UPROPERTY(EditAnywhere, Category = "Ai Navigation", meta = (AllowPrivateAccess = "true", ToolTip = "到达巡逻点后最长等待时间（秒）。实际等待在 Min~Max 之间随机。"))
+	float PatrolWaitMax = 6.f;
 
-	UPROPERTY(EditAnywhere, Category = "Ai Navigation", meta = (AllowPrivateAccess = "true"))
-	float PatrolRotationSpeed = 2.f; // 巡逻张望旋转速度
+	// 巡逻张望旋转速度
+	UPROPERTY(EditAnywhere, Category = "Ai Navigation", meta = (AllowPrivateAccess = "true", ToolTip = "巡逻张望时的旋转速度。值越大转向越快。"))
+	float PatrolRotationSpeed = 2.f;
 
-	UPROPERTY(EditAnywhere, Category = "Ai Navigation", meta = (AllowPrivateAccess = "true"))
-	float SingleLookTime = 1.5f; // 单次张望持续时间
+	// 单次张望持续时间
+	UPROPERTY(EditAnywhere, Category = "Ai Navigation", meta = (AllowPrivateAccess = "true", ToolTip = "单次张望持续时间（秒）。"))
+	float SingleLookTime = 1.5f;
 
 	void SearchTimerFinished(); // 巡逻张望结束回调
 	void LostTargetSearchFinished(); // 追丢搜寻结束回调
@@ -180,8 +223,19 @@ private:
 	FVector LastKnownLocation; // 玩家最后已知位置
 	bool bSearchingLostTarget = false; // 区分巡逻张望 vs 追丢搜寻
 
-	UPROPERTY(EditAnywhere, Category = "Combat", meta = (AllowPrivateAccess = "true"))
-	float SearchAcceptanceRadius = 50.f; // 追丢搜寻到达判定半径
+	// 追丢搜寻到达判定半径
+	UPROPERTY(EditAnywhere, Category = "Combat", meta = (AllowPrivateAccess = "true", ToolTip = "追丢搜寻时的导航到达判定半径（cm）。"))
+	float SearchAcceptanceRadius = 50.f;
+
+	/* 战斗拉扯 */
+	void UpdateCombatMovement(float DeltaTime, float DistanceToTarget, const FVector& ToTarget);
+	bool MoveToCombatLocation(const FVector& Location);
+	void ResetCombatReposition();
+	UFUNCTION()
+	void OnRepositionMoveCompleted(FAIRequestID RequestID, EPathFollowingResult::Type Result);
+	float NextCombatRepositionTime = 0.f;
+	bool bRepositionInProgress = false;
+	FString LastCombatMoveDebug;
 
 	/* 定时器 */
 	FTimerHandle PatrolTimer; // 巡逻等待定时器

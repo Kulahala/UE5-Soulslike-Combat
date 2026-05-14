@@ -13,8 +13,8 @@ public:
 	virtual void Notify(USkeletalMeshComponent* MeshComp, UAnimSequenceBase* Animation, const FAnimNotifyEventReference& EventReference) override;
 
 public:
-	// 允许你在动画编辑器中填入插槽名字！
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weapon")
+	// 武器挂载的骨骼插槽名
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weapon", meta = (ToolTip = "武器挂载的骨骼插槽名，在动画编辑器中设置。"))
 	FName SocketName;
 
 };

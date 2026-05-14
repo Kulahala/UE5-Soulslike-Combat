@@ -37,11 +37,11 @@ protected:
 private:
 	void TickBufferDelay(float InDeltaTime);
 	// 缓冲条追赶真实血条的速度
-	UPROPERTY(EditAnywhere, Category = "Health Bar")
+	UPROPERTY(EditAnywhere, Category = "Health Bar", meta = (ToolTip = "缓冲条追赶真实血条的插值速度。"))
 	float BufferInterpSpeed = 3.0f;
 
 	// 缓冲条开始下降前的等待时间（延迟时间）
-	UPROPERTY(EditAnywhere, Category = "Health Bar")
+	UPROPERTY(EditAnywhere, Category = "Health Bar", meta = (ToolTip = "缓冲条开始追赶前的等待时间（秒）。"))
 	float BufferDelayTime = 2.0f;
 
 	// 内部计时器，用于记录当前延迟了多久

@@ -34,7 +34,8 @@ No CI pipeline, no lint/test commands configured.
 `Test.Build.cs` — `PublicDependencyModuleNames`:
 `Core`, `CoreUObject`, `Engine`, `InputCore`, `EnhancedInput`, `AnimGraphRuntime`, `Niagara`, `GeometryCollectionEngine`, `PCG`, `UMG`, `AIModule`
 
-No `PrivateDependencyModuleNames`.
+`PrivateDependencyModuleNames`:
+`Slate`, `SlateCore`
 
 ## Truth Sources
 
@@ -149,9 +150,17 @@ UInterface → UBlockableInterface (weapon hit interception before final damage 
 
 - Controlled by `AAIController` through `SetEnemyState(EEnemyState)` — the real flow is Patrol/Search/Chase/Combat, not just chase/attack.
 - `CheckCombatTarget()` runs before per-state Tick logic: invalid target returns to patrol, targets inside `CombatingRadius` switch to `EES_Combating`, targets inside `ChasingRadius` switch to `EES_Chasing`.
+- `SetEnemyState(EES_Combating)` is an entry-action boundary: it calls `StopEnemyMovementIfPossible()`, disables orient-to-movement, and resets combat reposition state so old chase moves do not bleed into combat spacing.
 - `OnSearching()` stops movement, disables orient-to-movement, starts `PatrolTimer` and repeating `LookTimer`, then rotates toward `GenerateNewLookRotation()` using `PatrolRotationSpeed`.
 - `ClearPatrolTimers()` must be called when leaving patrol/search states or on death to avoid stale timers firing after state changes.
-- `OnChasing()` reissues `MoveToTarget()` if path-following falls back to idle; `OnCombating()` rotates toward the target until `DotProduct > AttackAngleThreshold`, then attacks.
+- `OnChasing()` reissues `MoveToTarget()` if path-following falls back to idle. For `ChasingTarget`, `MoveToTarget()` explicitly disables agent/goal radius reach tests so the enemy does not stop too far out.
+- `OnCombating()` now separates **attack distance** from **cooldown spacing**:
+  `CombatAttackMaxRadius` gates whether the enemy may start an attack, while `CombatPreferredMinRadius` / `CombatPreferredMaxRadius` define the cooldown spacing ring used for retreat, diagonal retreat, strafe, and press.
+- Current code defaults are:
+  `CombatTooCloseRadius(90) < CombatAttackMaxRadius(170) <= CombatPreferredMinRadius(210) <= CombatPreferredMaxRadius(250) < CombatingRadius(300) < ChasingRadius(1000)`.
+  Keep this ordering intact when tuning; if `CombatPreferredMaxRadius >= CombatingRadius`, retreat/strafe targets will push the enemy out of `EES_Combating` and immediately back into `EES_Chasing`.
+- During cooldown, `UpdateCombatMovement()` chooses `Retreat` / `BackDiag` / `Strafe` / `Press` based on current distance. `MoveToCombatLocation()` only marks `bRepositionInProgress` on `RequestSuccessful`, retries quickly on failure, and relies on `ReceiveMoveCompleted` → `OnRepositionMoveCompleted(...)` to clear the in-progress flag.
+- `MoveToCombatLocation()` intentionally uses `FAIMoveRequest` with `SetReachTestIncludesAgentRadius(false)` and `SetReachTestIncludesGoalRadius(false)`. Do not reintroduce manual `ProjectPointToNavigation(...)` here; `AAIController::MoveTo()` already performs goal projection with the AI's nav agent properties.
 - `EES_Attacking`, `EES_Stunned`, and `EES_Dead` are hard-stop states for Tick-driven AI reactions.
 
 ### Health Bar Buffer System
@@ -182,7 +191,7 @@ UInterface → UBlockableInterface (weapon hit interception before final damage 
   - `test.Debug.Enemy` → enemy text toggle
   - `test.Debug.Shapes` → world debug sphere toggle
 - Player debug currently includes input snapshot text, HP, stamina, action state, montage name, and movement speed.
-- Enemy debug currently includes enemy state / ground speed text plus optional distance and chase/combat radius spheres.
+- Enemy debug currently includes enemy state / ground speed text, distance text, optional chase/combat radius spheres, and `CombatMove: Ready/Retreat/BackDiag/Strafe/Press/AlreadyAtGoal/MoveFail` while in `EES_Combating`.
 
 ### Content Organization
 

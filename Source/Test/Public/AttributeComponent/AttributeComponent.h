@@ -36,31 +36,31 @@ protected:
 	                           FActorComponentTickFunction* ThisTickFunction) override;
 
 private:
-	UPROPERTY(VisibleAnywhere, Category = "Actor Attributes", meta = (AllowPrivateAccess = "true"))
+	UPROPERTY(VisibleAnywhere, Category = "Actor Attributes", meta = (AllowPrivateAccess = "true", ToolTip = "当前金币数。"))
 	int32 Gold;
 
 	// 当前生命值
-	UPROPERTY(EditAnywhere, Category = "Actor Attributes", meta = (AllowPrivateAccess = "true"))
+	UPROPERTY(EditAnywhere, Category = "Actor Attributes", meta = (AllowPrivateAccess = "true", ToolTip = "角色当前生命值，编辑器中可调整初始值。"))
 	float CurrentHealth = 100.f;
 
 	// 最大生命值
-	UPROPERTY(EditAnywhere, Category = "Actor Attributes", meta = (AllowPrivateAccess = "true"))
+	UPROPERTY(EditAnywhere, Category = "Actor Attributes", meta = (AllowPrivateAccess = "true", ToolTip = "生命值上限。"))
 	float MaxHealth = 100.f;
 
 	// 当前体力值
-	UPROPERTY(EditAnywhere, Category = "Actor Attributes", meta = (AllowPrivateAccess = "true"))
+	UPROPERTY(EditAnywhere, Category = "Actor Attributes", meta = (AllowPrivateAccess = "true", ToolTip = "角色当前体力值，编辑器中可调整初始值。"))
 	float CurrentStamina = 100.f;
 
 	// 最大体力值
-	UPROPERTY(EditAnywhere, Category = "Actor Attributes", meta = (AllowPrivateAccess = "true"))
+	UPROPERTY(EditAnywhere, Category = "Actor Attributes", meta = (AllowPrivateAccess = "true", ToolTip = "体力值上限。"))
 	float MaxStamina = 100.f;
 
 	// 体力每秒恢复量
-	UPROPERTY(EditAnywhere, Category = "Actor Attributes", meta = (AllowPrivateAccess = "true"))
+	UPROPERTY(EditAnywhere, Category = "Actor Attributes", meta = (AllowPrivateAccess = "true", ToolTip = "体力每秒恢复量，冷却结束后生效。"))
 	float StaminaRegenRate = 10.f;
 
 	// 体力消耗后冷却时间（秒），冷却结束才开始恢复
-	UPROPERTY(EditAnywhere, Category = "Actor Attributes", meta = (AllowPrivateAccess = "true"))
+	UPROPERTY(EditAnywhere, Category = "Actor Attributes", meta = (AllowPrivateAccess = "true", ToolTip = "体力消耗后的冷却时间（秒），冷却期间不恢复体力。"))
 	float StaminaRegenDelay = 1.f;
 
 	float StaminaRegenCooldown = 0.f; // 当前剩余冷却
@@ -68,7 +68,7 @@ private:
 	bool bStaminaJustDepleted = false; // 防止重复广播耗尽
 
 	// 生命值每秒恢复量（需调用 EnableHealthRegen() 启用）
-	UPROPERTY(EditAnywhere, Category = "Actor Attributes", meta = (AllowPrivateAccess = "true"))
+	UPROPERTY(EditAnywhere, Category = "Actor Attributes", meta = (AllowPrivateAccess = "true", ToolTip = "生命值每秒恢复量，需调用 EnableHealthRegen() 启用。"))
 	float HealthRegenRate = 1.f;
 
 	bool bHealthRegenActive = false;

@@ -39,21 +39,26 @@ protected:
 	virtual void SphereOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
 
 	/* 抛物线参数 */
-	UPROPERTY(EditAnywhere, Category = "Spawning")
-	float SpawnDuration = 0.5f; // 抛物线持续时间
+	// 抛物线持续时间
+	UPROPERTY(EditAnywhere, Category = "Spawning", meta = (ToolTip = "抛物线生成动画的持续时间（秒）。"))
+	float SpawnDuration = 0.5f;
 
-	UPROPERTY(EditAnywhere, Category = "Spawning")
-	float SpawnHeight = 100.f; // 抛物线最高点相对偏移
+	// 抛物线最高点相对偏移
+	UPROPERTY(EditAnywhere, Category = "Spawning", meta = (ToolTip = "抛物线最高点相对落点的高度偏移（cm）。"))
+	float SpawnHeight = 100.f;
 
 	/* 浮动/自转参数 */
-	UPROPERTY(EditAnywhere, Category = "Movement")
-	float Amplitude = 10.f; // 浮动的高度范围
+	// 浮动的高度范围
+	UPROPERTY(EditAnywhere, Category = "Movement", meta = (ToolTip = "闲置时上下浮动的高度范围（cm）。"))
+	float Amplitude = 10.f;
 
-	UPROPERTY(EditAnywhere, Category = "Movement")
-	float TimeConstant = 4.0f; // 浮动的速度频率
+	// 浮动的速度频率
+	UPROPERTY(EditAnywhere, Category = "Movement", meta = (ToolTip = "闲置时上下浮动的频率。值越大浮动越快。"))
+	float TimeConstant = 4.0f;
 
-	UPROPERTY(EditAnywhere, Category = "Movement")
-	float RotationRate = 45.f; // 每秒绕Z轴旋转的度数
+	// 每秒绕Z轴旋转的度数
+	UPROPERTY(EditAnywhere, Category = "Movement", meta = (ToolTip = "闲置时每秒绕Z轴旋转的度数。"))
+	float RotationRate = 45.f;
 
 	/* 状态 */
 	UPROPERTY(BlueprintReadOnly, Category = "State")
@@ -61,17 +66,17 @@ protected:
 
 private:
 	/* 组件 */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true"))
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true", ToolTip = "根场景组件。"))
 	USceneComponent* Root;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true"))
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true", ToolTip = "物品静态网格体。"))
 	UStaticMeshComponent* Mesh;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true"))
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true", ToolTip = "拾取碰撞球体。"))
 	USphereComponent* Sphere;
 
 	// 用于播放微弱亮光等特效
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true"))
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true", ToolTip = "物品特效组件（微弱亮光等）。"))
 	class UNiagaraComponent* Effect;
 
 	/* 抛物线内部 */

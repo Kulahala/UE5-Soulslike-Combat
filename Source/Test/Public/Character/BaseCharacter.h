@@ -60,15 +60,15 @@ protected:
 
 	/* 蒙太奇资源 */
 	// 攻击蒙太奇（含 Section：Attack1, Attack2 等）
-	UPROPERTY(EditDefaultsOnly, Category = "Montages")
+	UPROPERTY(EditDefaultsOnly, Category = "Montages", meta = (ToolTip = "攻击蒙太奇，含 Section：Attack1, Attack2 等。"))
 	UAnimMontage* AttackMontage;
 
 	// 受击反应蒙太奇（含 Section：FromFront, FromBack, FromLeft, FromRight）
-	UPROPERTY(EditDefaultsOnly, Category = "Montages")
+	UPROPERTY(EditDefaultsOnly, Category = "Montages", meta = (ToolTip = "受击反应蒙太奇，含 Section：FromFront, FromBack, FromLeft, FromRight。"))
 	UAnimMontage* HitReactMontage;
 
 	// 死亡蒙太奇
-	UPROPERTY(EditDefaultsOnly, Category = "Montages")
+	UPROPERTY(EditDefaultsOnly, Category = "Montages", meta = (ToolTip = "死亡蒙太奇。"))
 	UAnimMontage* DeathMontage;
 
 	/* 状态 */
@@ -86,16 +86,17 @@ protected:
 	float Direction; // 移动方向（-180~180），驱动 BlendSpace
 
 	/* 组件 */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true"))
-	UAttributeComponent* Attributes; // 属性组件（血量、金币等）
+	// 属性组件（血量、体力、金币等）
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true", ToolTip = "属性组件，管理血量、体力、金币。"))
+	UAttributeComponent* Attributes;
 
 	/* 受击效果 */
 	// 普通受击音效（格挡时不播放，由 Shield::BlockSound 替代）
-	UPROPERTY(EditAnywhere, Category = "Effect")
+	UPROPERTY(EditAnywhere, Category = "Effect", meta = (ToolTip = "普通受击音效，格挡时不播放。"))
 	USoundBase* HitSound;
 
 	// 普通受击粒子（格挡时不播放，由 Shield::BlockParticle 替代）
-	UPROPERTY(EditAnywhere, Category = "Effect")
+	UPROPERTY(EditAnywhere, Category = "Effect", meta = (ToolTip = "普通受击粒子，格挡时不播放。"))
 	UParticleSystem* HitParticle;
 
 	/* 武器 */
@@ -104,11 +105,11 @@ protected:
 
 	/* 受击后退 */
 	// 受击后退基础距离（cm），实际距离 = 此值 × KnockbackScale。子类构造函数覆写：Player=10, Enemy=5
-	UPROPERTY(EditAnywhere, Category = "Combat|Knockback")
+	UPROPERTY(EditAnywhere, Category = "Combat|Knockback", meta = (ToolTip = "受击后退基础距离（cm），实际距离 = 此值 × KnockbackScale。"))
 	float BaseHitKnockbackDistance = 0.f;
 
 	// 后退完成时间（秒），quadratic ease-out 曲线
-	UPROPERTY(EditAnywhere, Category = "Combat|Knockback")
+	UPROPERTY(EditAnywhere, Category = "Combat|Knockback", meta = (ToolTip = "后退完成时间（秒），quadratic ease-out 曲线。"))
 	float HitKnockbackDuration = 0.12f;
 
 	FPendingHitContext PendingHitContext;
