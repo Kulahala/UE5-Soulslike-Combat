@@ -284,17 +284,18 @@ void AEnemy::OnAttackCooldownEnd()
 		return;
 	}
 
+	const FVector ToTarget = (ChasingTarget->GetActorLocation() - GetActorLocation()).GetSafeNormal2D();
 	const float DistanceToTarget = FVector::Dist2D(GetActorLocation(), ChasingTarget->GetActorLocation());
-	if (DistanceToTarget > CombatAttackMaxRadius)
+	const float ForwardDot = CalcForwardDot2D(ToTarget);
+	if (ShouldTriggerAttack(DistanceToTarget, ForwardDot))
 	{
-		// 超出攻击距离：立刻用动态追踪覆盖旧的冷却期静态 MoveTo
-		GetCharacterMovement()->MaxWalkSpeed = ChaseSpeed;
-		MoveToCombatTarget();
+		// 满足出手条件：停住等转身出手
+		StopEnemyMovementIfPossible();
 	}
 	else
 	{
-		// 已在攻击距离内：停住等转身出手
-		StopEnemyMovementIfPossible();
+		// 未满足出手条件：复用 attack-ready 定位钩子，让子类策略自动生效
+		HandleAttackReadyPositioning(DistanceToTarget, ToTarget);
 	}
 }
 
@@ -598,12 +599,28 @@ void AEnemy::OnCombating(float DeltaTime)
 	SetActorRotation(FMath::RInterpTo(GetActorRotation(), TargetRot, DeltaTime, CombatRotationSpeed));
 	UpdateCombatRetreatSpeedEase();
 
-	if (!bAttackOnCooldown && Dot > AttackAngleThreshold && DistanceToTarget <= CombatAttackMaxRadius)
+	if (ShouldTriggerAttack(DistanceToTarget, Dot))
 	{
-		// 攻击 ready 且已在攻击距离内 -> 出手
 		Attack();
 	}
-	else if (!bAttackOnCooldown && DistanceToTarget > CombatAttackMaxRadius)
+	else if (!bAttackOnCooldown)
+	{
+		HandleAttackReadyPositioning(DistanceToTarget, ToTarget);
+	}
+	else
+	{
+		HandleCooldownPositioning(DeltaTime, DistanceToTarget, ToTarget);
+	}
+}
+
+bool AEnemy::ShouldTriggerAttack(float DistanceToTarget, float ForwardDot) const
+{
+	return !bAttackOnCooldown && ForwardDot > AttackAngleThreshold && DistanceToTarget <= CombatAttackMaxRadius;
+}
+
+void AEnemy::HandleAttackReadyPositioning(float DistanceToTarget, const FVector& ToTarget)
+{
+	if (DistanceToTarget > CombatAttackMaxRadius)
 	{
 		// 攻击 ready 但还在攻击距离外 -> 动态追踪目标 Actor，不受 NextCombatRepositionTime 节流
 		// 仅在导航空闲时重新下发，避免每帧重规划路径
@@ -614,11 +631,16 @@ void AEnemy::OnCombating(float DeltaTime)
 			MoveToCombatTarget();
 		}
 	}
-	else if (bAttackOnCooldown)
+	else
 	{
-		// 攻击 CD 中 → 根据距离拉扯
-		UpdateCombatMovement(DeltaTime, DistanceToTarget, ToTarget);
+		// 已在攻击距离内但未转正 -> 停住等转身出手
+		StopEnemyMovementIfPossible();
 	}
+}
+
+void AEnemy::HandleCooldownPositioning(float DeltaTime, float DistanceToTarget, const FVector& ToTarget)
+{
+	UpdateCombatMovement(DeltaTime, DistanceToTarget, ToTarget);
 }
 
 // ==================== 战斗拉扯 ====================

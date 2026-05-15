@@ -93,12 +93,17 @@ UDataAsset → UTreasureData (static mesh, gold value, pickup sound, scale)
 - `CheckCombatTarget()` runs before per-state Tick logic: invalid **or dead** targets return to `EES_Patrolling`（via `IsValidCombatTarget()` helper — checks `IsValid()` + `Cast<ABaseCharacter>` + `IsAlive()`）。**战斗退出滞后**：已在战斗族状态（`EES_Combating`/`EES_Attacking`/`EES_Stunned`）时，退出半径使用 `CombatingRadius + CombatExitBuffer`（默认 350），防止边界每帧在 Chasing/Combating 间抖动；非战斗族状态仍用 `CombatingRadius`(300) 进入。
 - `IsValidCombatTarget()` is also used in `TargetPerceptionUpdated()` (prevents dead player re-acquisition) and `CanAttack()` (defense-in-depth).
 - **Patrolling / Searching**: `OnPatrolling()` moves between `PatrolTargets`; once inside `PatrolRadius`, the enemy switches to `EES_Searching`. `OnSearching()` stops movement, starts `PatrolTimer` plus repeating `LookTimer`, and rotates toward `GenerateNewLookRotation()`.
-- **Chasing / Combating**: `OnChasing()` reissues `MoveToTarget()` if path-following falls back to idle. `OnCombating()` rotates toward the target until `DotProduct > AttackAngleThreshold`, then attacks.
-- **Combat Spacing**: `OnCombating()` 三分支：攻击就绪+在范围内→Attack()；攻击就绪+超出范围→`MoveToCombatTarget()` 动态追踪（`SetGoalActor`，仅 `MoveStatus != Moving` 时下发）；攻击CD→`UpdateCombatMovement()` 拉扯位移（静态点位 + 随机间隔节流）。`UpdateCombatMovement()` 按距离分 Retreat/BackDiag/Strafe/Press 四种策略，通过 `MoveToCombatLocation()` 发起导航请求，`ReceiveMoveCompleted` 委托回调重置 `bRepositionInProgress`。`RotateAngleAxis` 实现恒定半径横移。
+- **Chasing / Combating**: `OnChasing()` is `virtual`，派生类可覆写追逐行为（如法师后撤、自爆兵冲脸）。`OnCombating()` 保留公共流程（距离/朝向计算、转身、速度缓动更新），战斗决策委托给 3 个 `protected virtual` 钩子。
+- **战斗决策钩子（Virtual Seam）**：
+  - `ShouldTriggerAttack(DistanceToTarget, ForwardDot)` — 是否满足出手条件（默认：非 CD + 朝向达标 + 在攻击距离内）
+  - `HandleAttackReadyPositioning(DistanceToTarget, ToTarget)` — 攻击就绪但未出手时的定位（默认：超出范围→`MoveToCombatTarget()` 追踪；在范围内→停住等转身）
+  - `HandleCooldownPositioning(DeltaTime, DistanceToTarget, ToTarget)` — 攻击 CD 期间的拉扯（默认：`UpdateCombatMovement()` 四策略）
+  - **所有战斗决策入口都必须走这组钩子**：`OnCombating()` Tick 和 `OnAttackCooldownEnd()` 定时器回调都统一调用，子类覆写后两条路径自动生效。
+- **Combat Spacing**: `UpdateCombatMovement()` 按距离分 Retreat/BackDiag/Strafe/Press 四种策略，通过 `MoveToCombatLocation()` 发起导航请求，`ReceiveMoveCompleted` 委托回调重置 `bRepositionInProgress`。`RotateAngleAxis` 实现恒定半径横移。
 - **Retreat Speed Ease**: Retreat/BackDiag 使用速度缓动：起始 `PatrolSpeed`(150)，quadratic ease-out 降到 `PatrolSpeed * CombatRetreatMinSpeedRatio`(82.5)。`StartCombatRetreatSpeedEase()` 在导航成功时启动，`UpdateCombatRetreatSpeedEase()` 每帧 Tick 更新，`OnRepositionMoveCompleted` 清理。Strafe 不缓动（保持 `PatrolSpeed`），Press 用 `ChaseSpeed`(330)。
 - `SetEnemyState()` 使用 entry-action 模式：进入 `EES_Combating` 时保存 `OldState`，仅在 `OldState != EES_Chasing || DistToTarget <= CombatAttackMaxRadius` 时 `StopMovement`（远距离追逐入口让 `OnCombating` 前压接管），关闭 `bOrientRotationToMovement`，重置拉扯状态；进入 `EES_Attacking`/`EES_Stunned` 时清除 `bRepositionInProgress`。
 - **参数约束**：`CombatTooCloseRadius(90) < CombatAttackMaxRadius(170) <= CombatPreferredMinRadius(210) <= CombatPreferredMaxRadius(270) < CombatingRadius(300) < ChasingRadius(1000)`。`CombatPressMargin(25)` 必须大于 `CombatRepositionAcceptanceRadius(12)`，否则前压会在攻击范围外停住。
-- **CD 结束处理**: `OnAttackCooldownEnd()` 先 `ResetCombatReposition()` 清门闩，再按状态分支：非 Combating 或目标无效→不打断导航；Combating+超出攻击距离→立刻 `MoveToCombatTarget()` 覆盖旧 MoveTo；Combating+在攻击距离内→停住等出手。
+- **CD 结束处理**: `OnAttackCooldownEnd()` 先 `ResetCombatReposition()` 清门闩，再按状态分支：非 Combating 或目标无效→不打断导航；Combating→复用战斗决策钩子：`ShouldTriggerAttack()` 为真→停住等出手，否则→`HandleAttackReadyPositioning()` 走子类定位策略。
 - `MoveToCombatLocation()` 用 `FAIMoveRequest` + `SetReachTestIncludesAgentRadius(false)` + `SetReachTestIncludesGoalRadius(false)`。不要手动 `ProjectPointToNavigation()`，`MoveTo` 已内置目标投影。`MoveToCombatTarget()` 同理，但用 `SetGoalActor(ChasingTarget)` 动态追踪。
 - `OnChasing()` 对 `ChasingTarget` 的 `MoveToTarget()` 同样禁用 agent/goal radius 紧凑测试，避免追击距离过远停下。
 - `PatrolTimer` and `LookTimer` are cleared via `ClearPatrolTimers()` on state transitions and death.

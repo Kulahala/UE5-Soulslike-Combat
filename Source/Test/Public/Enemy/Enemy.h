@@ -7,6 +7,7 @@
 #include "Character/CharacterTypes.h"
 #include "Enemy.generated.h"
 
+struct FAIStimulus;
 struct FAIRequestID;
 
 namespace EPathFollowingResult
@@ -70,8 +71,13 @@ protected:
 	void OnPatrolling(float DeltaTime); // 巡逻Tick逻辑
 	void OnSearching(float DeltaTime); // 巡逻到达点张望Tick逻辑
 	void OnLostTargetSearch(float DeltaTime); // 追丢搜寻Tick逻辑
-	void OnChasing(); // 追逐Tick逻辑
+	virtual void OnChasing(); // 追逐Tick逻辑 — 派生类可覆写（如法师后撤、自爆兵冲脸）
 	void OnCombating(float DeltaTime); // 战斗Tick逻辑
+
+	/* 战斗决策钩子 — 派生类按需覆写 */
+	virtual bool ShouldTriggerAttack(float DistanceToTarget, float ForwardDot) const;
+	virtual void HandleAttackReadyPositioning(float DistanceToTarget, const FVector& ToTarget);
+	virtual void HandleCooldownPositioning(float DeltaTime, float DistanceToTarget, const FVector& ToTarget);
 
 	/* 导航/工具 */
 	void StopEnemyMovementIfPossible(); // 收敛：AI 停止移动
