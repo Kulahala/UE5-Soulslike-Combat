@@ -119,6 +119,11 @@ private:
 	UPROPERTY(EditAnywhere, Category = "Combat", meta = (ClampMin = "0.0", ToolTip = "必须大于 CombatPreferredMaxRadius，建议至少多 30cm 防止拉扯后立刻切回追击，且小于 ChasingRadius。"))
 	float CombatingRadius = 300.f;
 
+	// 战斗退出滞后缓冲。已在战斗族状态时，目标超出 CombatingRadius + 此值才退回 Chasing。
+	// 防止 CombatingRadius 边界上状态每帧抖动。
+	UPROPERTY(EditAnywhere, Category = "Combat", meta = (ClampMin = "0.0", ToolTip = "战斗退出滞后缓冲（cm）。已在战斗族状态时，退出半径 = CombatingRadius + 此值。"))
+	float CombatExitBuffer = 50.f;
+
 	// 攻击面朝阈值：DotProduct > 此值才允许攻击（0.965 ≈ ±15°）
 	UPROPERTY(EditAnywhere, Category = "Combat", meta = (ClampMin = "0.5", ClampMax = "1.0", ToolTip = "DotProduct > 此值才允许攻击。0.965 ≈ ±15°。"))
 	float AttackAngleThreshold = 0.965f;
@@ -229,6 +234,7 @@ private:
 	/* 战斗拉扯 */
 	void UpdateCombatMovement(float DeltaTime, float DistanceToTarget, const FVector& ToTarget);
 	bool MoveToCombatLocation(const FVector& Location);
+	bool MoveToCombatTarget(); // 攻击 ready 时动态追踪目标 Actor
 	void ResetCombatReposition();
 	void StartCombatRetreatSpeedEase(const FVector& GoalLocation);
 	void UpdateCombatRetreatSpeedEase();

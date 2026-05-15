@@ -166,23 +166,25 @@ UInterface → UBlockableInterface (weapon hit interception before final damage 
 ### Enemy AI (`AEnemy`)
 
 - Controlled by `AAIController` through `SetEnemyState(EEnemyState)` — the real flow is Patrol/Search/Chase/Combat, not just chase/attack.
-- `CheckCombatTarget()` runs before per-state Tick logic: invalid target returns to patrol, targets inside `CombatingRadius` switch to `EES_Combating`, targets inside `ChasingRadius` switch to `EES_Chasing`.
+- `CheckCombatTarget()` runs before per-state Tick logic: invalid target returns to patrol, non-combat states enter `EES_Combating` inside `CombatingRadius`, and combat-family states (`EES_Combating`, `EES_Attacking`, `EES_Stunned`) use `CombatingRadius + CombatExitBuffer` as their chase fallback threshold before dropping to `EES_Chasing`.
 - `CheckCombatTarget()` validity is no longer just pointer validity: `IsValidCombatTarget()` treats dead `ABaseCharacter` targets as invalid, so corpse targets are cleared and the enemy returns to patrol instead of looping on attacks.
 - `TargetPerceptionUpdated()` and `CanAttack()` also gate on `IsValidCombatTarget()`, preventing sight reacquire or attack start against a dead player even if the Actor still exists.
-- `SetEnemyState(EES_Combating)` is an entry-action boundary: it calls `StopEnemyMovementIfPossible()`, disables orient-to-movement, and resets combat reposition state so old chase moves do not bleed into combat spacing.
+- `SetEnemyState(EES_Combating)` is an entry-action boundary: it disables orient-to-movement and resets combat reposition state. When entering from `EES_Chasing` while still outside `CombatAttackMaxRadius`, it intentionally skips `StopEnemyMovementIfPossible()` so the chase-to-combat handoff does not create a visible brake.
 - `OnSearching()` stops movement, disables orient-to-movement, starts `PatrolTimer` and repeating `LookTimer`, then rotates toward `GenerateNewLookRotation()` using `PatrolRotationSpeed`.
 - `ClearPatrolTimers()` must be called when leaving patrol/search states or on death to avoid stale timers firing after state changes.
-- `OnChasing()` reissues `MoveToTarget()` if path-following falls back to idle. For `ChasingTarget`, `MoveToTarget()` explicitly disables agent/goal radius reach tests so the enemy does not stop too far out.
-- `OnCombating()` now separates **attack distance** from **cooldown spacing**:
-  `CombatAttackMaxRadius` gates whether the enemy may start an attack, while `CombatPreferredMinRadius` / `CombatPreferredMaxRadius` define the cooldown spacing ring used for retreat, diagonal retreat, strafe, and press.
+- `OnChasing()` reissues `MoveToTarget()` if path-following falls back to idle. For `ChasingTarget`, `MoveToTarget()` explicitly disables agent/goal radius reach tests and stops at `CombatAttackMaxRadius - CombatPressMargin`, so chase handoff reaches attack-ready range instead of parking at the combat boundary.
+- `OnCombating()` now separates **attack-ready gap close** from **cooldown spacing**:
+  `CombatAttackMaxRadius` gates whether the enemy may start an attack, attack-ready gap close uses `MoveToCombatTarget()` to dynamically track `ChasingTarget` without `NextCombatRepositionTime` throttling, and cooldown-only spacing uses `CombatPreferredMinRadius` / `CombatPreferredMaxRadius` through `UpdateCombatMovement()` and `MoveToCombatLocation()`.
 - Current code defaults are:
   `CombatTooCloseRadius(90) < CombatAttackMaxRadius(170) <= CombatPreferredMinRadius(210) <= CombatPreferredMaxRadius(270) < CombatingRadius(300) < ChasingRadius(1000)`.
   Keep this ordering intact when tuning; if `CombatPreferredMaxRadius >= CombatingRadius`, retreat/strafe targets will push the enemy out of `EES_Combating` and immediately back into `EES_Chasing`.
 - Keep `CombatPressMargin(25)` greater than `CombatRepositionAcceptanceRadius(12)`. If the margin is smaller, press movement can be considered complete while the enemy is still just outside `CombatAttackMaxRadius`, producing a stand-still-at-edge bug.
+- `OnAttackCooldownEnd()` must clear combat reposition state via `ResetCombatReposition()`. If the enemy is still in `EES_Combating` and outside `CombatAttackMaxRadius`, it should immediately restart `MoveToCombatTarget()`; if already in attack range it may stop in place to turn and swing. Do not blindly stop navigation outside combat, because the cooldown timer can fire after the state already changed.
 - During cooldown, `UpdateCombatMovement()` chooses `Retreat` / `BackDiag` / `Strafe` / `Press` based on current distance. `MoveToCombatLocation()` only marks `bRepositionInProgress` on `RequestSuccessful`, retries quickly on failure, and relies on `ReceiveMoveCompleted` → `OnRepositionMoveCompleted(...)` to clear the in-progress flag.
 - Combat movement speed is intentionally tied to the existing state speeds: `Press` uses `ChaseSpeed`, while `Retreat` / `BackDiag` / `Strafe` use `PatrolSpeed` as their base. Do not reintroduce independent combat press/reposition speed knobs without a real design need.
 - `Retreat` and `BackDiag` add a speed ease on top of path following: they start at `PatrolSpeed` and slow toward `PatrolSpeed * CombatRetreatMinSpeedRatio` as they approach the goal. This only changes `CharacterMovement->MaxWalkSpeed`; navigation and obstacle handling still belong to `MoveToCombatLocation()`.
 - `MoveToCombatLocation()` intentionally uses `FAIMoveRequest` with `SetReachTestIncludesAgentRadius(false)` and `SetReachTestIncludesGoalRadius(false)`. Do not reintroduce manual `ProjectPointToNavigation(...)` here; `AAIController::MoveTo()` already performs goal projection with the AI's nav agent properties.
+- `MoveToTarget()`, `MoveToLocation()`, `MoveToCombatLocation()`, and `MoveToCombatTarget()` are intentionally separate semantic wrappers. If you ever dedupe them, only extract the shared `FAIMoveRequest` boilerplate; do not collapse them into one flag-heavy helper.
 - `EES_Attacking`, `EES_Stunned`, and `EES_Dead` are hard-stop states for Tick-driven AI reactions.
 
 ### Health Bar Buffer System

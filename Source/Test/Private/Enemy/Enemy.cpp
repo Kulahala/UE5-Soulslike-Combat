@@ -276,6 +276,26 @@ void AEnemy::OnHitReactMontageEnded(UAnimMontage* Montage, bool bInterrupted)
 void AEnemy::OnAttackCooldownEnd()
 {
 	bAttackOnCooldown = false;
+	ResetCombatReposition();
+
+	// 非战斗态或目标无效时只清标志，不打断当前导航（避免打断 Chasing MoveTo）
+	if (EnemyState != EEnemyState::EES_Combating || !IsValidCombatTarget(ChasingTarget))
+	{
+		return;
+	}
+
+	const float DistanceToTarget = FVector::Dist2D(GetActorLocation(), ChasingTarget->GetActorLocation());
+	if (DistanceToTarget > CombatAttackMaxRadius)
+	{
+		// 超出攻击距离：立刻用动态追踪覆盖旧的冷却期静态 MoveTo
+		GetCharacterMovement()->MaxWalkSpeed = ChaseSpeed;
+		MoveToCombatTarget();
+	}
+	else
+	{
+		// 已在攻击距离内：停住等转身出手
+		StopEnemyMovementIfPossible();
+	}
 }
 
 // ==================== 状态机 ====================
@@ -292,7 +312,15 @@ void AEnemy::CheckCombatTarget()
 		return;
 	}
 
-	if (BInTargetRange(ChasingTarget, CombatingRadius))
+	// 战斗族状态（Combating/Attacking/Stunned）使用退出滞后半径，防止边界抖动
+	const bool bInCombatFamily = EnemyState == EEnemyState::EES_Combating
+		|| EnemyState == EEnemyState::EES_Attacking
+		|| EnemyState == EEnemyState::EES_Stunned;
+	const float CombatCheckRadius = bInCombatFamily
+		? (CombatingRadius + CombatExitBuffer)
+		: CombatingRadius;
+
+	if (BInTargetRange(ChasingTarget, CombatCheckRadius))
 	{
 		SetEnemyState(EEnemyState::EES_Combating);
 	}
@@ -324,6 +352,7 @@ void AEnemy::SetEnemyState(EEnemyState NewState)
 	}
 
 	// --- 切换状态 ---
+	EEnemyState OldState = EnemyState;
 	EnemyState = NewState;
 	ClearCombatRetreatSpeedEase();
 
@@ -344,10 +373,19 @@ void AEnemy::SetEnemyState(EEnemyState NewState)
 		MoveToTarget(ChasingTarget);
 		break;
 	case EEnemyState::EES_Combating:
-		StopEnemyMovementIfPossible();
+	{
 		GetCharacterMovement()->bOrientRotationToMovement = false;
+		// 仅在攻击距离内或非追逐入口时停导航；远距离追逐入口让 OnCombating 前压逻辑接管
+		const float DistToTarget = ChasingTarget
+			? FVector::Dist2D(GetActorLocation(), ChasingTarget->GetActorLocation())
+			: 0.f;
+		if (OldState != EEnemyState::EES_Chasing || DistToTarget <= CombatAttackMaxRadius)
+		{
+			StopEnemyMovementIfPossible();
+		}
 		ResetCombatReposition();
 		break;
+	}
 	case EEnemyState::EES_Attacking:
 	case EEnemyState::EES_Stunned:
 		StopEnemyMovementIfPossible();
@@ -567,23 +605,13 @@ void AEnemy::OnCombating(float DeltaTime)
 	}
 	else if (!bAttackOnCooldown && DistanceToTarget > CombatAttackMaxRadius)
 	{
-		// 攻击 ready 但还在攻击距离外 -> 前压到可出手距离
-		if (!bRepositionInProgress && GetWorld()->GetTimeSeconds() >= NextCombatRepositionTime)
+		// 攻击 ready 但还在攻击距离外 -> 动态追踪目标 Actor，不受 NextCombatRepositionTime 节流
+		// 仅在导航空闲时重新下发，避免每帧重规划路径
+		if (EnemyController && EnemyController->GetMoveStatus() != EPathFollowingStatus::Moving)
 		{
-			float TargetDist = CombatAttackMaxRadius - CombatPressMargin;
-			FVector GoalLocation = ChasingTarget->GetActorLocation() - ToTarget * TargetDist;
 			ClearCombatRetreatSpeedEase();
 			GetCharacterMovement()->MaxWalkSpeed = ChaseSpeed;
-			if (MoveToCombatLocation(GoalLocation))
-			{
-				LastCombatMoveDebug = TEXT("Press");
-				const float Interval = FMath::FRandRange(CombatRepositionIntervalMin, CombatRepositionIntervalMax);
-				NextCombatRepositionTime = GetWorld()->GetTimeSeconds() + Interval;
-			}
-			else
-			{
-				NextCombatRepositionTime = GetWorld()->GetTimeSeconds() + 0.15f;
-			}
+			MoveToCombatTarget();
 		}
 	}
 	else if (bAttackOnCooldown)
@@ -693,6 +721,30 @@ bool AEnemy::MoveToCombatLocation(const FVector& Location)
 	return false;
 }
 
+bool AEnemy::MoveToCombatTarget()
+{
+	if (!EnemyController || !ChasingTarget) return false;
+
+	FAIMoveRequest MoveRequest;
+	MoveRequest.SetGoalActor(ChasingTarget);
+	MoveRequest.SetAcceptanceRadius(FMath::Max(15.f, CombatAttackMaxRadius - CombatPressMargin));
+	MoveRequest.SetReachTestIncludesAgentRadius(false);
+	MoveRequest.SetReachTestIncludesGoalRadius(false);
+	MoveRequest.SetUsePathfinding(true);
+	MoveRequest.SetAllowPartialPath(true);
+	FPathFollowingRequestResult Result = EnemyController->MoveTo(MoveRequest);
+
+	if (Result.Code == EPathFollowingRequestResult::RequestSuccessful
+		|| Result.Code == EPathFollowingRequestResult::AlreadyAtGoal)
+	{
+		LastCombatMoveDebug = TEXT("AttackPress");
+		return true;
+	}
+
+	LastCombatMoveDebug = TEXT("MoveFail");
+	return false;
+}
+
 void AEnemy::ResetCombatReposition()
 {
 	bRepositionInProgress = false;
@@ -755,10 +807,10 @@ void AEnemy::MoveToTarget(const AActor* Target)
 	FAIMoveRequest MoveRequest;
 	MoveRequest.SetGoalActor(Target);
 
-	// 追击：减去目标胶囊体半径 + 精度余量，让中心距 ≈ CombatingRadius
+	// 追击：中心距到达 CombatAttackMaxRadius - CombatPressMargin 时停下，与前压目标距离对齐
 	// 巡逻：保持原逻辑
 	float StopRadius = (Target == ChasingTarget)
-		                   ? FMath::Max(15.f, CombatingRadius - Target->GetSimpleCollisionRadius() - 10.f)
+		                   ? FMath::Max(15.f, CombatAttackMaxRadius - CombatPressMargin)
 		                   : FMath::Max(15.f, PatrolRadius - 50.f);
 
 	MoveRequest.SetAcceptanceRadius(StopRadius);
