@@ -22,7 +22,7 @@ The project follows a decoupled, component-based architecture to ensure scalabil
    - **Interface-Driven Interaction**: Uses `IHitInterface` to handle combat interactions across different actor types.
    - **Enemy AI**: Full `EEnemyState` FSM with perception, facing verification before attack, attack cooldown system, and 2D BlendSpace-driven locomotion. During attack cooldown, enemies actively manage spacing — retreating when too close, strafing laterally within the preferred ring, and pressing forward when at the edge. Attack-ready pursuit uses dynamic `SetGoalActor` tracking to continuously follow the moving player, while cooldown spacing uses static point MoveTo with randomized intervals. See [State Machine Flow](#state-machine-flow) below.
    - **Combat Distance System**: Enemy behavior is controlled by layered combat radii. Current default relationship is `CombatTooCloseRadius(90) < CombatAttackMaxRadius(170) <= CombatPreferredMinRadius(210) <= CombatPreferredMaxRadius(270) < CombatingRadius(300) < ChasingRadius(1000)`. `CombatAttackMaxRadius` is the real attack-start distance; `CombatPreferredMinRadius` / `CombatPreferredMaxRadius` define the cooldown spacing ring. Keep `CombatPreferredMaxRadius` below `CombatingRadius` so retreat/strafe targets do not immediately push the enemy back into `EES_Chasing`. Keep `CombatPressMargin(25)` greater than `CombatRepositionAcceptanceRadius(12)` so press movement cannot stop just outside attack range. Combat state exit uses hysteresis (`CombatingRadius + CombatExitBuffer`) to prevent boundary oscillation between Chasing and Combating.
-   - **Lock-On System**: Middle-mouse lock-on built on Enhanced Input (`IA_LockOn` + `IMC_CharacterInput`). Target selection filters living `AEnemy` actors by radius and camera-facing angle, then prefers the candidate closest to view center. While locked, look input is suppressed, the character keeps facing the target, enemy health bars stay visible, and the camera shifts into an over-the-shoulder view through `SpringArm->SocketOffset` interpolation.
+   - **Lock-On System**: Middle-mouse lock-on built on Enhanced Input (`IA_LockOn` + `IMC_CharacterInput`). Target selection filters living `AEnemy` actors by radius and camera-facing angle, then prefers the candidate closest to view center. While locked, look input is suppressed, enemy health bars stay visible, and the camera shifts into an over-the-shoulder view through `SpringArm->SocketOffset` interpolation. Normal lock-on movement keeps the character facing the target; holding Sprint with movement input enters a temporary free-run mode where the target and camera stay locked, but the character body faces the movement direction.
    - **Shield Blocking System**: Hold-to-block defense via `IBlockableInterface`. DotProduct angle check (default ±60°) determines if an incoming attack is within block arc. Successful block reduces damage by configurable percentage (default 80% via `BlockedDamageMultiplier`), costs stamina, and skips hit-react. Supports auto-resume after interruption, air-block prevention, and exhaustion-forced unblock.
    - **Hit Feedback System**: Two-layer victim-side feedback: (1) Screen edge red vignette flash — programmatic 256x256 texture generated via edge-distance formula with smoothstep, intensity scales with damage reduction rate (full flash on unblocked, scaled on partial block, none on 100% block). Fade-in + exponential decay curve for natural feel. (2) Camera shake on hit-react path via `ClientStartCameraShake`.
    - **Hit Knockback System**: Tick-driven displacement on hit, distance scaled by damage reduction rate (Player=10cm, Enemy=5cm). Uses `PendingHitContext` written by weapon hit chain to decouple knockback from stun/block state. Quadratic ease-out curve for natural deceleration. `AddActorWorldOffset` with sweep prevents wall penetration; actual displacement tracked to handle partial blocks. Same-team hits trigger knockback but no damage.
@@ -30,7 +30,7 @@ The project follows a decoupled, component-based architecture to ensure scalabil
 ### 🧠 Key Technical & Algorithmic Highlights
 
 - **Precise Collision Sweeping**: Implements **Box Trace Sweep** between `OldCenter` and `CurrentCenter` to prevent "ghost swings" at high speeds.
-- **Directional Locomotion**: Uses `DotProduct(Velocity, ActorForward)` to scale speed: Forward (1.0x), Strafe (0.8x), Backwards (0.65x).
+- **Directional Locomotion**: Free movement uses the base walk/run/sprint speeds directly. Ordinary lock-on combat steps use `DotProduct(Velocity, ActorForward)` to interpolate from forward speed through configurable strafe/back multipliers (`LockOnStrafeSpeedMultiplier`, `LockOnBackSpeedMultiplier`). Lock-on Sprint free-run bypasses that combat-step slowdown so any movement direction can sprint while the camera remains locked to the enemy.
 - **Health Buffer Visuals**: Implements a delayed buffer bar effect for better visual clarity on damage received.
 - **Lock-On Camera Framing**: Uses `SpringArm->SocketOffset` interpolation to shift the camera into a right-shoulder view while preserving the existing controller-driven yaw lock. Non-lock camera offset is cached from the live SpringArm value at `BeginPlay()`, so Blueprint overrides remain the source of truth.
 - **Enemy Attack Pipeline**: Combat state facing verification (DotProduct ±15°) before attack, with full movement lock during attack montage.
@@ -59,7 +59,7 @@ The project follows a decoupled, component-based architecture to ensure scalabil
    - **接口驱动交互**：利用 `IHitInterface` 统一处理不同类型 Actor（敌人、可破坏物）的受击效果、粒子与音效。
    - **敌人 AI**：基于 `EEnemyState` 状态机，支持完整的战斗流程：感知追击 → 面朝校验 → 攻击 → 冷却等待 → 硬直恢复。巡逻阶段使用平滑旋转张望，追击阶段使用 2D BlendSpace（Speed × Direction）驱动移动动画。攻击冷却从攻击开始计算，让追击时间重叠冷却，体感更紧凑。冷却期间敌人主动管理距离——过近时后撤，合适距离时侧移绕位，边缘时前压逼近。攻击就绪时改用动态 `SetGoalActor` 追踪持续逼近移动中的玩家，冷却期拉扯则使用静态点位 MoveTo + 随机间隔节流。
    - **战斗距离系统**：敌人战斗距离由多层半径控制。当前默认关系是 `CombatTooCloseRadius(90) < CombatAttackMaxRadius(170) <= CombatPreferredMinRadius(210) <= CombatPreferredMaxRadius(270) < CombatingRadius(300) < ChasingRadius(1000)`。`CombatAttackMaxRadius` 是真正允许出手的距离；`CombatPreferredMinRadius` / `CombatPreferredMaxRadius` 是攻击冷却期想保持的距离环。`CombatPreferredMaxRadius` 必须小于 `CombatingRadius`，否则敌人后撤或侧移到目标距离后会立刻离开 `EES_Combating`，切回 `EES_Chasing`。`CombatPressMargin(25)` 必须大于 `CombatRepositionAcceptanceRadius(12)`，否则前压可能停在攻击范围边缘外。战斗状态退出使用滞后半径（`CombatingRadius + CombatExitBuffer`）防止 Chasing/Combating 边界抖动。
-   - **锁定系统**：基于增强输入的中键锁定（`IA_LockOn` + `IMC_CharacterInput`）。目标搜索会按半径、相机前方夹角过滤存活的 `AEnemy`，再优先选择更靠近视野中心的目标。锁定期间会屏蔽自由视角输入、让角色持续朝向目标、保持敌人血条显示，并通过 `SpringArm->SocketOffset` 插值切到越肩视角。
+   - **锁定系统**：基于增强输入的中键锁定（`IA_LockOn` + `IMC_CharacterInput`）。目标搜索会按半径、相机前方夹角过滤存活的 `AEnemy`，再优先选择更靠近视野中心的目标。锁定期间会屏蔽自由视角输入、保持敌人血条显示，并通过 `SpringArm->SocketOffset` 插值切到越肩视角。普通锁定移动让角色朝向目标；按住 Sprint 并有移动输入时进入临时 free-run，目标和相机仍锁敌，但角色身体朝移动方向奔跑。
    - **盾牌防御系统**：基于 `IBlockableInterface` 的格挡判定，按住按键举盾，通过 DotProduct 角度检测判断攻击是否在格挡范围内（默认 ±60°），成功格挡按可配置比例减伤（默认 80%，`BlockedDamageMultiplier`）并消耗体力，跳过受击硬直。支持中断自动恢复、空中禁止防御、体力耗尽强制解除等边界处理。
    - **受击视觉反馈系统**：双层受击方反馈——(1) 屏幕边缘红晕闪烁，程序化生成 256×256 边缘距离渐变纹理（smoothstep），强度按减伤率缩放（未格挡=满闪，部分格挡=缩放，100%格挡=不闪），渐入 + 指数衰减曲线模拟自然冲击余韵；(2) 受击相机晃动，仅在 `GetHit` 受击反应路径触发，致死一击也有反馈。
    - **受击后退系统**：Tick 驱动位移，距离按减伤率缩放（玩家=10cm，敌人=5cm）。通过 `PendingHitContext` 模式将后退与硬直/格挡状态解耦——武器命中链写入上下文，`GetHit` 统一消费。Quadratic ease-out 曲线（`1 - (1-α)²`）实现先快后慢的自然减速。`AddActorWorldOffset` 带 sweep 防穿墙，撞墙时按实际位移累计保留剩余距离。同阵营命中触发后退但不扣血。
@@ -146,11 +146,11 @@ stateDiagram-v2
   为了防止在低帧率或高速挥剑时武器穿模而不产生判定，系统实现了**盒体扫掠检测**。通过计算刀刃在相邻两帧之间的中心位移路径，进行 `BoxTraceSingle` 判定，确保 100% 的命中可靠性。
 
 - **方向敏感型运动算法 (Directional Locomotion)**
-  移动速度并非固定值，而是根据移动方向与角色正前方的夹角动态缩放：
-  - **算法**：`FVector::DotProduct(速度, 角色前方)`。
-  - **正向移动 (>0.8)**：全速运行 (默认 300 / 冲刺 450)。
-  - **横向平移 (-0.2 到 0.2)**：速度降至基准的 80%。
-  - **后退移动 (<-0.8)**：速度降至基准的 65%，模拟真实的负重感。
+  自由移动直接使用基础走/跑/冲刺速度；普通锁定战斗步伐才根据移动方向与角色正前方的夹角动态缩放：
+  - **算法**：`FVector::DotProduct(速度, 角色前方)`，并在前进、侧移、后退倍率之间连续插值。
+  - **普通锁定前进**：基准速度 100%。
+  - **普通锁定侧移/后退**：使用 `LockOnStrafeSpeedMultiplier` / `LockOnBackSpeedMultiplier` 调整，当前默认 0.95 / 0.9。
+  - **锁定 Sprint free-run**：目标和相机仍锁敌，但角色朝移动方向奔跑，任意方向都可进入冲刺速度并正常消耗体力。
 
 - **血条缓冲视觉逻辑 (Health Buffer)**
   UI 实现了现代动作游戏中常见的”残影血条”效果：受击时主血条立即扣除，缓冲条经过短暂延迟后通过 `FMath::FInterpTo` 平滑追随，增强了受击时的视觉冲击力。

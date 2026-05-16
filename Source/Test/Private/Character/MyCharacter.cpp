@@ -83,6 +83,7 @@ void AMyCharacter::Tick(float DeltaTime)
 	}
 	TryResumeBlock();
 	UpdateMovementSpeed();
+	ApplyLockOnRotationMode();
 	DrawDebugInfo();  // [调试] 角色状态面板，放在更新之后读取本帧最终状态
 }
 
@@ -94,6 +95,18 @@ void AMyCharacter::Attack()
 	Super::Attack();
 	if (CanAttack())
 	{
+		// 锁定 free-run 接攻击：面向奔跑方向，锁定旋转让位给根运动
+		if (ShouldUseLockOnFreeRun())
+		{
+			FVector Dir = GetLockOnFreeRunDirection();
+			if (!Dir.IsNearlyZero())
+			{
+				FaceDirection2D(Dir);
+			}
+			GetCharacterMovement()->bOrientRotationToMovement = false;
+			bUseControllerRotationYaw = false;
+		}
+
 		Attributes->UseStamina(15.f);
 		Attributes->PauseStaminaRegen();
 		ActionState = EActionState::EAS_Attacking;
@@ -358,26 +371,31 @@ void AMyCharacter::UpdateMovementSpeed()
 	Velocity.Z = 0.f;
 
 	float SpeedMultiplier = (bIsBlocking && EquippedShield) ? EquippedShield->BlockMoveSpeedMultiplier
-		: (ArmWeaponState == EArmWeaponState::AWS_Arming) ? 0.875f : 1.0f;
+		: bIsArming ? 0.875f : 1.0f;
 
 	if (!Velocity.IsNearlyZero())
 	{
 		float DotProduct = CalcForwardDot2D(Velocity);
-		float BaseSpeed = CalcBaseSpeed(DotProduct);
+		const bool bLockOnFreeRun = ShouldUseLockOnFreeRun();
+		// free-run 时传 1.f，让 CalcBaseSpeed 的冲刺判断无条件生效
+		float BaseSpeed = CalcBaseSpeed((bIsLockingOn && !bLockOnFreeRun) ? DotProduct : 1.f);
+		float DirectionMultiplier = 1.f;
 
-		// 分段移速缩放：全速(前) -> 80%(侧) -> 65%(后)
-		if (DotProduct > 0.2f)
+		// 普通锁定战斗步伐：在前/侧/后之间连续插值；free-run 时不吃降速。
+		if (bIsLockingOn && !bLockOnFreeRun)
 		{
-			GetCharacterMovement()->MaxWalkSpeed = BaseSpeed * SpeedMultiplier;
+			const float ClampedDot = FMath::Clamp(DotProduct, -1.f, 1.f);
+			if (ClampedDot >= 0.f)
+			{
+				DirectionMultiplier = FMath::Lerp(LockOnStrafeSpeedMultiplier, 1.f, ClampedDot);
+			}
+			else
+			{
+				DirectionMultiplier = FMath::Lerp(LockOnStrafeSpeedMultiplier, LockOnBackSpeedMultiplier, -ClampedDot);
+			}
 		}
-		else if (DotProduct >= -0.2f)
-		{
-			GetCharacterMovement()->MaxWalkSpeed = BaseSpeed * 0.8f * SpeedMultiplier;
-		}
-		else
-		{
-			GetCharacterMovement()->MaxWalkSpeed = BaseSpeed * 0.65f * SpeedMultiplier;
-		}
+
+		GetCharacterMovement()->MaxWalkSpeed = BaseSpeed * DirectionMultiplier * SpeedMultiplier;
 	}
 	else
 	{
@@ -396,8 +414,9 @@ void AMyCharacter::TickSprintStamina()
 		Velocity.Z = 0.f;
 		if (!Velocity.IsNearlyZero())
 		{
+			// free-run 时侧跑/后跑也扣体力，绕过 Dot > 0.2f 门槛
 			float Dot = CalcForwardDot2D(Velocity);
-			if (Dot > 0.2f)
+			if (ShouldUseLockOnFreeRun() || Dot > 0.2f)
 			{
 				float DeltaTime = GetWorld()->GetDeltaSeconds();
 				Attributes->UseStamina(12.f * DeltaTime);
@@ -442,6 +461,10 @@ void AMyCharacter::PlayBlockMontage(const FName& SectionName)
 void AMyCharacter::OnAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted)
 {
 	Super::OnAttackMontageEnded(Montage, bInterrupted);
+
+	// 旋转恢复必须在 interrupted guard 之前：free-run 攻击设了双 false，打断后必须还原
+	RestorePostAttackRotationMode();
+
 	if (bInterrupted) return;  // 更高优先级逻辑（受击/死亡）已接管状态
 
 	ActionState = EActionState::EAS_UnOccupied;
@@ -588,6 +611,66 @@ void AMyCharacter::UpdateLockOn(float DeltaTime)
 
 	// [调试]
 	FDebugDrawHelper::Add(FString::Printf(TEXT("LockOn: %s"), *LockedTarget->GetName()), FColor::Yellow);
+}
+
+bool AMyCharacter::ShouldUseLockOnFreeRun() const
+{
+	return bIsLockingOn && bIsSprinting
+		&& ActionState == EActionState::EAS_UnOccupied
+		&& !GetCharacterMovement()->IsFalling()
+		&& GetLastMovementInputVector().SizeSquared2D() > KINDA_SMALL_NUMBER;
+}
+
+FVector AMyCharacter::GetLockOnFreeRunDirection() const
+{
+	return GetLastMovementInputVector().GetSafeNormal2D();
+}
+
+void AMyCharacter::ApplyLockOnRotationMode()
+{
+	// 攻击中不覆盖旋转：普通锁定攻击保持双 true，free-run 攻击保持 Attack() 入口设的双 false
+	if (ActionState == EActionState::EAS_Attacking) return;
+
+	const bool bFreeRun = ShouldUseLockOnFreeRun();
+	if (bFreeRun)
+	{
+		GetCharacterMovement()->bOrientRotationToMovement = true;
+		bUseControllerRotationYaw = false;
+	}
+	else if (bIsLockingOn)
+	{
+		GetCharacterMovement()->bOrientRotationToMovement = false;
+		bUseControllerRotationYaw = true;
+	}
+}
+
+void AMyCharacter::RestorePostAttackRotationMode()
+{
+	if (bIsLockingOn)
+	{
+		const bool bFreeRun = ShouldUseLockOnFreeRun();
+		if (bFreeRun)
+		{
+			GetCharacterMovement()->bOrientRotationToMovement = true;
+			bUseControllerRotationYaw = false;
+		}
+		else
+		{
+			GetCharacterMovement()->bOrientRotationToMovement = false;
+			bUseControllerRotationYaw = true;
+		}
+	}
+	else
+	{
+		GetCharacterMovement()->bOrientRotationToMovement = bCachedOrientRotationToMovement;
+		bUseControllerRotationYaw = bCachedUseControllerRotationYaw;
+	}
+}
+
+void AMyCharacter::FaceDirection2D(const FVector& FacingDirection)
+{
+	const FRotator TargetRot(0.f, FacingDirection.Rotation().Yaw, 0.f);
+	SetActorRotation(TargetRot);
 }
 
 // ==================== 提取方法 ====================

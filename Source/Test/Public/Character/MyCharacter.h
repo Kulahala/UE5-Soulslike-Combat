@@ -95,6 +95,11 @@ private:
 	bool ShouldInterruptBlock() const;
 	void TickSprintStamina();
 	float CalcBaseSpeed(float DotProduct) const;
+	bool ShouldUseLockOnFreeRun() const;
+	FVector GetLockOnFreeRunDirection() const;
+	void ApplyLockOnRotationMode();
+	void RestorePostAttackRotationMode();
+	void FaceDirection2D(const FVector& FacingDirection);
 
 	/* 相机组件 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true", ToolTip = "玩家相机。"))
@@ -165,6 +170,12 @@ private:
 
 	UPROPERTY(EditDefaultsOnly, Category = "LockOn", meta = (ToolTip = "自动解锁距离（cm）。目标超出此距离自动解锁，带滞后防抖动。"))
 	float LockOnBreakRadius = 2000.f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "LockOn|Movement", meta = (ClampMin = "0.0", ToolTip = "锁定时侧移速度倍率。1.0 表示不低于基础移动速度。"))
+	float LockOnStrafeSpeedMultiplier = 0.95f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "LockOn|Movement", meta = (ClampMin = "0.0", ToolTip = "锁定时后撤速度倍率。1.0 表示不低于基础移动速度。"))
+	float LockOnBackSpeedMultiplier = 0.9f;
 
 	// 锁定越肩相机
 	UPROPERTY(EditDefaultsOnly, Category = "LockOnCamera", meta = (ToolTip = "锁定时 SpringArm 右肩偏移（Y=右, Z=上）。"))

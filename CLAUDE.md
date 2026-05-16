@@ -128,6 +128,8 @@ UDataAsset → UTreasureData (static mesh, gold value, pickup sound, scale)
 - **敌人血条联动**：`SetTargetedByPlayer(true)` → 显示血条 + 清隐藏计时器 + `CancelFadeOutAnim()`；`SetTargetedByPlayer(false)` → 重启隐藏计时器。
 - **Tick 执行顺序**：`SocketOffset 插值 → UpdateLockOn → [Stunning/Dead 早退] → 格挡/移速/Debug`。`UpdateLockOn` 和 SocketOffset 插值在状态早退之前，确保硬直/死亡时仍能清理目标和回正相机。
 - **Tick 旋转应用**：`FindLookAtRotation(PlayerLoc, TargetLoc)` → `LookAt.Pitch = 0.f`（只锁 yaw）→ `RInterpTo` → `SetControlRotation`。内部有死亡/硬直 guard 不应用转向但仍然清理。
+- **锁定冲刺 Free-Run**：`ShouldUseLockOnFreeRun()` 条件 = `bIsLockingOn && bIsSprinting && EAS_UnOccupied && !IsFalling && 有移动输入`。满足时角色临时恢复自由移动语义：`bOrientRotationToMovement=true`（角色朝移动方向跑），`bUseControllerRotationYaw=false`（脱离控制器朝向），但控制器/相机继续盯敌人。`UpdateMovementSpeed()` 绕过锁定方向降速，`TickSprintStamina()` 绕过 `Dot>0.2f` 门槛。松开 Sprint 立即恢复普通锁定旋转。`ApplyLockOnRotationMode()` 每帧 Tick 末尾根据条件切换旋转模式。
+- **锁定冲刺攻击**：`Attack()` 入口检测 free-run → `FaceDirection2D()` 对齐奔跑方向 → 设 `bOrientRotationToMovement=false, bUseControllerRotationYaw=false` 锁住朝向。蒙太奇结束 delegate 调 `RestorePostAttackRotationMode()` 恢复（无 `EAS_Attacking` guard，interrupted 也执行）。`ApplyLockOnRotationMode()` 保留 `EAS_Attacking` 早退防止 Tick 覆盖。`ClearLockOn()`/`Die()` 已有旋转恢复路径，无需额外清理。
 - **蓝图待办**：`CancelFadeOutAnim()` 需在血条 Widget Blueprint 中实现（停止淡出动画 + 恢复可见状态）；创建 `IA_LockOn` 输入资产绑定中键。
 
 ### Player HUD (`UPlayerHUDWidget`)

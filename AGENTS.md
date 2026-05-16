@@ -142,6 +142,10 @@ UInterface → UBlockableInterface (weapon hit interception before final damage 
 - `UpdateLockOn()` is intentionally split: target validity / range cleanup always runs, while camera-facing rotation is skipped during `EAS_Stunning` and `EAC_Dead`.
 - `ClearLockOn()` must be able to clear state after invalid / pending-kill targets; keep the target cleanup path guarded by `IsValid(LockedTarget)` and keep the local state recovery unconditional.
 - Lock-on camera framing currently stays on **yaw-only** control rotation. If future work wants target-height framing to matter, that requires changing the camera-aim math; adding a height offset alone is a no-op while `LookAt.Pitch` is cleared back to zero.
+- Lock-on Sprint free-run is a derived movement mode, **not** a separate `EActionState`. `ShouldUseLockOnFreeRun()` is based on lock-on, sprint intent, `EAS_UnOccupied`, grounded state, and live movement input.
+- During lock-on free-run, the target remains locked and the controller / camera still yaw toward the enemy, but the character body temporarily uses `bOrientRotationToMovement=true` and `bUseControllerRotationYaw=false` so movement direction drives facing.
+- Lock-on free-run attacks face the current movement input direction at attack start via `FaceDirection2D()`, then hold that attack-facing mode until the attack montage ends or is interrupted. Use `RestorePostAttackRotationMode()` for post-attack cleanup; do not let Tick-time lock-on rotation overwrite attack facing.
+- If future tuning needs better path visibility while lock-on sprinting, prefer adding a small movement-direction camera offset under `LockOnCamera`; do not clear lock-on or switch the camera fully to free-look as part of the sprint movement mode.
 
 ### Lock-On Camera
 
@@ -175,10 +179,11 @@ UInterface → UBlockableInterface (weapon hit interception before final damage 
 ### Movement Speed
 
 - Player movement speed is updated continuously in `AMyCharacter::UpdateMovementSpeed()`; keep this logic on the character, not the controller.
-- Current base speeds are walk `150`, run `300`, sprint `450`. Sprint only applies while `ActionState == EAS_UnOccupied` and forward `DotProduct > 0.2`.
-- Directional scaling is intentional: forward `100%`, lateral `80%`, backward `65%`.
-- The state multiplier is chosen before directional scaling: blocking uses `EquippedShield->BlockMoveSpeedMultiplier`, arming uses `0.875f`, otherwise `1.0f`.
-- `TickSprintStamina()` only drains stamina while grounded, unblocked, actually moving, and pushing forward; it also resets the stamina regen cooldown each frame during active sprint drain.
+- Current base speeds are walk `150`, run `300`, sprint `450`. Non-lock movement is treated as free movement and passes a forward dot into `CalcBaseSpeed()` so sprint intent can apply without fake side/back penalties.
+- Ordinary lock-on movement uses directional speed interpolation from forward `1.0` through `LockOnStrafeSpeedMultiplier` to `LockOnBackSpeedMultiplier`; current defaults are strafe `0.95` and back `0.9`.
+- Lock-on Sprint free-run bypasses lock-on directional slowdown: any movement-input direction can reach sprint speed while the locked camera remains on the enemy.
+- The state multiplier is chosen before directional scaling: blocking uses `EquippedShield->BlockMoveSpeedMultiplier`, transient `bIsArming` uses `0.875f`, otherwise `1.0f`. Being armed / holding a weapon no longer reduces normal movement speed by itself.
+- `TickSprintStamina()` drains stamina while grounded, unblocked, and moving. In ordinary lock-on combat step it still uses the forward-dot gate, while lock-on free-run bypasses that gate so side/back sprint consumes stamina.
 
 ### Enemy AI (`AEnemy`)
 
