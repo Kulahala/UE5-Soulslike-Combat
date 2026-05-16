@@ -21,6 +21,9 @@ public:
 	UFUNCTION(BlueprintImplementableEvent, Category = "UI")
 	void PlayFadeOutAnim();
 
+	UFUNCTION(BlueprintImplementableEvent, Category = "UI")
+	void CancelFadeOutAnim();
+
 	// 缓冲条追赶逻辑：掉血延迟后追赶，回血瞬间跟上（static，供外部复用）
 	static void TickBufferDelayImpl(UProgressBar* Buffer, UProgressBar* Health,
 		float& CurrentDelay, float DelayTime, float InterpSpeed, float InDeltaTime);

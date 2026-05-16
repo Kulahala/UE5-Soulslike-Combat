@@ -48,6 +48,8 @@ void ACharacterController::SetupInputComponent()
 		EnhancedInputComponent->BindAction(BlockAction, ETriggerEvent::Started, this, &ACharacterController::Input_BlockStart);
 		EnhancedInputComponent->BindAction(BlockAction, ETriggerEvent::Completed, this, &ACharacterController::Input_BlockEnd);
 		EnhancedInputComponent->BindAction(BlockAction, ETriggerEvent::Canceled, this, &ACharacterController::Input_BlockEnd);  // [调试] 防止 held 挂住
+
+		EnhancedInputComponent->BindAction(LockOnAction, ETriggerEvent::Started, this, &ACharacterController::Input_LockOn);
 	}
 }
 
@@ -82,6 +84,11 @@ void ACharacterController::Input_MoveEnd()
 
 void ACharacterController::Input_Look(const FInputActionValue& Value)
 {
+	if (AMyCharacter* MyCharacter = GetMyCharacter())
+	{
+		if (MyCharacter->IsLockingOn()) return;  // 锁定中忽略视角输入
+	}
+
 	if (APawn* ControlledPawn = GetPawn())
 	{
 		FVector2D LookAxisVector = Value.Get<FVector2D>();
@@ -191,6 +198,15 @@ void ACharacterController::Input_BlockEnd()
 	bDebugBlockHeld = false;  // [调试]
 }
 
+void ACharacterController::Input_LockOn()
+{
+	DebugLockOnExpireTime = GetWorld()->GetTimeSeconds() + 0.15f;  // [调试]
+	if (AMyCharacter* MyCharacter = GetMyCharacter())
+	{
+		MyCharacter->ToggleLockOn();
+	}
+}
+
 AMyCharacter* ACharacterController::GetMyCharacter() const
 {
 	return Cast<AMyCharacter>(GetPawn());
@@ -209,6 +225,7 @@ FString ACharacterController::GetDebugInputText() const
 	if (Now < DebugJumpExpireTime)   Result += TEXT("Jump ");
 	if (Now < DebugEquipExpireTime)  Result += TEXT("Equip ");
 	if (Now < DebugArmExpireTime)    Result += TEXT("Arm ");
+	if (Now < DebugLockOnExpireTime) Result += TEXT("LockOn ");
 
 	if (!DebugMoveInput.IsNearlyZero())
 		Result += FString::Printf(TEXT("Move(%.1f, %.1f) "), DebugMoveInput.X, DebugMoveInput.Y);

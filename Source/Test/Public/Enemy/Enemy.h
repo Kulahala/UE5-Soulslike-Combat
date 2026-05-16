@@ -54,6 +54,9 @@ public:
 	virtual void OnAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted) override;
 	virtual void OnHitReactMontageEnded(UAnimMontage* Montage, bool bInterrupted) override;
 
+	/* 锁定联动 */
+	void SetTargetedByPlayer(bool bTargeted);
+
 protected:
 	/* 攻击 */
 	virtual bool CanAttack() const override;
@@ -260,6 +263,7 @@ private:
 	FTimerHandle AttackCooldownTimer; // 攻击冷却定时器
 	FTimerHandle HealthBarHideTimer; // 血条延迟隐藏定时器
 	bool bAttackOnCooldown = false; // 攻击冷却中
+	bool bIsTargetedByPlayer = false; // 被玩家锁定中
 	void ClearPatrolTimers(); // 清理巡逻相关定时器
 	void ClearAllTimers(); // 清理所有定时器（巡逻 + 冷却 + 血条）
 };

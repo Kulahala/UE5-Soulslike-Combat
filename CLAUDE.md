@@ -46,10 +46,10 @@ AActor
 └── ABird (APawn subclass, flyable spectator)
 
 ACharacter
-├── AMyCharacter (UAttributeComponent, spring arm + camera, weapon equipping)
+├── AMyCharacter (UAttributeComponent, spring arm + camera, weapon equipping, lock-on targeting)
 └── AEnemy + IHitInterface (AI patrol/search/chase/combat state machine, directional hit react)
 
-APlayerController → ACharacterController (Enhanced Input: 9 bound actions)
+APlayerController → ACharacterController (Enhanced Input: 10 bound actions, incl. LockOn)
 UActorComponent → UAttributeComponent (health, gold, OnHealthChanged delegate)
 UWidgetComponent → UHealthBarComponent
 UUserWidget → UBaseHealthBarWidget (PB_Health + PB_Buffer progress bars, buffer delay logic)
@@ -117,6 +117,18 @@ UDataAsset → UTreasureData (static mesh, gold value, pickup sound, scale)
 - `UHealthBarComponent::SetHealthPercent()` delegates to the widget.
 - `UAttributeComponent::OnHealthChanged` broadcasts `HealthPercent` — widgets and components bind to this.
 - 敌人血条可见性由 `ShowHealthBar()`/`HideHealthBar()` 定时器驱动，可选蓝图淡出动画 `PlayFadeOutAnim()`。
+
+### Lock-On System (`AMyCharacter`)
+- **输入**：`ACharacterController::Input_LockOn()` 绑定中键 `ETriggerEvent::Started`，调用 `AMyCharacter::ToggleLockOn()`。`Input_Look()` 在 `IsLockingOn()` 时早退，忽略视角输入。
+- **目标搜索**：`FindLockOnTarget()` 用 `GetAllActorsOfClass(AEnemy::StaticClass())` 遍历，过滤 `IsAlive()` + 距离 < `LockOnRadius` + **Camera forward** 视角角度 < `LockOnViewAngleDegrees`。排序：更靠近视野中心优先，距离作 tie-breaker。
+- **状态管理**：`bIsLockingOn` 独立 bool（不从 `IsValid(LockedTarget)` 推导），`LockedTarget` 用 `UPROPERTY()` 持有。`IsLockingOn()` 内联返回 `bIsLockingOn`。
+- **旋转模式切换**：开启时缓存 `bOrientRotationToMovement` / `bUseControllerRotationYaw` / `bUsePawnControlRotation`，切换到锁定模式（`false` / `true` / `true`）。`ClearLockOn()` 恢复缓存值。
+- **越肩相机**：`LockOnSocketOffset = (0, 50, 30)` 右肩偏移。`Tick()` 中用 `FMath::VInterpTo` 双向插值——锁定中朝 `LockOnSocketOffset`，非锁定朝 `CachedSocketOffset`。`CachedSocketOffset` 仅在 `BeginPlay()` 初始化一次，不随重新锁定覆盖。
+- **自动解锁**：`UpdateLockOn()` 每帧检查目标 `!IsValid()` / `!IsAlive()` / 距离 > `LockOnBreakRadius` → `ClearLockOn()`。玩家死亡也调 `ClearLockOn()`。
+- **敌人血条联动**：`SetTargetedByPlayer(true)` → 显示血条 + 清隐藏计时器 + `CancelFadeOutAnim()`；`SetTargetedByPlayer(false)` → 重启隐藏计时器。
+- **Tick 执行顺序**：`SocketOffset 插值 → UpdateLockOn → [Stunning/Dead 早退] → 格挡/移速/Debug`。`UpdateLockOn` 和 SocketOffset 插值在状态早退之前，确保硬直/死亡时仍能清理目标和回正相机。
+- **Tick 旋转应用**：`FindLookAtRotation(PlayerLoc, TargetLoc)` → `LookAt.Pitch = 0.f`（只锁 yaw）→ `RInterpTo` → `SetControlRotation`。内部有死亡/硬直 guard 不应用转向但仍然清理。
+- **蓝图待办**：`CancelFadeOutAnim()` 需在血条 Widget Blueprint 中实现（停止淡出动画 + 恢复可见状态）；创建 `IA_LockOn` 输入资产绑定中键。
 
 ### Player HUD (`UPlayerHUDWidget`)
 - 与 `UBaseHealthBarWidget` 共享 buffer delay 逻辑（PB_Health + PB_Buffer + PB_Stamina）。

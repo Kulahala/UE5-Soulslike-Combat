@@ -913,7 +913,8 @@ void AEnemy::ShowHealthBar()
 
 void AEnemy::HideHealthBar()
 {
-	// TODO: 魂系锁定机制。等待锁定功能实现后，在这里判断 if (bIsTargetedByPlayer) return; 以保持血条显示
+	// 被玩家锁定中，保持血条显示
+	if (bIsTargetedByPlayer) return;
 
 	// 玩家还在追击范围内，不隐藏，重新计时
 	if (BInTargetRange(ChasingTarget, ChasingRadius))
@@ -943,6 +944,35 @@ void AEnemy::HideHealthBar()
 			// 如果强转失败或还没绑定蓝图，降级处理为直接隐藏
 			HealthBarWidgetComp->SetVisibility(false);
 		}
+	}
+}
+
+void AEnemy::SetTargetedByPlayer(bool bTargeted)
+{
+	bIsTargetedByPlayer = bTargeted;
+	if (bTargeted)
+	{
+		// 锁定时确保血条可见（覆盖未挨打过的敌人和正在淡出的敌人）
+		if (HealthBarWidgetComp)
+		{
+			HealthBarWidgetComp->SetVisibility(true);
+			if (UUserWidget* Widget = HealthBarWidgetComp->GetUserWidgetObject())
+			{
+				Widget->SetRenderOpacity(1.0f);
+				if (UBaseHealthBarWidget* HealthWidget = Cast<UBaseHealthBarWidget>(Widget))
+				{
+					HealthWidget->CancelFadeOutAnim();
+				}
+			}
+		}
+		GetWorldTimerManager().ClearTimer(HealthBarHideTimer);
+	}
+	else
+	{
+		// 解除锁定后重排隐藏计时器，恢复自然隐藏流程
+		GetWorldTimerManager().SetTimer(
+			HealthBarHideTimer, this, &AEnemy::HideHealthBar,
+			HealthBarDisplayTime, false);
 	}
 }
 

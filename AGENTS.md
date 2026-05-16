@@ -86,7 +86,7 @@ ACharacter
 ├── AMyCharacter + IBlockableInterface (UAttributeComponent, spring arm + camera, weapon/shield equipping, hold-to-block)
 └── AEnemy + IHitInterface (AI patrol/search/chase/combat FSM, directional hit react)
 
-APlayerController → ACharacterController (Enhanced Input, move/look/jump/equip/attack/arm/sprint/walk/block bindings, input debug snapshot owner)
+APlayerController → ACharacterController (Enhanced Input, move/look/jump/equip/attack/arm/sprint/walk/block/lock-on bindings, input debug snapshot owner)
 UActorComponent → UAttributeComponent (health, gold, OnHealthChanged delegate)
 UWidgetComponent → UHealthBarComponent
 UUserWidget → UBaseHealthBarWidget (PB_Health + PB_Buffer progress bars, delayed buffer logic)
@@ -133,6 +133,23 @@ UInterface → UBlockableInterface (weapon hit interception before final damage 
 - Blocked hits still flow through `GetHit` via `FPendingHitContext`, so scaled knockback and class-specific feedback can still happen even when normal hit react is suppressed.
 - Blocking is canceled when shield/state/falling conditions become invalid; blocked movement speed is reduced through `UpdateMovementSpeed()`.
 - When tuning block damage reduction, update both the C++ default (`AShield::BlockedDamageMultiplier`) and the actual `BP_Shield` asset if it overrides the value in Blueprint.
+
+### Lock-On System
+
+- `ACharacterController` owns the lock-on input binding through `LockOnAction` → `Input_LockOn()`; the current input assets are `Content/_GAME/BP/input/IA_LockOn.uasset`, `Content/_GAME/BP/input/IMC_CharacterInput.uasset`, and `Content/_GAME/BP/input/BP_CharacterController.uasset`.
+- `AMyCharacter` owns lock-on state through `LockedTarget` + `bIsLockingOn`; do not introduce a separate lock-on action state unless the state machine genuinely needs it.
+- `FindLockOnTarget()` currently uses `GetAllActorsOfClass(AEnemy::StaticClass())`, filters by `LockOnRadius`, `LockOnViewAngleDegrees`, and target alive state, then prefers the candidate closest to the camera forward axis.
+- `UpdateLockOn()` is intentionally split: target validity / range cleanup always runs, while camera-facing rotation is skipped during `EAS_Stunning` and `EAC_Dead`.
+- `ClearLockOn()` must be able to clear state after invalid / pending-kill targets; keep the target cleanup path guarded by `IsValid(LockedTarget)` and keep the local state recovery unconditional.
+- Lock-on camera framing currently stays on **yaw-only** control rotation. If future work wants target-height framing to matter, that requires changing the camera-aim math; adding a height offset alone is a no-op while `LookAt.Pitch` is cleared back to zero.
+
+### Lock-On Camera
+
+- The current over-shoulder lock-on camera is driven by `SpringArm->SocketOffset`, not by a separate camera actor or a second spring arm.
+- `CachedSocketOffset` is initialized once from the live `SpringArm->SocketOffset` in `BeginPlay()`. This is intentional so Blueprint overrides remain the source of truth for the non-lock camera baseline; do not overwrite that baseline every time lock-on starts.
+- `Tick()` interpolates `SpringArm->SocketOffset` in both directions: lock-on moves toward `LockOnSocketOffset`, non-lock moves back toward `CachedSocketOffset`. Keep this interpolation before the `Stunning/Dead` early-return so death and hard-stun exits still recover the camera framing.
+- Current code defaults are `LockOnSocketOffset = (0, 80, 80)` and `LockOnSocketOffsetInterpSpeed = 6.f`, but these are tuning values rather than architectural truth; feel free to retune them in Blueprint / defaults without changing the control flow.
+- The current camera still computes `LookAt` from `PlayerLoc -> TargetLoc`. That is enough for the present "cheap fix" shoulder framing, but it does **not** mathematically guarantee that the enemy stays centered after socket offset. If future tuning still leaves the target drifting too far off the main viewing area, prefer compensating the aim from the offset camera position before adding arbitrary yaw-bias magic numbers.
 
 ### Shared Direction Helper
 
@@ -196,7 +213,8 @@ UInterface → UBlockableInterface (weapon hit interception before final damage 
 - `NativeTick()` lerps `PB_Buffer` toward `PB_Health` with `BufferInterpSpeed`; healing snaps the buffer bar upward immediately instead of animating.
 - Shared buffer interpolation math lives in `UBaseHealthBarWidget::TickBufferDelayImpl(...)`; `UPlayerHUDWidget` reuses that helper while keeping player-only `DamageFlash` / `Vignette` behavior local.
 - `UHealthBarComponent::SetHealthPercent()` delegates to the widget instance, and `UAttributeComponent::ReceiveDamage()` broadcasts `OnHealthChanged` for UI bindings.
-- Enemy health bar visibility is timer-driven by `AEnemy::ShowHealthBar()` / `HideHealthBar()`, with optional Blueprint fade-out through `UBaseHealthBarWidget::PlayFadeOutAnim()`.
+- Enemy health bar visibility is timer-driven by `AEnemy::ShowHealthBar()` / `HideHealthBar()`, with Blueprint fade-out hooks through `UBaseHealthBarWidget::PlayFadeOutAnim()` and `CancelFadeOutAnim()`.
+- Lock-on keeps enemy health bars visible through `AEnemy::SetTargetedByPlayer(bool)`. When this path changes, verify both sides: C++ timer behavior and the actual Widget Blueprint implementation in `Content/_GAME/BP/HUD/WBP_EnemyHealthBar.uasset`.
 
 ### Player HUD
 
@@ -223,6 +241,7 @@ UInterface → UBlockableInterface (weapon hit interception before final damage 
   - `test.Debug.Enemy` → enemy text toggle
   - `test.Debug.Shapes` → world debug sphere toggle
 - Player debug currently includes input snapshot text, HP, stamina, action state, montage name, and movement speed.
+- Player debug currently includes the short-lived `LockOn` marker from `Input_LockOn()` in addition to the existing input snapshot text.
 - Enemy debug currently includes enemy state / ground speed text, distance text, optional chase/combat/attack radius spheres, and `CombatMove: Ready/Retreat/BackDiag/Strafe/Press/AlreadyAtGoal/MoveFail` while in `EES_Combating`.
 
 ### UE 5.7 Pitfalls

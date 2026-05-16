@@ -9,6 +9,7 @@
 #include "MyCharacter.generated.h"
 
 class Aitem;
+class AEnemy;
 class AShield;
 class USpringArmComponent;
 class UCameraComponent;
@@ -56,6 +57,11 @@ public:
 	void Walk();
 	void StopWalking();
 	void UpdateMovementSpeed(); // 每帧根据方向/状态动态调整移速
+
+	/* 锁定 */
+	void ToggleLockOn();
+	void ClearLockOn();
+	bool IsLockingOn() const { return bIsLockingOn; }
 
 protected:
 	/* 蒙太奇 */
@@ -134,6 +140,41 @@ private:
 
 	// 受击染红缩放系数（TryBlockHit 设置，SetHealthPercent 消费后归位）
 	float LastDamageFlashScale = 1.f;
+
+	/* 锁定 */
+	UPROPERTY()
+	AEnemy* LockedTarget = nullptr;
+
+	bool bIsLockingOn = false;
+
+	// 锁定开启前缓存的状态（ClearLockOn 时恢复）
+	bool bCachedOrientRotationToMovement = true;
+	bool bCachedUseControllerRotationYaw = false;
+	bool bCachedSpringArmUsePawnControlRotation = false;
+	FVector CachedSocketOffset = FVector::ZeroVector;
+
+	// 锁定参数
+	UPROPERTY(EditDefaultsOnly, Category = "LockOn", meta = (ToolTip = "锁定目标搜索半径（cm）。"))
+	float LockOnRadius = 1500.f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "LockOn", meta = (ToolTip = "前方视角过滤半角（度）。只有在此角度内的敌人才会被选中。"))
+	float LockOnViewAngleDegrees = 45.f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "LockOn", meta = (ToolTip = "锁定朝向插值速度。值越大转向越快。"))
+	float LockOnRotationInterpSpeed = 8.f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "LockOn", meta = (ToolTip = "自动解锁距离（cm）。目标超出此距离自动解锁，带滞后防抖动。"))
+	float LockOnBreakRadius = 2000.f;
+
+	// 锁定越肩相机
+	UPROPERTY(EditDefaultsOnly, Category = "LockOnCamera", meta = (ToolTip = "锁定时 SpringArm 右肩偏移（Y=右, Z=上）。"))
+	FVector LockOnSocketOffset = FVector(0.f, 80.f, 80.f);
+
+	UPROPERTY(EditDefaultsOnly, Category = "LockOnCamera", meta = (ToolTip = "SocketOffset 插值速度。"))
+	float LockOnSocketOffsetInterpSpeed = 6.f;
+
+	void FindLockOnTarget();
+	void UpdateLockOn(float DeltaTime);
 
 public:
 	FORCEINLINE void SetEquippedItem(Aitem* Item) { OverLapItem = Item; }
