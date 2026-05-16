@@ -123,12 +123,13 @@ UDataAsset → UTreasureData (static mesh, gold value, pickup sound, scale)
 - **目标搜索**：`FindLockOnTarget()` 用 `GetAllActorsOfClass(AEnemy::StaticClass())` 遍历，过滤 `IsAlive()` + 距离 < `LockOnRadius` + **Camera forward** 视角角度 < `LockOnViewAngleDegrees`。排序：更靠近视野中心优先，距离作 tie-breaker。
 - **状态管理**：`bIsLockingOn` 独立 bool（不从 `IsValid(LockedTarget)` 推导），`LockedTarget` 用 `UPROPERTY()` 持有。`IsLockingOn()` 内联返回 `bIsLockingOn`。
 - **旋转模式切换**：开启时缓存 `bOrientRotationToMovement` / `bUseControllerRotationYaw` / `bUsePawnControlRotation`，切换到锁定模式（`false` / `true` / `true`）。`ClearLockOn()` 恢复缓存值。
-- **越肩相机**：`LockOnSocketOffset = (0, 50, 30)` 右肩偏移。`Tick()` 中用 `FMath::VInterpTo` 双向插值——锁定中朝 `LockOnSocketOffset`，非锁定朝 `CachedSocketOffset`。`CachedSocketOffset` 仅在 `BeginPlay()` 初始化一次，不随重新锁定覆盖。
+- **越肩相机**：`LockOnSocketOffset = (0, 80, 80)` 右肩偏移。`Tick()` 中用 `FMath::VInterpTo` 双向插值——锁定中朝 `LockOnSocketOffset`，非锁定朝 `CachedSocketOffset`。`CachedSocketOffset` 仅在 `BeginPlay()` 初始化一次，不随重新锁定覆盖。
 - **自动解锁**：`UpdateLockOn()` 每帧检查目标 `!IsValid()` / `!IsAlive()` / 距离 > `LockOnBreakRadius` → `ClearLockOn()`。玩家死亡也调 `ClearLockOn()`。
 - **敌人血条联动**：`SetTargetedByPlayer(true)` → 显示血条 + 清隐藏计时器 + `CancelFadeOutAnim()`；`SetTargetedByPlayer(false)` → 重启隐藏计时器。
-- **Tick 执行顺序**：`SocketOffset 插值 → UpdateLockOn → [Stunning/Dead 早退] → 格挡/移速/Debug`。`UpdateLockOn` 和 SocketOffset 插值在状态早退之前，确保硬直/死亡时仍能清理目标和回正相机。
+- **Tick 执行顺序**：`SocketOffset + TargetArmLength 插值 → UpdateLockOn → [Stunning/Dead 早退] → 格挡/移速/Debug`。`UpdateLockOn` 和相机插值在状态早退之前，确保硬直/死亡时仍能清理目标和回正相机。
 - **Tick 旋转应用**：`FindLookAtRotation(PlayerLoc, TargetLoc)` → `LookAt.Pitch = 0.f`（只锁 yaw）→ `RInterpTo` → `SetControlRotation`。内部有死亡/硬直 guard 不应用转向但仍然清理。
 - **锁定冲刺 Free-Run**：`ShouldUseLockOnFreeRun()` 条件 = `bIsLockingOn && bIsSprinting && EAS_UnOccupied && !IsFalling && 有移动输入`。满足时角色临时恢复自由移动语义：`bOrientRotationToMovement=true`（角色朝移动方向跑），`bUseControllerRotationYaw=false`（脱离控制器朝向），但控制器/相机继续盯敌人。`UpdateMovementSpeed()` 绕过锁定方向降速，`TickSprintStamina()` 绕过 `Dot>0.2f` 门槛。松开 Sprint 立即恢复普通锁定旋转。`ApplyLockOnRotationMode()` 每帧 Tick 末尾根据条件切换旋转模式。
+- **锁定 Free-Run 相机偏移**：Tick 中 SocketOffset 插值改为三态（非锁定→`CachedSocketOffset` / 普通锁定→`LockOnSocketOffset` / free-run→`LockOnSocketOffset + DynamicOffset`）。`GetLockOnFreeRunCameraInputLocal()` 将移动输入转控制器 yaw 局部坐标，`GetLockOnFreeRunCameraOffsetTarget()` 拆 `SideAlpha`(Y) + `BackAlpha`(-X, 仅后撤) 输出偏移。参数：`LockOnFreeRunCameraSideOffset`(60)、`LockOnFreeRunCameraBackHeightOffset`(40)、`LockOnFreeRunCameraBackArmLengthBonus`(0)、`LockOnFreeRunCameraInterpSpeed`(10)。`TargetArmLength` 同步插值，`CachedTargetArmLength` BeginPlay 缓存。
 - **锁定冲刺攻击**：`Attack()` 入口检测 free-run → `FaceDirection2D()` 对齐奔跑方向 → 设 `bOrientRotationToMovement=false, bUseControllerRotationYaw=false` 锁住朝向。蒙太奇结束 delegate 调 `RestorePostAttackRotationMode()` 恢复（无 `EAS_Attacking` guard，interrupted 也执行）。`ApplyLockOnRotationMode()` 保留 `EAS_Attacking` 早退防止 Tick 覆盖。`ClearLockOn()`/`Die()` 已有旋转恢复路径，无需额外清理。
 - **蓝图待办**：`CancelFadeOutAnim()` 需在血条 Widget Blueprint 中实现（停止淡出动画 + 恢复可见状态）；创建 `IA_LockOn` 输入资产绑定中键。
 
@@ -237,6 +238,9 @@ UDataAsset → UTreasureData (static mesh, gold value, pickup sound, scale)
 ### UI 动画曲线
 - 指数衰减 `Alpha *= pow(0.01, dt/Duration)` 比线性淡出更自然（前快后慢拖尾）。
 - Duration 含义：Alpha 衰减到 1% 的时间。`0.01` 可调，越小衰减越快。
+
+### 相机偏移方向：用控制器局部空间，不用 Actor 局部空间
+当需要"玩家输入方向 → 相机偏移"时，必须用 `GetControlRotation().Yaw` + `UnrotateVector` 转到控制器局部空间。Actor 局部空间在角色身体旋转后会吃掉左右后信息（如 free-run 时角色朝运动方向旋转，Actor Forward = 运动方向，左侧输入变成 Back）。用速度方向也有问题：撞墙时速度归零但玩家意图不变。
 
 ### 跨类静态 Helper 复用（TickBufferDelayImpl 模式）
 当两个类共享逻辑但不在同一继承链时，用 `static` 方法 + 显式参数传递，而非强行建立继承关系。

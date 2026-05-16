@@ -43,6 +43,7 @@ void AMyCharacter::BeginPlay()
 
 	// 初始化缓存为当前实际值（Blueprint 可能已覆盖）
 	CachedSocketOffset = SpringArm->SocketOffset;
+	CachedTargetArmLength = SpringArm->TargetArmLength;
 
 	if (Attributes)
 	{
@@ -67,10 +68,28 @@ void AMyCharacter::Tick(float DeltaTime)
 		}
 	}
 
-	// SocketOffset 插值：锁定中朝越肩偏移，非锁定朝缓存原值（双向平滑，不受状态限制）
-	const FVector SocketTarget = bIsLockingOn ? LockOnSocketOffset : CachedSocketOffset;
+	// SocketOffset 插值：三态 — 非锁定 / 普通锁定 / 锁定 free-run（动态偏移）
+	FVector SocketTarget = bIsLockingOn ? LockOnSocketOffset : CachedSocketOffset;
+	float ArmLengthTarget = CachedTargetArmLength;
+
+	if (bIsLockingOn && ShouldUseLockOnFreeRun())
+	{
+		const FVector DynamicOffset = GetLockOnFreeRunCameraOffsetTarget();
+		SocketTarget = LockOnSocketOffset + DynamicOffset;
+
+		// 后撤时拉远弹簧臂（BackAlpha > 0 → ArmLength bonus）
+		const FVector InputLocal = GetLockOnFreeRunCameraInputLocal();
+		const float BackAlpha = FMath::Max(0.f, -InputLocal.X);
+		ArmLengthTarget = CachedTargetArmLength + LockOnFreeRunCameraBackArmLengthBonus * BackAlpha;
+	}
+
+	const float InterpSpeed = (bIsLockingOn && ShouldUseLockOnFreeRun())
+		? LockOnFreeRunCameraInterpSpeed : LockOnSocketOffsetInterpSpeed;
+
 	SpringArm->SocketOffset = FMath::VInterpTo(
-		SpringArm->SocketOffset, SocketTarget, DeltaTime, LockOnSocketOffsetInterpSpeed);
+		SpringArm->SocketOffset, SocketTarget, DeltaTime, InterpSpeed);
+	SpringArm->TargetArmLength = FMath::FInterpTo(
+		SpringArm->TargetArmLength, ArmLengthTarget, DeltaTime, InterpSpeed);
 
 	// UpdateLockOn 放在早退之前：内部已有死亡/硬直 guard，但有效性清理必须在所有状态下执行
 	UpdateLockOn(DeltaTime);
@@ -624,6 +643,26 @@ bool AMyCharacter::ShouldUseLockOnFreeRun() const
 FVector AMyCharacter::GetLockOnFreeRunDirection() const
 {
 	return GetLastMovementInputVector().GetSafeNormal2D();
+}
+
+FVector AMyCharacter::GetLockOnFreeRunCameraInputLocal() const
+{
+	const FVector InputWorld = GetLastMovementInputVector().GetSafeNormal2D();
+	const FRotator YawRot(0.f, GetControlRotation().Yaw, 0.f);
+	return YawRot.UnrotateVector(InputWorld);
+}
+
+FVector AMyCharacter::GetLockOnFreeRunCameraOffsetTarget() const
+{
+	const FVector Local = GetLockOnFreeRunCameraInputLocal();
+	const float SideAlpha = Local.Y;   // [-1, 1]：左负右正
+	const float BackAlpha = FMath::Max(0.f, -Local.X);  // [0, 1]：后撤权重
+
+	return FVector(
+		0.f,
+		SideAlpha * LockOnFreeRunCameraSideOffset,
+		BackAlpha * LockOnFreeRunCameraBackHeightOffset
+	);
 }
 
 void AMyCharacter::ApplyLockOnRotationMode()

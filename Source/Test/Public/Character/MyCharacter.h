@@ -36,7 +36,7 @@ public:
 	void Die(); // 死亡演出
 	UFUNCTION()
 	void HandleExhausted(); // 体力耗尽回调
-	void RecoverFromExhaustion(); // 2秒后恢复
+	void RecoverFromExhaustion(); // ExhaustedTime 后恢复
 
 	/* 装备 */
 	virtual void Equip() override;
@@ -97,6 +97,8 @@ private:
 	float CalcBaseSpeed(float DotProduct) const;
 	bool ShouldUseLockOnFreeRun() const;
 	FVector GetLockOnFreeRunDirection() const;
+	FVector GetLockOnFreeRunCameraInputLocal() const;
+	FVector GetLockOnFreeRunCameraOffsetTarget() const;
 	void ApplyLockOnRotationMode();
 	void RestorePostAttackRotationMode();
 	void FaceDirection2D(const FVector& FacingDirection);
@@ -157,6 +159,7 @@ private:
 	bool bCachedUseControllerRotationYaw = false;
 	bool bCachedSpringArmUsePawnControlRotation = false;
 	FVector CachedSocketOffset = FVector::ZeroVector;
+	float CachedTargetArmLength = 300.f;
 
 	// 锁定参数
 	UPROPERTY(EditDefaultsOnly, Category = "LockOn", meta = (ToolTip = "锁定目标搜索半径（cm）。"))
@@ -183,6 +186,19 @@ private:
 
 	UPROPERTY(EditDefaultsOnly, Category = "LockOnCamera", meta = (ToolTip = "SocketOffset 插值速度。"))
 	float LockOnSocketOffsetInterpSpeed = 6.f;
+
+	// 锁定 free-run 动态相机偏移
+	UPROPERTY(EditDefaultsOnly, Category = "LockOnCamera|FreeRun", meta = (ClampMin = "0.0", ToolTip = "锁定冲刺侧移时相机横向最大偏移幅度（cm），正值按输入方向偏移。"))
+	float LockOnFreeRunCameraSideOffset = 60.f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "LockOnCamera|FreeRun", meta = (ClampMin = "0.0", ToolTip = "锁定冲刺后撤时相机抬高幅度（cm）。"))
+	float LockOnFreeRunCameraBackHeightOffset = 40.f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "LockOnCamera|FreeRun", meta = (ClampMin = "0.0", ToolTip = "锁定冲刺后撤时弹簧臂额外拉远（cm），默认 0 不改变距离手感。"))
+	float LockOnFreeRunCameraBackArmLengthBonus = 0.f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "LockOnCamera|FreeRun", meta = (ToolTip = "锁定冲刺动态偏移插值速度。"))
+	float LockOnFreeRunCameraInterpSpeed = 10.f;
 
 	void FindLockOnTarget();
 	void UpdateLockOn(float DeltaTime);
