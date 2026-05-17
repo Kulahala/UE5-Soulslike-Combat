@@ -3,6 +3,7 @@
 #include "Items/Weapon/Weapon.h"
 #include "Character/BaseCharacter.h"
 #include "Character/MyCharacter.h"
+#include "Combat/CombatTeamHelper.h"
 #include "Components/BoxComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "Kismet/KismetSystemLibrary.h"
@@ -141,16 +142,10 @@ AWeapon::FWeaponHitResult AWeapon::ResolveHit(AActor* HitActor, const FHitResult
 	Result.FinalDamage = Damage;
 
 	// 同类豁免：武器持有者和命中目标共享标签
-	if (GetOwner())
+	if (FCombatTeamHelper::ShareTeamTag(GetOwner(), HitActor))
 	{
-		for (const FName& Tag : GetOwner()->Tags)
-		{
-			if (HitActor->ActorHasTag(Tag))
-			{
-				Result.bSameTeam = true;
-				return Result;
-			}
-		}
+		Result.bSameTeam = true;
+		return Result;
 	}
 
 	// 格挡判定（仅跨阵营）

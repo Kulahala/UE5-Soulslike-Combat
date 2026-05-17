@@ -90,6 +90,7 @@ protected:
 	bool IsValidCombatTarget(const AActor* Target) const; // 目标有效且存活
 
 	/* 血条 */
+	void RevealHealthBar();
 	void ShowHealthBar();
 	void HideHealthBar();
 
@@ -241,7 +242,32 @@ private:
 	float SearchAcceptanceRadius = 50.f;
 
 	/* 战斗拉扯 */
+	enum class EEnemyCombatMoveType : uint8
+	{
+		None,
+		Retreat,
+		BackDiag,
+		Strafe,
+		Press
+	};
+
+	struct FEnemyCombatMovePlan
+	{
+		EEnemyCombatMoveType MoveType = EEnemyCombatMoveType::None;
+		FVector GoalLocation = FVector::ZeroVector;
+		float MoveSpeed = 0.f;
+		bool bUseRetreatSpeedEase = false;
+		float RetryDelay = 0.15f;
+
+		bool IsValid() const
+		{
+			return MoveType != EEnemyCombatMoveType::None;
+		}
+	};
+
 	void UpdateCombatMovement(float DeltaTime, float DistanceToTarget, const FVector& ToTarget);
+	FEnemyCombatMovePlan BuildCombatMovePlan(float DistanceToTarget, const FVector& ToTarget) const;
+	static const TCHAR* GetCombatMoveDebugName(EEnemyCombatMoveType MoveType);
 	bool MoveToCombatLocation(const FVector& Location);
 	bool MoveToCombatTarget(); // 攻击 ready 时动态追踪目标 Actor
 	void ResetCombatReposition();

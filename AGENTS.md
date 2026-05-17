@@ -32,10 +32,10 @@ No CI pipeline, no lint/test commands configured.
 ## Module Dependencies
 
 `Test.Build.cs` — `PublicDependencyModuleNames`:
-`Core`, `CoreUObject`, `Engine`, `InputCore`, `EnhancedInput`, `AnimGraphRuntime`, `Niagara`, `GeometryCollectionEngine`, `PCG`, `UMG`, `AIModule`
+`Core`, `CoreUObject`, `Engine`, `InputCore`, `EnhancedInput`, `AnimGraphRuntime`, `Niagara`, `GeometryCollectionEngine`, `PCG`, `UMG`, `AIModule`, `SlateCore`
 
 `PrivateDependencyModuleNames`:
-`Slate`, `SlateCore`
+`Slate`
 
 ## Truth Sources
 
@@ -58,7 +58,7 @@ All gameplay states are defined as `UENUM` enums in `CharacterTypes.h` — the s
 | Enum | C++ Values | Used By |
 |------|-----------|---------|
 | `EWeaponState` | `EWS_Unequipped`, `EWS_OneHandEquipped`, `EWS_TwoHandEquipped` | `ABaseCharacter`, `AMyCharacter`, `USlashAnimInstance` |
-| `EActionState` | `EAS_UnOccupied`, `EAS_Attacking`, `EAS_Arming`, `EAS_Stunning`, `EAS_Exhausted`, `EAC_Dead` | `AMyCharacter` |
+| `EActionState` | `EAS_UnOccupied`, `EAS_Attacking`, `EAS_Arming`, `EAS_Stunning`, `EAS_Exhausted`, `EAS_Dead` | `AMyCharacter` |
 | `EArmWeaponState` | `AWS_Arming`, `AWS_Disarming` | `AMyCharacter`, `USlashAnimInstance` |
 | `EEnemyState` | `EES_UnOccupied`, `EES_Patrolling`, `EES_Searching`, `EES_Chasing`, `EES_Combating`, `EES_Attacking`, `EES_Stunned`, `EES_Dead` | `AEnemy` |
 | `EItemState` | `EIS_Spawning`, `EIS_Dropped`, `EIS_Equipped` | `Aitem` (in `item.h`) |
@@ -88,6 +88,7 @@ ACharacter
 
 APlayerController → ACharacterController (Enhanced Input, move/look/jump/equip/attack/arm/sprint/walk/block/lock-on bindings, input debug snapshot owner)
 UActorComponent → UAttributeComponent (health, gold, OnHealthChanged delegate)
+               └── UPlayerLockOnComponent (lock-on state, target selection, camera tunables)
 UWidgetComponent → UHealthBarComponent
 UUserWidget → UBaseHealthBarWidget (PB_Health + PB_Buffer progress bars, delayed buffer logic)
            └── UPlayerHUDWidget (player HP/stamina HUD + NativePaint debug text overlay + damage vignette)
@@ -137,10 +138,11 @@ UInterface → UBlockableInterface (weapon hit interception before final damage 
 ### Lock-On System
 
 - `ACharacterController` owns the lock-on input binding through `LockOnAction` → `Input_LockOn()`; the current input assets are `Content/_GAME/BP/input/IA_LockOn.uasset`, `Content/_GAME/BP/input/IMC_CharacterInput.uasset`, and `Content/_GAME/BP/input/BP_CharacterController.uasset`.
-- `AMyCharacter` owns lock-on state through `LockedTarget` + `bIsLockingOn`; do not introduce a separate lock-on action state unless the state machine genuinely needs it.
-- `FindLockOnTarget()` currently uses `GetAllActorsOfClass(AEnemy::StaticClass())`, filters by `LockOnRadius`, `LockOnViewAngleDegrees`, and target alive state, then prefers the candidate closest to the camera forward axis.
-- `UpdateLockOn()` is intentionally split: target validity / range cleanup always runs, while camera-facing rotation is skipped during `EAS_Stunning` and `EAC_Dead`.
-- `ClearLockOn()` must be able to clear state after invalid / pending-kill targets; keep the target cleanup path guarded by `IsValid(LockedTarget)` and keep the local state recovery unconditional.
+- `UPlayerLockOnComponent` owns lock-on state (`LockedTarget`, `bIsLockingOn`), tunables (`LockOn*`, `LockOnCamera*`), target scoring, and player-targeted mark handoff to `AEnemy::SetTargetedByPlayer(bool)`.
+- `AMyCharacter` keeps the facade (`ToggleLockOn()`, `ClearLockOn()`, `IsLockingOn()`), plus all direct writes to `CharacterMovement`, controller rotation, and `SpringArm`.
+- `UPlayerLockOnComponent::FindBestTarget(...)` currently uses `GetAllActorsOfClass(AEnemy::StaticClass())`, filters by radius and camera-facing angle, then prefers the candidate closest to the camera forward axis.
+- `UpdateLockOn()` is intentionally split: target validity / range cleanup always runs, while camera-facing rotation is skipped during `EAS_Stunning` and `EAS_Dead`.
+- `ClearLockOn()` must be able to clear state after invalid / pending-kill targets. Target cleanup belongs to `UPlayerLockOnComponent`, while local rotation/camera recovery remains unconditional on `AMyCharacter`.
 - Lock-on camera framing currently stays on **yaw-only** control rotation. If future work wants target-height framing to matter, that requires changing the camera-aim math; adding a height offset alone is a no-op while `LookAt.Pitch` is cleared back to zero.
 - Lock-on Sprint free-run is a derived movement mode, **not** a separate `EActionState`. `ShouldUseLockOnFreeRun()` is based on lock-on, sprint intent, `EAS_UnOccupied`, grounded state, and live movement input.
 - During lock-on free-run, the target remains locked and the controller / camera still yaw toward the enemy, but the character body temporarily uses `bOrientRotationToMovement=true` and `bUseControllerRotationYaw=false` so movement direction drives facing.
@@ -153,6 +155,7 @@ UInterface → UBlockableInterface (weapon hit interception before final damage 
 - `CachedSocketOffset` is initialized once from the live `SpringArm->SocketOffset` in `BeginPlay()`. This is intentional so Blueprint overrides remain the source of truth for the non-lock camera baseline; do not overwrite that baseline every time lock-on starts.
 - `CachedTargetArmLength` is also initialized once from the live `SpringArm->TargetArmLength` in `BeginPlay()`, so optional free-run camera pull-back can always recover to the Blueprint-authored baseline.
 - `Tick()` interpolates both `SpringArm->SocketOffset` and `SpringArm->TargetArmLength` before the `Stunning/Dead` early-return. Non-lock moves back toward `CachedSocketOffset` / `CachedTargetArmLength`, ordinary lock-on uses `LockOnSocketOffset`, and lock-on Sprint free-run uses `LockOnSocketOffset + DynamicOffset` plus an optional arm-length bonus.
+- Current lock-on camera tunables now live on `UPlayerLockOnComponent`, but the actual `SpringArm` writes still stay on `AMyCharacter`.
 - Free-run camera offset is driven by controller-yaw local movement input via `GetControlRotation().Yaw` + `UnrotateVector`, not Actor-local direction or velocity. Free-run rotates the body toward movement, so Actor-local space would lose left/right/back intent; velocity also drops to zero when the player pushes into walls.
 - Current code defaults are `LockOnSocketOffset = (0, 80, 80)`, `LockOnSocketOffsetInterpSpeed = 6.f`, `LockOnFreeRunCameraSideOffset = 60.f`, `LockOnFreeRunCameraBackHeightOffset = 40.f`, `LockOnFreeRunCameraBackArmLengthBonus = 0.f`, and `LockOnFreeRunCameraInterpSpeed = 10.f`, but these are tuning values rather than architectural truth; feel free to retune them in Blueprint / defaults without changing the control flow.
 - The current camera still computes `LookAt` from `PlayerLoc -> TargetLoc`. That is enough for the present "cheap fix" shoulder framing, but it does **not** mathematically guarantee that the enemy stays centered after socket offset. If future tuning still leaves the target drifting too far off the main viewing area, prefer compensating the aim from the offset camera position before adding arbitrary yaw-bias magic numbers.
@@ -221,6 +224,7 @@ UInterface → UBlockableInterface (weapon hit interception before final damage 
 - Shared buffer interpolation math lives in `UBaseHealthBarWidget::TickBufferDelayImpl(...)`; `UPlayerHUDWidget` reuses that helper while keeping player-only `DamageFlash` / `Vignette` behavior local.
 - `UHealthBarComponent::SetHealthPercent()` delegates to the widget instance, and `UAttributeComponent::ReceiveDamage()` broadcasts `OnHealthChanged` for UI bindings.
 - Enemy health bar visibility is timer-driven by `AEnemy::ShowHealthBar()` / `HideHealthBar()`, with Blueprint fade-out hooks through `UBaseHealthBarWidget::PlayFadeOutAnim()` and `CancelFadeOutAnim()`.
+- `AEnemy::RevealHealthBar()` is the shared re-entry path used by both `ShowHealthBar()` and `SetTargetedByPlayer(true)`: it restores component visibility, widget visibility, render opacity, and cancels any in-flight fade-out animation before the normal timer/lock logic resumes.
 - Lock-on keeps enemy health bars visible through `AEnemy::SetTargetedByPlayer(bool)`. When this path changes, verify both sides: C++ timer behavior and the actual Widget Blueprint implementation in `Content/_GAME/BP/HUD/WBP_EnemyHealthBar.uasset`.
 
 ### Player HUD
@@ -232,8 +236,8 @@ UInterface → UBlockableInterface (weapon hit interception before final damage 
 
 - Player hurt feedback is split intentionally: **camera shake = hit reaction**, **red vignette = health loss**.
 - `AMyCharacter::GetHit_Implementation()` triggers `HitReceivedCameraShake` for the local player whenever the weapon-hit feedback path reaches `GetHit`, including blocked hits and same-team weapon hits.
-- `AMyCharacter::TryBlockHit()` writes `LastDamageFlashScale` from `AShield::BlockedDamageMultiplier`; `TakeDamage()` resets that scale on zero-damage/full-block hits to avoid leaking state into the next real hit.
-- `UPlayerHUDWidget::SetHealthPercent()` consumes `LastDamageFlashScale` only when health actually drops, so the vignette intensity tracks final post-block damage instead of raw incoming damage.
+- `AMyCharacter::TryBlockHit()` writes `LastDamageFlashScale` from `AShield::BlockedDamageMultiplier`; `TakeDamage()` pushes that scale into `UPlayerHUDWidget::SetPendingDamageFlashScale(...)` before damage application, then immediately resets the local value so hits cannot leak state across frames.
+- `UPlayerHUDWidget::SetHealthPercent()` consumes `PendingDamageFlashScale` only when health actually drops, so the vignette intensity tracks final post-block damage instead of raw incoming damage.
 - Result: blocked or friendly hits may still shake the camera, but only real health loss drives the red vignette.
 - The vignette mask is generated in C++ as an **edge-distance gradient**, not a radial center fade. `VignetteFadeWidth = 0.2` means roughly the outer 20% of the screen carries the red falloff while the center stays clear.
 

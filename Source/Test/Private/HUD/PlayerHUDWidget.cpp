@@ -2,7 +2,6 @@
 #include "HUD/BaseHealthBarWidget.h"
 #include "Components/ProgressBar.h"
 #include "AttributeComponent/AttributeComponent.h"
-#include "Character/MyCharacter.h"
 #include "Utils/DebugDrawHelper.h"
 #include "Styling/CoreStyle.h"
 #include "Rendering/DrawElements.h"
@@ -15,11 +14,10 @@ void UPlayerHUDWidget::SetHealthPercent(float Percent)
 		if (Percent < PB_Health->GetPercent())
 		{
 			CurrentBufferDelay = BufferDelayTime;
-			float FlashScale = OwnerCharacter ? OwnerCharacter->GetLastDamageFlashScale() : 1.f;
-			DamageFlashPeakAlphaScaled = DamageFlashPeakAlpha * FlashScale;
+			DamageFlashPeakAlphaScaled = DamageFlashPeakAlpha * PendingDamageFlashScale;
 			DamageFlashTimer = 0.f;
 			bDamageFlashAttacking = true;
-			if (OwnerCharacter) OwnerCharacter->SetLastDamageFlashScale(1.f);
+			PendingDamageFlashScale = 1.f;
 		}
 		PB_Health->SetPercent(Percent);
 	}
@@ -33,9 +31,8 @@ void UPlayerHUDWidget::SetStaminaPercent(float Percent)
 	}
 }
 
-void UPlayerHUDWidget::BindToAttributes(UAttributeComponent* Attributes, AMyCharacter* InCharacter)
+void UPlayerHUDWidget::BindToAttributes(UAttributeComponent* Attributes)
 {
-	OwnerCharacter = InCharacter;
 	if (Attributes)
 	{
 		Attributes->OnHealthChanged.AddDynamic(this, &UPlayerHUDWidget::SetHealthPercent);
@@ -44,6 +41,11 @@ void UPlayerHUDWidget::BindToAttributes(UAttributeComponent* Attributes, AMyChar
 		Attributes->OnStaminaChanged.AddDynamic(this, &UPlayerHUDWidget::SetStaminaPercent);
 		SetStaminaPercent(Attributes->GetStaminaPercent());
 	}
+}
+
+void UPlayerHUDWidget::SetPendingDamageFlashScale(float Scale)
+{
+	PendingDamageFlashScale = FMath::Max(0.f, Scale);
 }
 
 void UPlayerHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)

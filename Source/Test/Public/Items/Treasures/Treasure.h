@@ -23,8 +23,6 @@ public:
 	int32 GetGoldValue() const { return GoldValue; }
 
 protected:
-	virtual void BeginPlay() override;
-	virtual void Tick(float DeltaSeconds) override;
 	virtual void SphereEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex) override;
 	virtual void SphereOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult) override;
 
@@ -36,7 +34,4 @@ protected:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Treasure Properties", meta = (ToolTip = "宝物显示名称。"))
 	FString TreasureName = TEXT("宝物");
-
-private:
-
 };

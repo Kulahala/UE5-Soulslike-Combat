@@ -1,15 +1,12 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Character/CharacterTypes.h"
 
 struct FDebugDrawEntry
 {
 	FString Text;
 	FColor Color;
 };
-
-class AEnemy;
 
 class TEST_API FDebugDrawHelper
 {

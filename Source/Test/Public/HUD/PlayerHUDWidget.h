@@ -6,7 +6,6 @@
 
 class UProgressBar;
 class UAttributeComponent;
-class AMyCharacter;
 class UTexture2D;
 
 UCLASS()
@@ -19,7 +18,8 @@ public:
 	void SetHealthPercent(float Percent);
 	UFUNCTION()
 	void SetStaminaPercent(float Percent);
-	void BindToAttributes(UAttributeComponent* Attributes, AMyCharacter* InCharacter);
+	void BindToAttributes(UAttributeComponent* Attributes);
+	void SetPendingDamageFlashScale(float Scale);
 
 	UPROPERTY(meta = (BindWidget))
 	UProgressBar* PB_Health;
@@ -47,10 +47,8 @@ private:
 
 	float CurrentBufferDelay = 0.0f;
 
-	// 受击染红
-	UPROPERTY()
-	AMyCharacter* OwnerCharacter = nullptr;
-
+	// 本次掉血前由角色推送；SetHealthPercent 消费后归位到 1
+	float PendingDamageFlashScale = 1.0f;
 	float DamageFlashAlpha = 0.0f;
 	float DamageFlashPeakAlphaScaled = 0.0f;
 	float DamageFlashTimer = 0.0f;

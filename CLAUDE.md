@@ -51,6 +51,7 @@ ACharacter
 
 APlayerController → ACharacterController (Enhanced Input: 10 bound actions, incl. LockOn)
 UActorComponent → UAttributeComponent (health, gold, OnHealthChanged delegate)
+UActorComponent → UPlayerLockOnComponent (lock-on state, target search/scoring, lock-on parameters)
 UWidgetComponent → UHealthBarComponent
 UUserWidget → UBaseHealthBarWidget (PB_Health + PB_Buffer progress bars, buffer delay logic)
 UAnimInstance → USlashAnimInstance (exposes GroundSpeed, Direction, bIsBlocking, bIsStunning, state enums to anim graph)
@@ -63,7 +64,7 @@ UDataAsset → UTreasureData (static mesh, gold value, pickup sound, scale)
 3. **NotifyBegin** → `AWeapon::StartWeaponTrace()` (records old box positions)
 4. **NotifyTick** → `AWeapon::ExecuteWeaponTrace()` (sweeps from old→new center to prevent ghost swings)
 5. On hit:
-   - 同阵营命中：不 `ApplyDamage`，但仍走 `GetHit` 路径（击退、命中反馈、相机晃动）
+   - 同阵营命中：不 `ApplyDamage`，但仍走 `GetHit` 路径（击退、命中反馈、相机晃动）。同阵营判定通过 `FCombatTeamHelper::ShareTeamTag()`（Weapon + Enemy 共用）
    - 跨阵营命中：`IBlockableInterface::TryBlockHit()` 在 `ApplyDamage` 前拦截；格挡成功：减伤 + 跳过硬直
    - `ExecuteWeaponTrace()` 通过 `FPendingHitContext` 写入每命中的上下文（instigator、knockback scale、blocked flag、stun flag），然后调用 `GetHit()`
    - `ABaseCharacter::GetHit_Implementation()` 消费 context 驱动击退/受击反应，子类（`AMyCharacter`、`AEnemy`）在各自硬直逻辑后清空 context
@@ -117,11 +118,13 @@ UDataAsset → UTreasureData (static mesh, gold value, pickup sound, scale)
 - `UHealthBarComponent::SetHealthPercent()` delegates to the widget.
 - `UAttributeComponent::OnHealthChanged` broadcasts `HealthPercent` — widgets and components bind to this.
 - 敌人血条可见性由 `ShowHealthBar()`/`HideHealthBar()` 定时器驱动，可选蓝图淡出动画 `PlayFadeOutAnim()`。
+- `RevealHealthBar()` 是共享的"血条拉回可见态" helper：恢复 component visibility + widget visibility + opacity + `CancelFadeOutAnim()`。`ShowHealthBar()`（受击）和 `SetTargetedByPlayer(true)`（锁定）共用此入口，防止两条路径恢复逻辑漂移。
 
-### Lock-On System (`AMyCharacter`)
+### Lock-On System (`AMyCharacter` + `UPlayerLockOnComponent`)
+- **组件架构**：`UPlayerLockOnComponent`（`ActorComponent`，不 Tick）拥有锁定状态（`bIsLockingOn`、`LockedTarget`）、目标搜索/评分逻辑、所有 `LockOn*` 参数。`AMyCharacter` 保留 facade（`ToggleLockOn`、`ClearLockOn`、`IsLockingOn`）+ 旋转/相机实际写入。组件只返回"期望值"，Character 统一执行 CharacterMovement 和 SpringArm 修改。
 - **输入**：`ACharacterController::Input_LockOn()` 绑定中键 `ETriggerEvent::Started`，调用 `AMyCharacter::ToggleLockOn()`。`Input_Look()` 在 `IsLockingOn()` 时早退，忽略视角输入。
-- **目标搜索**：`FindLockOnTarget()` 用 `GetAllActorsOfClass(AEnemy::StaticClass())` 遍历，过滤 `IsAlive()` + 距离 < `LockOnRadius` + **Camera forward** 视角角度 < `LockOnViewAngleDegrees`。排序：更靠近视野中心优先，距离作 tie-breaker。
-- **状态管理**：`bIsLockingOn` 独立 bool（不从 `IsValid(LockedTarget)` 推导），`LockedTarget` 用 `UPROPERTY()` 持有。`IsLockingOn()` 内联返回 `bIsLockingOn`。
+- **目标搜索**：`LockOnComponent->FindBestTarget(PlayerLoc, CameraForward)` 遍历所有 `AEnemy`，`ScoreTarget()` 按 `IsAlive()` + 距离 + Camera forward 视角角度评分，返回最低分目标。
+- **状态管理**：`bIsLockingOn` 和 `LockedTarget` 由组件持有。`IsLockingOn()` / `GetLockedTarget()` 委托组件 + nullptr 守卫。
 - **旋转模式切换**：开启时缓存 `bOrientRotationToMovement` / `bUseControllerRotationYaw` / `bUsePawnControlRotation`，切换到锁定模式（`false` / `true` / `true`）。`ClearLockOn()` 恢复缓存值。
 - **越肩相机**：`LockOnSocketOffset = (0, 80, 80)` 右肩偏移。`Tick()` 中用 `FMath::VInterpTo` 双向插值——锁定中朝 `LockOnSocketOffset`，非锁定朝 `CachedSocketOffset`。`CachedSocketOffset` 仅在 `BeginPlay()` 初始化一次，不随重新锁定覆盖。
 - **自动解锁**：`UpdateLockOn()` 每帧检查目标 `!IsValid()` / `!IsAlive()` / 距离 > `LockOnBreakRadius` → `ClearLockOn()`。玩家死亡也调 `ClearLockOn()`。
@@ -135,7 +138,8 @@ UDataAsset → UTreasureData (static mesh, gold value, pickup sound, scale)
 
 ### Player HUD (`UPlayerHUDWidget`)
 - 与 `UBaseHealthBarWidget` 共享 buffer delay 逻辑（PB_Health + PB_Buffer + PB_Stamina）。
-- `BindToAttributes()` 绑定 `OnHealthChanged` + `OnStaminaChanged` delegate。
+- `BindToAttributes(UAttributeComponent*)` 绑定 `OnHealthChanged` + `OnStaminaChanged` delegate。不持有 `AMyCharacter` 指针。
+- 受击红晕：`AMyCharacter::TakeDamage()` 通过 `SetPendingDamageFlashScale()` 显式推送 flash scale（不再由 Widget 反查角色）。`SetHealthPercent()` 消费后归位。
 - 由 `AMyCharacter::BeginPlay()` 通过 `CreateWidget<>` 创建并 `AddToViewport()`。
 
 ### Stamina & Exhaustion System

@@ -1,6 +1,7 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
 #include "Character/MyCharacter.h"
+#include "Character/Components/PlayerLockOnComponent.h"
 #include "Character/Controller/CharacterController.h"
 
 #include "Camera/CameraComponent.h"
@@ -34,6 +35,8 @@ AMyCharacter::AMyCharacter()
 
 	Camera = CreateDefaultSubobject<UCameraComponent>(TEXT("Camera"));
 	Camera->SetupAttachment(SpringArm);
+
+	LockOnComponent = CreateDefaultSubobject<UPlayerLockOnComponent>(TEXT("LockOnComponent"));
 }
 
 void AMyCharacter::BeginPlay()
@@ -68,37 +71,16 @@ void AMyCharacter::Tick(float DeltaTime)
 		}
 	}
 
-	// SocketOffset 插值：三态 — 非锁定 / 普通锁定 / 锁定 free-run（动态偏移）
-	FVector SocketTarget = bIsLockingOn ? LockOnSocketOffset : CachedSocketOffset;
-	float ArmLengthTarget = CachedTargetArmLength;
-
-	if (bIsLockingOn && ShouldUseLockOnFreeRun())
-	{
-		const FVector DynamicOffset = GetLockOnFreeRunCameraOffsetTarget();
-		SocketTarget = LockOnSocketOffset + DynamicOffset;
-
-		// 后撤时拉远弹簧臂（BackAlpha > 0 → ArmLength bonus）
-		const FVector InputLocal = GetLockOnFreeRunCameraInputLocal();
-		const float BackAlpha = FMath::Max(0.f, -InputLocal.X);
-		ArmLengthTarget = CachedTargetArmLength + LockOnFreeRunCameraBackArmLengthBonus * BackAlpha;
-	}
-
-	const float InterpSpeed = (bIsLockingOn && ShouldUseLockOnFreeRun())
-		? LockOnFreeRunCameraInterpSpeed : LockOnSocketOffsetInterpSpeed;
-
-	SpringArm->SocketOffset = FMath::VInterpTo(
-		SpringArm->SocketOffset, SocketTarget, DeltaTime, InterpSpeed);
-	SpringArm->TargetArmLength = FMath::FInterpTo(
-		SpringArm->TargetArmLength, ArmLengthTarget, DeltaTime, InterpSpeed);
+	UpdateLockOnCamera(DeltaTime);
 
 	// UpdateLockOn 放在早退之前：内部已有死亡/硬直 guard，但有效性清理必须在所有状态下执行
 	UpdateLockOn(DeltaTime);
 
-	if (ActionState == EActionState::EAS_Stunning || ActionState == EActionState::EAC_Dead) return;
+	if (ActionState == EActionState::EAS_Stunning || ActionState == EActionState::EAS_Dead) return;
 
 	if (bIsBlocking && ShouldInterruptBlock())
 	{
-		InterruptBlock(!EquippedShield || ActionState == EActionState::EAS_Exhausted || ActionState == EActionState::EAC_Dead);
+		InterruptBlock(!EquippedShield || ActionState == EActionState::EAS_Exhausted || ActionState == EActionState::EAS_Dead);
 	}
 	TryResumeBlock();
 	UpdateMovementSpeed();
@@ -122,8 +104,7 @@ void AMyCharacter::Attack()
 			{
 				FaceDirection2D(Dir);
 			}
-			GetCharacterMovement()->bOrientRotationToMovement = false;
-			bUseControllerRotationYaw = false;
+			SetMovementRotationMode(false, false);
 		}
 
 		Attributes->UseStamina(15.f);
@@ -170,7 +151,7 @@ void AMyCharacter::Die()
 {
 	InterruptBlock(true);
 	ClearLockOn();
-	ActionState = EActionState::EAC_Dead;
+	ActionState = EActionState::EAS_Dead;
 
 	// 停止移动
 	GetCharacterMovement()->StopMovementImmediately();
@@ -209,11 +190,14 @@ void AMyCharacter::RecoverFromExhaustion()
 float AMyCharacter::TakeDamage(float DamageAmount, const struct FDamageEvent& DamageEvent,
                                class AController* EventInstigator, AActor* DamageCauser)
 {
-	Attributes->ReceiveDamage(DamageAmount);
-	if (DamageAmount <= 0.f)
+	if (PlayerHUDWidget)
 	{
-		LastDamageFlashScale = 1.f;  // 100% 减伤：无掉血，手动归位防串味
+		const float FlashScale = DamageAmount > 0.f ? LastDamageFlashScale : 1.f;
+		PlayerHUDWidget->SetPendingDamageFlashScale(FlashScale);
 	}
+
+	LastDamageFlashScale = 1.f;  // 推送给 HUD 后立即归位，避免下一次掉血串味
+	Attributes->ReceiveDamage(DamageAmount);
 	if (!Attributes->IsAlive())
 	{
 		Die();
@@ -397,20 +381,20 @@ void AMyCharacter::UpdateMovementSpeed()
 		float DotProduct = CalcForwardDot2D(Velocity);
 		const bool bLockOnFreeRun = ShouldUseLockOnFreeRun();
 		// free-run 时传 1.f，让 CalcBaseSpeed 的冲刺判断无条件生效
-		float BaseSpeed = CalcBaseSpeed((bIsLockingOn && !bLockOnFreeRun) ? DotProduct : 1.f);
+		float BaseSpeed = CalcBaseSpeed((IsLockingOn() && !bLockOnFreeRun) ? DotProduct : 1.f);
 		float DirectionMultiplier = 1.f;
 
 		// 普通锁定战斗步伐：在前/侧/后之间连续插值；free-run 时不吃降速。
-		if (bIsLockingOn && !bLockOnFreeRun)
+		if (IsLockingOn() && !bLockOnFreeRun)
 		{
 			const float ClampedDot = FMath::Clamp(DotProduct, -1.f, 1.f);
 			if (ClampedDot >= 0.f)
 			{
-				DirectionMultiplier = FMath::Lerp(LockOnStrafeSpeedMultiplier, 1.f, ClampedDot);
+				DirectionMultiplier = FMath::Lerp(LockOnComponent->GetStrafeSpeedMultiplier(), 1.f, ClampedDot);
 			}
 			else
 			{
-				DirectionMultiplier = FMath::Lerp(LockOnStrafeSpeedMultiplier, LockOnBackSpeedMultiplier, -ClampedDot);
+				DirectionMultiplier = FMath::Lerp(LockOnComponent->GetStrafeSpeedMultiplier(), LockOnComponent->GetBackSpeedMultiplier(), -ClampedDot);
 			}
 		}
 
@@ -509,6 +493,16 @@ void AMyCharacter::OnArmMontageEnded(UAnimMontage* Montage, bool bInterrupted)
 
 // ==================== 锁定 ====================
 
+bool AMyCharacter::IsLockingOn() const
+{
+	return LockOnComponent && LockOnComponent->IsLockingOn();
+}
+
+AEnemy* AMyCharacter::GetLockedTarget() const
+{
+	return LockOnComponent ? LockOnComponent->GetLockedTarget() : nullptr;
+}
+
 void AMyCharacter::ToggleLockOn()
 {
 	if (IsLockingOn())
@@ -523,80 +517,22 @@ void AMyCharacter::ToggleLockOn()
 
 void AMyCharacter::ClearLockOn()
 {
-	if (!bIsLockingOn) return;
+	if (!IsLockingOn()) return;
 
-	bIsLockingOn = false;
-
-	// 清除旧目标的 targeted 标记（目标可能已被销毁或 pending kill）
-	if (IsValid(LockedTarget))
-	{
-		LockedTarget->SetTargetedByPlayer(false);
-	}
-	LockedTarget = nullptr;
-
-	// 恢复锁定前缓存的旋转模式（SocketOffset 由 Tick 插值平滑恢复）
-	GetCharacterMovement()->bOrientRotationToMovement = bCachedOrientRotationToMovement;
-	bUseControllerRotationYaw = bCachedUseControllerRotationYaw;
-	SpringArm->bUsePawnControlRotation = bCachedSpringArmUsePawnControlRotation;
+	ClearCurrentLockOnTarget();
+	RestoreCachedRotationState();
 }
 
 void AMyCharacter::FindLockOnTarget()
 {
-	TArray<AActor*> AllEnemies;
-	UGameplayStatics::GetAllActorsOfClass(this, AEnemy::StaticClass(), AllEnemies);
-
-	AActor* BestTarget = nullptr;
-	float BestScore = MAX_FLT;
-
-	const FVector PlayerLoc = GetActorLocation();
-	const FVector CamForward = Camera->GetForwardVector().GetSafeNormal2D();
-
-	for (AActor* Actor : AllEnemies)
+	if (!LockOnComponent)
 	{
-		AEnemy* Enemy = Cast<AEnemy>(Actor);
-		if (!Enemy || !Enemy->GetAttributes() || !Enemy->GetAttributes()->IsAlive()) continue;
-
-		const FVector ToEnemy = Enemy->GetActorLocation() - PlayerLoc;
-		const float Distance = ToEnemy.Size2D();
-		if (Distance > LockOnRadius) continue;
-
-		// 视角过滤：用相机 forward，不用角色 forward
-		const FVector ToEnemyDir = ToEnemy.GetSafeNormal2D();
-		const float DotAngle = FVector::DotProduct(CamForward, ToEnemyDir);
-		const float CosHalfAngle = FMath::Cos(FMath::DegreesToRadians(LockOnViewAngleDegrees));
-		if (DotAngle < CosHalfAngle) continue;
-
-		// 排序：更靠近视野中心优先，距离作 tie-breaker
-		// DotAngle 越大越靠近中心，转换为 score（越小越好）
-		float Score = (1.f - DotAngle) * 1000.f + Distance;
-		if (Score < BestScore)
-		{
-			BestScore = Score;
-			BestTarget = Enemy;
-		}
+		return;
 	}
 
-	if (BestTarget)
+	if (AEnemy* BestTarget = LockOnComponent->FindBestTarget(GetActorLocation(), Camera->GetForwardVector()))
 	{
-		// 清旧目标标记
-		if (LockedTarget)
-		{
-			LockedTarget->SetTargetedByPlayer(false);
-		}
-
-		LockedTarget = Cast<AEnemy>(BestTarget);
-		bIsLockingOn = true;
-		LockedTarget->SetTargetedByPlayer(true);
-
-		// 缓存当前旋转模式（SocketOffset 由 BeginPlay 初始化，不在此处覆盖）
-		bCachedOrientRotationToMovement = GetCharacterMovement()->bOrientRotationToMovement;
-		bCachedUseControllerRotationYaw = bUseControllerRotationYaw;
-		bCachedSpringArmUsePawnControlRotation = SpringArm->bUsePawnControlRotation;
-
-		// 切换到锁定旋转模式
-		GetCharacterMovement()->bOrientRotationToMovement = false;
-		bUseControllerRotationYaw = true;
-		SpringArm->bUsePawnControlRotation = true;
+		SetLockOnTarget(BestTarget);
 	}
 }
 
@@ -605,36 +541,27 @@ void AMyCharacter::UpdateLockOn(float DeltaTime)
 	if (!IsLockingOn()) return;
 
 	// 1. 有效性检查（无论是否应用旋转都必须执行，防止 targeted 标记残留）
-	if (!IsValid(LockedTarget) || !LockedTarget->GetAttributes() || !LockedTarget->GetAttributes()->IsAlive()
-		|| FVector::Dist2D(GetActorLocation(), LockedTarget->GetActorLocation()) > LockOnBreakRadius)
+	if (!IsLockOnTargetValid())
 	{
 		ClearLockOn();
 		return;
 	}
 
 	// 2. 死亡/硬直中不应用转向
-	if (ActionState == EActionState::EAC_Dead || ActionState == EActionState::EAS_Stunning) return;
+	if (ActionState == EActionState::EAS_Dead || ActionState == EActionState::EAS_Stunning) return;
 
-	// 3. 只锁 yaw，插值转向目标
-	const FVector PlayerLoc = GetActorLocation();
-	const FVector TargetLoc = LockedTarget->GetActorLocation();
-	FRotator LookAt = UKismetMathLibrary::FindLookAtRotation(PlayerLoc, TargetLoc);
-	LookAt.Pitch = 0.f;  // 只锁 yaw
-
-	APlayerController* PC = Cast<APlayerController>(GetController());
-	if (PC)
-	{
-		FRotator Current = PC->GetControlRotation();
-		PC->SetControlRotation(FMath::RInterpTo(Current, LookAt, DeltaTime, LockOnRotationInterpSpeed));
-	}
+	UpdateLockOnControlRotation(DeltaTime);
 
 	// [调试]
-	FDebugDrawHelper::Add(FString::Printf(TEXT("LockOn: %s"), *LockedTarget->GetName()), FColor::Yellow);
+	if (const AEnemy* LockedTarget = GetLockedTarget())
+	{
+		FDebugDrawHelper::Add(FString::Printf(TEXT("LockOn: %s"), *LockedTarget->GetName()), FColor::Yellow);
+	}
 }
 
 bool AMyCharacter::ShouldUseLockOnFreeRun() const
 {
-	return bIsLockingOn && bIsSprinting
+	return IsLockingOn() && bIsSprinting
 		&& ActionState == EActionState::EAS_UnOccupied
 		&& !GetCharacterMovement()->IsFalling()
 		&& GetLastMovementInputVector().SizeSquared2D() > KINDA_SMALL_NUMBER;
@@ -654,15 +581,32 @@ FVector AMyCharacter::GetLockOnFreeRunCameraInputLocal() const
 
 FVector AMyCharacter::GetLockOnFreeRunCameraOffsetTarget() const
 {
+	if (!LockOnComponent)
+	{
+		return FVector::ZeroVector;
+	}
+
 	const FVector Local = GetLockOnFreeRunCameraInputLocal();
 	const float SideAlpha = Local.Y;   // [-1, 1]：左负右正
 	const float BackAlpha = FMath::Max(0.f, -Local.X);  // [0, 1]：后撤权重
 
 	return FVector(
 		0.f,
-		SideAlpha * LockOnFreeRunCameraSideOffset,
-		BackAlpha * LockOnFreeRunCameraBackHeightOffset
+		SideAlpha * LockOnComponent->GetFreeRunCameraSideOffset(),
+		BackAlpha * LockOnComponent->GetFreeRunCameraBackHeightOffset()
 	);
+}
+
+void AMyCharacter::SetMovementRotationMode(bool bOrientToMovement, bool bUseControllerYaw)
+{
+	GetCharacterMovement()->bOrientRotationToMovement = bOrientToMovement;
+	bUseControllerRotationYaw = bUseControllerYaw;
+}
+
+void AMyCharacter::ApplyCurrentLockOnRotationMode()
+{
+	const bool bFreeRun = ShouldUseLockOnFreeRun();
+	SetMovementRotationMode(bFreeRun, !bFreeRun);
 }
 
 void AMyCharacter::ApplyLockOnRotationMode()
@@ -670,39 +614,134 @@ void AMyCharacter::ApplyLockOnRotationMode()
 	// 攻击中不覆盖旋转：普通锁定攻击保持双 true，free-run 攻击保持 Attack() 入口设的双 false
 	if (ActionState == EActionState::EAS_Attacking) return;
 
-	const bool bFreeRun = ShouldUseLockOnFreeRun();
-	if (bFreeRun)
+	if (IsLockingOn())
 	{
-		GetCharacterMovement()->bOrientRotationToMovement = true;
-		bUseControllerRotationYaw = false;
-	}
-	else if (bIsLockingOn)
-	{
-		GetCharacterMovement()->bOrientRotationToMovement = false;
-		bUseControllerRotationYaw = true;
+		ApplyCurrentLockOnRotationMode();
 	}
 }
 
 void AMyCharacter::RestorePostAttackRotationMode()
 {
-	if (bIsLockingOn)
+	if (IsLockingOn())
 	{
-		const bool bFreeRun = ShouldUseLockOnFreeRun();
-		if (bFreeRun)
-		{
-			GetCharacterMovement()->bOrientRotationToMovement = true;
-			bUseControllerRotationYaw = false;
-		}
-		else
-		{
-			GetCharacterMovement()->bOrientRotationToMovement = false;
-			bUseControllerRotationYaw = true;
-		}
+		ApplyCurrentLockOnRotationMode();
 	}
 	else
 	{
-		GetCharacterMovement()->bOrientRotationToMovement = bCachedOrientRotationToMovement;
-		bUseControllerRotationYaw = bCachedUseControllerRotationYaw;
+		SetMovementRotationMode(bCachedOrientRotationToMovement, bCachedUseControllerRotationYaw);
+	}
+}
+
+void AMyCharacter::UpdateLockOnCamera(float DeltaTime)
+{
+	if (!LockOnComponent)
+	{
+		return;
+	}
+
+	FVector SocketTarget = FVector::ZeroVector;
+	float ArmLengthTarget = CachedTargetArmLength;
+	float InterpSpeed = LockOnComponent->GetSocketOffsetInterpSpeed();
+	GetLockOnCameraTargets(SocketTarget, ArmLengthTarget, InterpSpeed);
+
+	SpringArm->SocketOffset = FMath::VInterpTo(
+		SpringArm->SocketOffset, SocketTarget, DeltaTime, InterpSpeed);
+	SpringArm->TargetArmLength = FMath::FInterpTo(
+		SpringArm->TargetArmLength, ArmLengthTarget, DeltaTime, InterpSpeed);
+}
+
+void AMyCharacter::GetLockOnCameraTargets(FVector& OutSocketTarget, float& OutArmLengthTarget, float& OutInterpSpeed) const
+{
+	if (!LockOnComponent)
+	{
+		OutSocketTarget = CachedSocketOffset;
+		OutArmLengthTarget = CachedTargetArmLength;
+		OutInterpSpeed = 0.f;
+		return;
+	}
+
+	OutSocketTarget = IsLockingOn() ? LockOnComponent->GetSocketOffset() : CachedSocketOffset;
+	OutArmLengthTarget = CachedTargetArmLength;
+
+	const bool bFreeRun = IsLockingOn() && ShouldUseLockOnFreeRun();
+	if (bFreeRun)
+	{
+		const FVector DynamicOffset = GetLockOnFreeRunCameraOffsetTarget();
+		OutSocketTarget = LockOnComponent->GetSocketOffset() + DynamicOffset;
+
+		// 后撤时拉远弹簧臂（BackAlpha > 0 -> ArmLength bonus）
+		const FVector InputLocal = GetLockOnFreeRunCameraInputLocal();
+		const float BackAlpha = FMath::Max(0.f, -InputLocal.X);
+		OutArmLengthTarget = CachedTargetArmLength + LockOnComponent->GetFreeRunCameraBackArmLengthBonus() * BackAlpha;
+	}
+
+	OutInterpSpeed = bFreeRun ? LockOnComponent->GetFreeRunCameraInterpSpeed() : LockOnComponent->GetSocketOffsetInterpSpeed();
+}
+
+void AMyCharacter::CacheLockOnRotationState()
+{
+	// SocketOffset 由 BeginPlay 初始化，不在此处覆盖
+	bCachedOrientRotationToMovement = GetCharacterMovement()->bOrientRotationToMovement;
+	bCachedUseControllerRotationYaw = bUseControllerRotationYaw;
+	bCachedSpringArmUsePawnControlRotation = SpringArm->bUsePawnControlRotation;
+}
+
+void AMyCharacter::EnterLockOnRotationMode()
+{
+	SetMovementRotationMode(false, true);
+	SpringArm->bUsePawnControlRotation = true;
+}
+
+void AMyCharacter::RestoreCachedRotationState()
+{
+	// SocketOffset 由 Tick 插值平滑恢复，ClearLockOn 只恢复旋转控制模式
+	SetMovementRotationMode(bCachedOrientRotationToMovement, bCachedUseControllerRotationYaw);
+	SpringArm->bUsePawnControlRotation = bCachedSpringArmUsePawnControlRotation;
+}
+
+void AMyCharacter::ClearCurrentLockOnTarget()
+{
+	if (LockOnComponent)
+	{
+		LockOnComponent->ClearLockedTarget();
+	}
+}
+
+void AMyCharacter::SetLockOnTarget(AEnemy* NewTarget)
+{
+	if (!NewTarget || !LockOnComponent)
+	{
+		return;
+	}
+
+	LockOnComponent->SetLockedTarget(NewTarget);
+	CacheLockOnRotationState();
+	EnterLockOnRotationMode();
+}
+
+bool AMyCharacter::IsLockOnTargetValid() const
+{
+	return LockOnComponent && LockOnComponent->IsCurrentTargetValid(GetActorLocation());
+}
+
+void AMyCharacter::UpdateLockOnControlRotation(float DeltaTime) const
+{
+	const AEnemy* LockedTarget = GetLockedTarget();
+	if (!LockedTarget)
+	{
+		return;
+	}
+
+	// 只锁 yaw，插值转向目标
+	const FVector PlayerLoc = GetActorLocation();
+	const FVector TargetLoc = LockedTarget->GetActorLocation();
+	FRotator LookAt = UKismetMathLibrary::FindLookAtRotation(PlayerLoc, TargetLoc);
+	LookAt.Pitch = 0.f;
+
+	if (APlayerController* PC = Cast<APlayerController>(GetController()))
+	{
+		const FRotator Current = PC->GetControlRotation();
+		PC->SetControlRotation(FMath::RInterpTo(Current, LookAt, DeltaTime, LockOnComponent->GetRotationInterpSpeed()));
 	}
 }
 
@@ -722,7 +761,7 @@ void AMyCharacter::InitializePlayerHUD()
 		if (PlayerHUDWidget)
 		{
 			PlayerHUDWidget->AddToViewport();
-			PlayerHUDWidget->BindToAttributes(Attributes, this);
+			PlayerHUDWidget->BindToAttributes(Attributes);
 		}
 	}
 }

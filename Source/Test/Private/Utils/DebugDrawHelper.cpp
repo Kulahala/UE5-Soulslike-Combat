@@ -1,5 +1,4 @@
 #include "Utils/DebugDrawHelper.h"
-#include "Enemy/Enemy.h"
 #include "DrawDebugHelpers.h"
 
 static TArray<FDebugDrawEntry> GDebugEntries;

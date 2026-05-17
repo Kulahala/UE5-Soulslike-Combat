@@ -1,9 +1,7 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
-
 #include "Items/Treasures/Treasure.h"
 
-#include "AssetTypeActions/AssetDefinition_SoundBase.h"
 #include "AttributeComponent/AttributeComponent.h"
 #include "Character/MyCharacter.h"
 #include "Items/Treasures/TreasureData.h"
@@ -20,11 +18,6 @@ ATreasure::ATreasure()
 		GetMesh()->SetCollisionResponseToAllChannels(ECR_Ignore);
 		GetMesh()->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
 	}
-}
-
-void ATreasure::Tick(float DeltaSeconds)
-{
-	Super::Tick(DeltaSeconds);
 }
 
 void ATreasure::InitializeFromData(UTreasureData* Data)
@@ -45,11 +38,6 @@ void ATreasure::InitializeFromData(UTreasureData* Data)
 	{
 		PickSound = Data->PickUpSound;
 	}
-}
-
-void ATreasure::BeginPlay()
-{
-	Super::BeginPlay();
 }
 
 void ATreasure::SphereEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,

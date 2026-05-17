@@ -4,17 +4,18 @@
 #include "Enemy/Enemy.h"
 
 #include "AIController.h"
-#include "Items/Weapon/Weapon.h"
-#include "NiagaraFunctionLibrary.h"
 #include "AttributeComponent/AttributeComponent.h"
+#include "Combat/CombatTeamHelper.h"
 #include "components/CapsuleComponent.h"
 #include "Components/WidgetComponent.h"
 #include "Engine/TargetPoint.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "HUD/BaseHealthBarWidget.h"
 #include "HUD/HealthBarComponent.h"
+#include "Items/Weapon/Weapon.h"
 #include "Kismet/GameplayStatics.h"
 #include "Navigation/PathFollowingComponent.h"
+#include "NiagaraFunctionLibrary.h"
 #include "Perception/AIPerceptionComponent.h"
 #include "Perception/AISenseConfig_Sight.h"
 #include "Utils/DebugDrawHelper.h"
@@ -141,16 +142,7 @@ void AEnemy::GetHit_Implementation(const FVector& ImpactPoint, AActor* HitInstig
 	if (Attributes->IsAlive() && HitInstigator)
 	{
 		// 只锁定不同阵营的目标，防止被同类打到后锁定队友
-		bool bSameTeam = false;
-		for (const FName& Tag : Tags)
-		{
-			if (HitInstigator->ActorHasTag(Tag))
-			{
-				bSameTeam = true;
-				break;
-			}
-		}
-		if (!bSameTeam)
+		if (!FCombatTeamHelper::ShareTeamTag(this, HitInstigator))
 		{
 			ChasingTarget = HitInstigator;
 		}
@@ -645,6 +637,75 @@ void AEnemy::HandleCooldownPositioning(float DeltaTime, float DistanceToTarget, 
 
 // ==================== 战斗拉扯 ====================
 
+const TCHAR* AEnemy::GetCombatMoveDebugName(EEnemyCombatMoveType MoveType)
+{
+	switch (MoveType)
+	{
+	case EEnemyCombatMoveType::Retreat:
+		return TEXT("Retreat");
+	case EEnemyCombatMoveType::BackDiag:
+		return TEXT("BackDiag");
+	case EEnemyCombatMoveType::Strafe:
+		return TEXT("Strafe");
+	case EEnemyCombatMoveType::Press:
+		return TEXT("Press");
+	default:
+		return TEXT("Ready");
+	}
+}
+
+AEnemy::FEnemyCombatMovePlan AEnemy::BuildCombatMovePlan(float DistanceToTarget, const FVector& ToTarget) const
+{
+	FEnemyCombatMovePlan Plan;
+	if (!ChasingTarget)
+	{
+		return Plan;
+	}
+
+	Plan.MoveSpeed = PatrolSpeed;
+
+	const FVector Right = FVector::CrossProduct(FVector::UpVector, ToTarget).GetSafeNormal2D();
+	const float SideDir = FMath::RandBool() ? 1.f : -1.f;
+
+	if (DistanceToTarget < CombatTooCloseRadius)
+	{
+		// 后撤
+		const float TargetDist = FMath::FRandRange(CombatPreferredMinRadius, CombatPreferredMaxRadius);
+		Plan.MoveType = EEnemyCombatMoveType::Retreat;
+		Plan.GoalLocation = ChasingTarget->GetActorLocation() - ToTarget * TargetDist;
+		Plan.bUseRetreatSpeedEase = true;
+	}
+	else if (DistanceToTarget < CombatPreferredMinRadius)
+	{
+		// 斜后撤
+		const float TargetDist = FMath::FRandRange(CombatPreferredMinRadius, CombatPreferredMaxRadius);
+		const FVector BackOffset = -ToTarget * TargetDist;
+		const FVector SideOffset = Right * SideDir * TargetDist * 0.3f;
+		Plan.MoveType = EEnemyCombatMoveType::BackDiag;
+		Plan.GoalLocation = ChasingTarget->GetActorLocation() + BackOffset + SideOffset;
+		Plan.bUseRetreatSpeedEase = true;
+	}
+	else if (DistanceToTarget <= CombatPreferredMaxRadius)
+	{
+		// 侧移：围绕目标旋转固定角度，保持当前半径
+		const FVector OffsetFromTarget = -ToTarget * DistanceToTarget;
+		const FVector RotatedOffset = OffsetFromTarget.RotateAngleAxis(
+			SideDir * CombatStrafeAngleDegrees, FVector::UpVector);
+		Plan.MoveType = EEnemyCombatMoveType::Strafe;
+		Plan.GoalLocation = ChasingTarget->GetActorLocation() + RotatedOffset;
+	}
+	else
+	{
+		// 冷却期目标太远时只压回到距离环外侧，不直接压进攻击距离
+		const float TargetDist = CombatPreferredMaxRadius - CombatPressMargin;
+		Plan.MoveType = EEnemyCombatMoveType::Press;
+		Plan.GoalLocation = ChasingTarget->GetActorLocation() - ToTarget * TargetDist;
+		Plan.MoveSpeed = ChaseSpeed;
+	}
+
+	return Plan;
+}
+
 void AEnemy::UpdateCombatMovement(float DeltaTime, float DistanceToTarget, const FVector& ToTarget)
 {
 	if (bRepositionInProgress) return;
@@ -652,55 +713,18 @@ void AEnemy::UpdateCombatMovement(float DeltaTime, float DistanceToTarget, const
 	const float Now = GetWorld()->GetTimeSeconds();
 	if (Now < NextCombatRepositionTime) return;
 
-	FVector GoalLocation;
-	float TargetDist;
-	FVector Right = FVector::CrossProduct(FVector::UpVector, ToTarget).GetSafeNormal2D();
-	float SideDir = FMath::RandBool() ? 1.f : -1.f;
-	float MoveSpeed = PatrolSpeed;
-	bool bUseRetreatSpeedEase = false;
-
-	if (DistanceToTarget < CombatTooCloseRadius)
-	{
-		// 后撤
-		TargetDist = FMath::FRandRange(CombatPreferredMinRadius, CombatPreferredMaxRadius);
-		GoalLocation = ChasingTarget->GetActorLocation() - ToTarget * TargetDist;
-		bUseRetreatSpeedEase = true;
-		LastCombatMoveDebug = TEXT("Retreat");
-	}
-	else if (DistanceToTarget < CombatPreferredMinRadius)
-	{
-		// 斜后撤
-		TargetDist = FMath::FRandRange(CombatPreferredMinRadius, CombatPreferredMaxRadius);
-		FVector BackOffset = -ToTarget * TargetDist;
-		FVector SideOffset = Right * SideDir * TargetDist * 0.3f;
-		GoalLocation = ChasingTarget->GetActorLocation() + BackOffset + SideOffset;
-		bUseRetreatSpeedEase = true;
-		LastCombatMoveDebug = TEXT("BackDiag");
-	}
-	else if (DistanceToTarget <= CombatPreferredMaxRadius)
-	{
-		// 侧移：围绕目标旋转固定角度，保持当前半径
-		FVector OffsetFromTarget = -ToTarget * DistanceToTarget;
-		FVector RotatedOffset = OffsetFromTarget.RotateAngleAxis(SideDir * CombatStrafeAngleDegrees, FVector::UpVector);
-		GoalLocation = ChasingTarget->GetActorLocation() + RotatedOffset;
-		LastCombatMoveDebug = TEXT("Strafe");
-	}
-	else
-	{
-		// 冷却期目标太远时只压回到距离环外侧，不直接压进攻击距离
-		TargetDist = CombatPreferredMaxRadius - CombatPressMargin;
-		GoalLocation = ChasingTarget->GetActorLocation() - ToTarget * TargetDist;
-		MoveSpeed = ChaseSpeed;
-		LastCombatMoveDebug = TEXT("Press");
-	}
+	const FEnemyCombatMovePlan MovePlan = BuildCombatMovePlan(DistanceToTarget, ToTarget);
+	if (!MovePlan.IsValid()) return;
 
 	ClearCombatRetreatSpeedEase();
-	GetCharacterMovement()->MaxWalkSpeed = MoveSpeed;
-	if (MoveToCombatLocation(GoalLocation))
+	GetCharacterMovement()->MaxWalkSpeed = MovePlan.MoveSpeed;
+	LastCombatMoveDebug = GetCombatMoveDebugName(MovePlan.MoveType);
+
+	if (MoveToCombatLocation(MovePlan.GoalLocation))
 	{
-		if (bUseRetreatSpeedEase)
+		if (MovePlan.bUseRetreatSpeedEase)
 		{
-			StartCombatRetreatSpeedEase(GoalLocation);
+			StartCombatRetreatSpeedEase(MovePlan.GoalLocation);
 		}
 		// 成功：正常节奏间隔
 		const float Interval = FMath::FRandRange(CombatRepositionIntervalMin, CombatRepositionIntervalMax);
@@ -709,7 +733,7 @@ void AEnemy::UpdateCombatMovement(float DeltaTime, float DistanceToTarget, const
 	else
 	{
 		// 失败：短间隔重试
-		NextCombatRepositionTime = Now + 0.15f;
+		NextCombatRepositionTime = Now + MovePlan.RetryDelay;
 	}
 }
 
@@ -888,18 +912,31 @@ bool AEnemy::IsValidCombatTarget(const AActor* Target) const
 
 // ==================== 血条 ====================
 
-void AEnemy::ShowHealthBar()
+void AEnemy::RevealHealthBar()
 {
-	if (HealthBarWidgetComp)
+	if (!HealthBarWidgetComp)
 	{
-		HealthBarWidgetComp->SetVisibility(true);
+		return;
+	}
 
-		// 重置透明度，防止上次 FadeOut 动画把 opacity 设为 0 后无法恢复
-		if (UUserWidget* Widget = HealthBarWidgetComp->GetUserWidgetObject())
+	HealthBarWidgetComp->SetVisibility(true);
+
+	if (UUserWidget* Widget = HealthBarWidgetComp->GetUserWidgetObject())
+	{
+		// FadeOut 可能把 widget 自身设为 Hidden/Collapsed，重显时显式拉回可见态。
+		Widget->SetVisibility(ESlateVisibility::Visible);
+		Widget->SetRenderOpacity(1.0f);
+
+		if (UBaseHealthBarWidget* HealthWidget = Cast<UBaseHealthBarWidget>(Widget))
 		{
-			Widget->SetRenderOpacity(1.0f);
+			HealthWidget->CancelFadeOutAnim();
 		}
 	}
+}
+
+void AEnemy::ShowHealthBar()
+{
+	RevealHealthBar();
 
 	// 每次调用都会重置倒计时
 	GetWorldTimerManager().SetTimer(
@@ -953,18 +990,7 @@ void AEnemy::SetTargetedByPlayer(bool bTargeted)
 	if (bTargeted)
 	{
 		// 锁定时确保血条可见（覆盖未挨打过的敌人和正在淡出的敌人）
-		if (HealthBarWidgetComp)
-		{
-			HealthBarWidgetComp->SetVisibility(true);
-			if (UUserWidget* Widget = HealthBarWidgetComp->GetUserWidgetObject())
-			{
-				Widget->SetRenderOpacity(1.0f);
-				if (UBaseHealthBarWidget* HealthWidget = Cast<UBaseHealthBarWidget>(Widget))
-				{
-					HealthWidget->CancelFadeOutAnim();
-				}
-			}
-		}
+		RevealHealthBar();
 		GetWorldTimerManager().ClearTimer(HealthBarHideTimer);
 	}
 	else
