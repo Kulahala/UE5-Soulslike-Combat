@@ -48,4 +48,29 @@ public:
 	// 格挡成功粒子
 	UPROPERTY(EditAnywhere, Category = "Block", meta = (ToolTip = "格挡成功时播放的粒子特效。"))
 	UNiagaraSystem* BlockParticle;
+
+	/* 弹反 */
+	// 弹反体力消耗（按下时即扣除，不论成功/失误）
+	UPROPERTY(EditAnywhere, Category = "Parry", meta = (ClampMin = "0.0", ToolTip = "弹反的体力消耗。不论成功或失误都扣除。"))
+	float ParryStaminaCost = 15.f;
+
+	// 被弹反方的硬直时长（秒）
+	UPROPERTY(EditAnywhere, Category = "Parry", meta = (ClampMin = "0.1", ToolTip = "弹反成功时攻击方的硬直时长（秒）。"))
+	float ParryStaggerDuration = 1.5f;
+
+	// 被弹反方硬直蒙太奇的播放速率
+	UPROPERTY(EditAnywhere, Category = "Parry", meta = (ClampMin = "0.1", ToolTip = "被弹反方硬直播放速率。0.5=半速。"))
+	float ParryStaggerPlayRate = 0.5f;
+
+	// 弹反后隐形冷却时间（秒），防止连续点按
+	UPROPERTY(EditAnywhere, Category = "Parry", meta = (ClampMin = "0.0", ToolTip = "弹反后的隐形冷却时间（秒）。弹反动画结束到下一次可弹反的最短间隔。"))
+	float ParryCooldown = 0.4f;
+
+	// 弹反成功音效
+	UPROPERTY(EditAnywhere, Category = "Parry", meta = (ToolTip = "弹反成功时播放的音效。"))
+	USoundBase* ParrySound;
+
+	// 弹反成功粒子特效
+	UPROPERTY(EditAnywhere, Category = "Parry", meta = (ToolTip = "弹反成功时播放的粒子特效。"))
+	UNiagaraSystem* ParryParticle;
 };

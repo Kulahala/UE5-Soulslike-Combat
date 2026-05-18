@@ -204,6 +204,55 @@ void AEnemy::Die()
 	SetLifeSpan(CorpseLifespan);
 }
 
+// ==================== 弹反 ====================
+
+void AEnemy::ApplyParried(float Duration, float PlayRate, AActor* ParryInstigator)
+{
+	// 连续弹反覆盖：先清旧 timer 和恢复速率
+	GetWorldTimerManager().ClearTimer(ParryRecoveryTimer);
+	if (UAnimInstance* Anim = GetMesh()->GetAnimInstance())
+	{
+		if (UAnimMontage* ActiveMontage = Anim->GetCurrentActiveMontage())
+		{
+			Anim->Montage_SetPlayRate(ActiveMontage, 1.f);
+		}
+	}
+
+	// 停止攻击蒙太奇（NotifyEnd 自动清 IgnoreActors 黑名单）
+	if (UAnimInstance* AnimForStop = GetMesh()->GetAnimInstance())
+	{
+		AnimForStop->Montage_Stop(0.05f);
+	}
+
+	SetEnemyState(EEnemyState::EES_Parried);
+	DirectionalHitReact(GetActorLocation(), ParryInstigator);
+	if (UAnimInstance* Anim = GetMesh()->GetAnimInstance())
+	{
+		if (UAnimMontage* ActiveMontage = Anim->GetCurrentActiveMontage())
+		{
+			Anim->Montage_SetPlayRate(ActiveMontage, PlayRate);
+		}
+	}
+	GetWorldTimerManager().SetTimer(
+		ParryRecoveryTimer, this, &AEnemy::RecoverFromParry, Duration, false);
+}
+
+void AEnemy::RecoverFromParry()
+{
+	if (EnemyState != EEnemyState::EES_Parried) return;
+
+	// 恢复蒙太奇速率
+	if (UAnimInstance* Anim = GetMesh()->GetAnimInstance())
+	{
+		if (UAnimMontage* ActiveMontage = Anim->GetCurrentActiveMontage())
+		{
+			Anim->Montage_SetPlayRate(ActiveMontage, 1.f);
+		}
+	}
+	// 委托 CheckCombatTarget 统一判定：有效目标→按距离切 Combating/Chasing，无效→Patrolling
+	CheckCombatTarget();
+}
+
 // ==================== 攻击 ====================
 
 void AEnemy::Attack()
@@ -305,10 +354,11 @@ void AEnemy::CheckCombatTarget()
 		return;
 	}
 
-	// 战斗族状态（Combating/Attacking/Stunned）使用退出滞后半径，防止边界抖动
+	// 战斗族状态（Combating/Attacking/Stunned/Parried）使用退出滞后半径，防止边界抖动
 	const bool bInCombatFamily = EnemyState == EEnemyState::EES_Combating
 		|| EnemyState == EEnemyState::EES_Attacking
-		|| EnemyState == EEnemyState::EES_Stunned;
+		|| EnemyState == EEnemyState::EES_Stunned
+		|| EnemyState == EEnemyState::EES_Parried;
 	const float CombatCheckRadius = bInCombatFamily
 		? (CombatingRadius + CombatExitBuffer)
 		: CombatingRadius;
@@ -381,6 +431,7 @@ void AEnemy::SetEnemyState(EEnemyState NewState)
 	}
 	case EEnemyState::EES_Attacking:
 	case EEnemyState::EES_Stunned:
+	case EEnemyState::EES_Parried:
 		StopEnemyMovementIfPossible();
 		bRepositionInProgress = false;
 		break;
@@ -433,8 +484,13 @@ void AEnemy::Tick(float DeltaTime)
 	Super::Tick(DeltaTime);
 
 	if (EnemyState == EEnemyState::EES_Dead || EnemyState == EEnemyState::EES_Stunned || EnemyState ==
-		EEnemyState::EES_Attacking)
+		EEnemyState::EES_Attacking || EnemyState == EEnemyState::EES_Parried)
 	{
+		// [调试] 弹反硬直标识（硬停早退前，确保可见）
+		if (FDebugDrawHelper::IsEnemyEnabled() && EnemyState == EEnemyState::EES_Parried)
+		{
+			FDebugDrawHelper::Add(TEXT("PAR"), FColor::Red);
+		}
 		return;
 	}
 
@@ -1066,4 +1122,5 @@ void AEnemy::ClearAllTimers()
 	ClearPatrolTimers();
 	GetWorldTimerManager().ClearTimer(HealthBarHideTimer);
 	GetWorldTimerManager().ClearTimer(AttackCooldownTimer);
+	GetWorldTimerManager().ClearTimer(ParryRecoveryTimer);
 }

@@ -40,6 +40,7 @@ protected:
 	void Input_BlockStart();
 	void Input_BlockEnd();
 	void Input_LockOn();
+	void Input_Parry();
 
 	/* ================= 增强输入资产声明 ================= */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input", meta = (ToolTip = "默认输入映射上下文。"))
@@ -75,6 +76,9 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input", meta = (ToolTip = "锁定输入动作（中键）。"))
 	UInputAction* LockOnAction;
 
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input", meta = (ToolTip = "弹反输入动作。"))
+	UInputAction* ParryAction;
+
 private:
 	// 输入调试状态
 	FVector2D DebugMoveInput = FVector2D::ZeroVector;
@@ -86,6 +90,7 @@ private:
 	float DebugEquipExpireTime = 0.f;
 	float DebugArmExpireTime = 0.f;
 	float DebugLockOnExpireTime = 0.f;
+	float DebugParryExpireTime = 0.f;
 
 public:
 	FString GetDebugInputText() const;

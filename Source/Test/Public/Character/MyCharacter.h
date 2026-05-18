@@ -52,6 +52,16 @@ public:
 	virtual FBlockResult TryBlockHit(const FVector& ImpactPoint, float IncomingDamage,
 	                                 AActor* Attacker, AActor* DamageCauser) override;
 
+	/* 弹反 */
+	void Input_Parry();
+	bool CanStartParry() const;
+	void SetParryActive(bool bActive);
+	void StartParryCooldown();
+	void ResetParryCooldown();
+	void InterruptParry();
+	void ClearParryState();
+	void OnParryMontageEnded(UAnimMontage* Montage, bool bInterrupted);
+
 	/* 移动状态 */
 	void Sprint();
 	void StopSprinting();
@@ -154,6 +164,14 @@ private:
 	bool bBlockInputHeld = false;
 	UPROPERTY()
 	AShield* EquippedShield;
+
+	/* 弹反 */
+	bool bIsParrying = false;
+	bool bParryActive = false;
+	bool bParryOnCooldown = false;
+	FTimerHandle ParryCooldownTimer;
+	UPROPERTY(EditDefaultsOnly, Category = "Montages", meta = (ToolTip = "弹反蒙太奇。"))
+	UAnimMontage* ParryMontage;
 
 	FTimerHandle ExhaustionTimerHandle;
 
