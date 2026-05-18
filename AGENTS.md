@@ -58,17 +58,16 @@ All gameplay states are defined as `UENUM` enums in `CharacterTypes.h` — the s
 | Enum | C++ Values | Used By |
 |------|-----------|---------|
 | `EWeaponState` | `EWS_Unequipped`, `EWS_OneHandEquipped`, `EWS_TwoHandEquipped` | `ABaseCharacter`, `AMyCharacter`, `USlashAnimInstance` |
-| `EActionState` | `EAS_UnOccupied`, `EAS_Attacking`, `EAS_Arming`, `EAS_Stunning`, `EAS_Exhausted`, `EAS_Dead` | `AMyCharacter` |
-| `EArmWeaponState` | `AWS_Arming`, `AWS_Disarming` | `AMyCharacter`, `USlashAnimInstance` |
+| `EActionState` | `EAS_UnOccupied`, `EAS_Attacking`, `EAS_Stunning`, `EAS_Exhausted`, `EAS_Dead` | `AMyCharacter` |
 | `EEnemyState` | `EES_UnOccupied`, `EES_Patrolling`, `EES_Searching`, `EES_Chasing`, `EES_Combating`, `EES_Attacking`, `EES_Stunned`, `EES_Dead` | `AEnemy` |
 | `EItemState` | `EIS_Spawning`, `EIS_Dropped`, `EIS_Equipped` | `Aitem` (in `item.h`) |
 
-**Critical: state flow is mixed C++ + montage delegate + `AnimNotify` driven.** Entry states are often set directly in C++ (`Attack()`, `GetHit_Implementation()`, `Die()`, `SetEnemyState()`). Recovery commonly uses `FOnMontageEnded` delegates with `bInterrupted` guards, while `AnimNotify` classes handle collision windows and designer-timed recoveries (`UAnimNotifyState_WeaponCollision`, `UAnimNotify_SetActionState`, `UAnimNotify_SetArmWeaponState`, `UAnimNotify_EnemyHitReactEnd`, `UAnimNotify_EnemyAttackEnd`, `UAnimNotify_CharacterHitReactEnd`). Do not hardcode recovery transitions in `Tick()`.
+**Critical: state flow is mixed C++ + montage delegate + `AnimNotify` driven.** Entry states are often set directly in C++ (`Attack()`, `GetHit_Implementation()`, `Die()`, `SetEnemyState()`). Recovery commonly uses `FOnMontageEnded` delegates with `bInterrupted` guards, while `AnimNotify` classes handle collision windows and designer-timed recoveries (`UAnimNotifyState_WeaponCollision`, `UAnimNotify_SetActionState`, `UAnimNotify_EnemyHitReactEnd`, `UAnimNotify_EnemyAttackEnd`, `UAnimNotify_CharacterHitReactEnd`). Do not hardcode recovery transitions in `Tick()`.
 
 ### Montage Helper Boundaries
 
 - `ABaseCharacter::PlayMontageSection(UAnimMontage*, const FName&)` is intentionally a tiny helper that only does `Montage_Play()` + `Montage_JumpToSection()`.
-- End-delegate binding stays in the semantic callsites (`PlayAttackMontage()`, `PlayHitReactMontage()`, `PlayArmMontage()`). Do not replace this with a "universal montage entry" unless those recovery semantics genuinely converge.
+- End-delegate binding stays in the semantic callsites (`PlayAttackMontage()`, `PlayHitReactMontage()`). Do not replace this with a "universal montage entry" unless those recovery semantics genuinely converge.
 
 ### Class Hierarchy
 
@@ -86,7 +85,7 @@ ACharacter
 ├── AMyCharacter + IBlockableInterface (UAttributeComponent, spring arm + camera, weapon/shield equipping, hold-to-block)
 └── AEnemy + IHitInterface (AI patrol/search/chase/combat FSM, directional hit react)
 
-APlayerController → ACharacterController (Enhanced Input, move/look/jump/equip/attack/arm/sprint/walk/block/lock-on bindings, input debug snapshot owner)
+APlayerController → ACharacterController (Enhanced Input, move/look/jump/equip/attack/sprint/walk/block/lock-on bindings, input debug snapshot owner)
 UActorComponent → UAttributeComponent (health, gold, OnHealthChanged delegate)
                └── UPlayerLockOnComponent (lock-on state, target selection, camera tunables)
 UWidgetComponent → UHealthBarComponent
@@ -128,7 +127,7 @@ UInterface → UBlockableInterface (weapon hit interception before final damage 
 - `ACharacterController` binds `BlockAction` start/end to `StartBlockInput()` / `ReleaseBlockInput()`.
 - `AShield` is equipped to the offhand via `EquipToOffhand()` and provides block tuning values:
   `BlockHalfAngleDegrees`, `BlockedDamageMultiplier`, `BlockStaminaCostPerDamage`, `BlockMoveSpeedMultiplier`.
-- `AMyCharacter::CanStartBlock()` is intentionally **independent of `ArmWeaponState`**. Current block-start gates are: shield equipped, `EAS_UnOccupied`, `!bIsArming`, and grounded.
+- `AMyCharacter::CanStartBlock()` is intentionally independent of weapon equip state. Current block-start gates are: shield equipped, `EAS_UnOccupied`, and grounded.
 - `AWeapon::ExecuteWeaponTrace()` checks `IBlockableInterface` on the hit actor before final damage application.
 - Successful blocks reduce or redirect damage through `FBlockResult`, suppress shared `DirectionalHitReact()` / `PlayHitEffects()`, and play shield-specific sound/particle feedback.
 - Blocked hits still flow through `GetHit` via `FPendingHitContext`, so scaled knockback and class-specific feedback can still happen even when normal hit react is suppressed.
@@ -187,7 +186,7 @@ UInterface → UBlockableInterface (weapon hit interception before final damage 
 - Current base speeds are walk `150`, run `300`, sprint `450`. Non-lock movement is treated as free movement and passes a forward dot into `CalcBaseSpeed()` so sprint intent can apply without fake side/back penalties.
 - Ordinary lock-on movement uses directional speed interpolation from forward `1.0` through `LockOnStrafeSpeedMultiplier` to `LockOnBackSpeedMultiplier`; current defaults are strafe `0.95` and back `0.9`.
 - Lock-on Sprint free-run bypasses lock-on directional slowdown: any movement-input direction can reach sprint speed while the locked camera remains on the enemy.
-- The state multiplier is chosen before directional scaling: blocking uses `EquippedShield->BlockMoveSpeedMultiplier`, transient `bIsArming` uses `0.875f`, otherwise `1.0f`. Being armed / holding a weapon no longer reduces normal movement speed by itself.
+- The state multiplier is chosen before directional scaling: blocking uses `EquippedShield->BlockMoveSpeedMultiplier`, otherwise `1.0f`. Being armed / holding a weapon does not reduce normal movement speed by itself.
 - `TickSprintStamina()` drains stamina while grounded, unblocked, and moving. In ordinary lock-on combat step it still uses the forward-dot gate, while lock-on free-run bypasses that gate so side/back sprint consumes stamina.
 
 ### Enemy AI (`AEnemy`)

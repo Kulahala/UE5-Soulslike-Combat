@@ -19,22 +19,6 @@ public:
 	EActionState NewActionState = EActionState::EAS_UnOccupied; // 默认给个结束占用的状态
 };
 
-// 专门用于改变 武器装备状态 (Arm Weapon State) 的通知
-UCLASS()
-class TEST_API UAnimNotify_SetArmWeaponState : public UAnimNotify
-{
-	GENERATED_BODY()
-
-public:
-	virtual void Notify(USkeletalMeshComponent* MeshComp, UAnimSequenceBase* Animation, const FAnimNotifyEventReference& EventReference) override;
-
-public:
-	// 通知触发时设置的拔刀/收刀状态
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "State", meta = (ToolTip = "通知触发时设置的拔刀/收刀状态。"))
-	EArmWeaponState NewArmState ;
-
-};
-
 // 专门用于结束 敌人受击硬直 的通知
 UCLASS()
 class TEST_API UAnimNotify_EnemyHitReactEnd : public UAnimNotify

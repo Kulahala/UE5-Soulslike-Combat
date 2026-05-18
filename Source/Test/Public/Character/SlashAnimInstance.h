@@ -41,13 +41,6 @@ private:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "State", meta = (AllowPrivateAccess = "true", ToolTip = "当前武器装备状态。"))
 	EWeaponState WeaponState = EWeaponState::EWS_Unequipped;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "State", meta = (AllowPrivateAccess = "true", ToolTip = "当前拔刀/收刀状态。"))
-	EArmWeaponState ArmWeaponState = EArmWeaponState::AWS_Disarming;
-
-	// 是否正在播放切刀/拔刀蒙太奇
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "State", meta = (AllowPrivateAccess = "true", ToolTip = "是否正在播放拔刀/收刀蒙太奇。"))
-	bool bIsArming = false;
-
 	// 是否正在防御
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "State", meta = (AllowPrivateAccess = "true", ToolTip = "是否正在防御状态。"))
 	bool bIsBlocking = false;

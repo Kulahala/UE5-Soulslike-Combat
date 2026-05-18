@@ -41,7 +41,6 @@ public:
 
 	/* 装备 */
 	virtual void Equip() override;
-	void ArmWeapon(); // 切换拔刀/收刀
 
 	/* 防御 */
 	void StartBlockInput();
@@ -66,15 +65,9 @@ public:
 
 protected:
 	/* 蒙太奇 */
-	void PlayArmMontage(const FName& SectionName); // 播放拔刀/收刀动画
 	void PlayBlockMontage(const FName& SectionName); // 播放防御蒙太奇
 	virtual bool CanAttack() const override;
 	virtual void OnAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted) override;
-	void OnArmMontageEnded(UAnimMontage* Montage, bool bInterrupted);
-
-	// 拔刀/收刀蒙太奇
-	UPROPERTY(EditDefaultsOnly, Category = "Montages", meta = (ToolTip = "拔刀/收刀蒙太奇，含 Section：Arm, Disarm。"))
-	UAnimMontage* ArmMontage;
 
 	// 防御蒙太奇（Section: BlockRaise, BlockIdle）
 	UPROPERTY(EditDefaultsOnly, Category = "Montages", meta = (ToolTip = "防御蒙太奇，含 Section：BlockRaise, BlockIdle。"))
@@ -145,10 +138,6 @@ private:
 	UPROPERTY(BlueprintReadOnly, Category = "State", meta = (AllowPrivateAccess = "true"))
 	bool bIsWalking = false;
 
-	// 是否正在播放切刀/拔刀蒙太奇（短暂状态）
-	UPROPERTY(VisibleInstanceOnly, Category = "State", meta = (AllowPrivateAccess = "true", ToolTip = "是否正在播放拔刀/收刀蒙太奇。"))
-	bool bIsArming = false;
-
 	/* 防御 */
 	bool bIsBlocking = false;
 	bool bBlockInputHeld = false;
@@ -179,11 +168,9 @@ public:
 	FORCEINLINE void SetEquippedItem(Aitem* Item) { OverLapItem = Item; }
 	FORCEINLINE Aitem* GetEquippedItem() const { return OverLapItem; }
 	FORCEINLINE void SetActionState(const EActionState NewState) { ActionState = NewState; }
-	FORCEINLINE void SetArmWeaponState(const EArmWeaponState NewState) { ArmWeaponState = NewState; }
 	FORCEINLINE UCameraComponent* GetCamera() const { return Camera; }
 	FORCEINLINE USpringArmComponent* GetSpringArm() const { return SpringArm; }
 	FORCEINLINE EActionState GetActionState() const { return ActionState; }
-	FORCEINLINE bool IsArming() const { return bIsArming; }
 	FORCEINLINE bool IsBlocking() const { return bIsBlocking; }
 	FORCEINLINE AShield* GetEquippedShield() const { return EquippedShield; }
 };

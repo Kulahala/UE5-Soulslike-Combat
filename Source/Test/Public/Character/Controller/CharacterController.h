@@ -32,7 +32,6 @@ protected:
 	void Input_StopJumping();
 	void Input_Equip();
 	void Input_Attack();
-	void Input_Arm();
 	void Input_SprintStart();
 	void Input_SprintEnd();
 	void Input_WalkStart();
@@ -60,9 +59,6 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input", meta = (ToolTip = "攻击输入动作。"))
 	UInputAction* AttackAction;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input", meta = (ToolTip = "拔刀/收刀输入动作。"))
-	UInputAction* ArmAction;
-
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input", meta = (ToolTip = "冲刺输入动作。"))
 	UInputAction* SprintAction;
 
@@ -84,7 +80,6 @@ private:
 	float DebugAttackExpireTime = 0.f;
 	float DebugJumpExpireTime = 0.f;
 	float DebugEquipExpireTime = 0.f;
-	float DebugArmExpireTime = 0.f;
 	float DebugLockOnExpireTime = 0.f;
 
 public:

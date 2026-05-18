@@ -25,13 +25,12 @@ All gameplay states are defined as `UENUM` enums in `CharacterTypes.h`. This is 
 | Enum | States | Used By |
 |------|--------|---------|
 | `EWeaponState` | Unequipped, OneHandEquipped, TwoHandEquipped | `AMyCharacter`, `USlashAnimInstance` |
-| `EActionState` | UnOccupied, Attacking, Arming, Stunning, Exhausted, Dead | `AMyCharacter` |
-| `EArmWeaponState` | Arming, Disarming | `AMyCharacter`, `USlashAnimInstance` |
+| `EActionState` | UnOccupied, Attacking, Stunning, Exhausted, Dead | `AMyCharacter` |
 | `EEnemyState` | UnOccupied, Patrolling, Searching, Chasing, Combating, Attacking, Stunned, Dead | `AEnemy` |
 
 **State transition pattern**: Mixed C++ + AnimNotify driven. Entry states are set directly in C++ (`Attack()`, `GetHit_Implementation()`, `Die()`). Recovery transitions use `FOnMontageEnded` delegates with `bInterrupted` guards as primary path. `UAnimNotify_CharacterHitReactEnd` is the exception — used for player hit react recovery so designers can tune stun duration in the animation editor. Enemy recovery has double coverage (delegate + AnimNotify with state guards).
 
-**Montage Helper**: `ABaseCharacter::PlayMontageSection(UAnimMontage*, const FName&)` 只做 `Montage_Play()` + `Montage_JumpToSection()`。End-delegate 绑定留在语义调用方（`PlayAttackMontage()`、`PlayHitReactMontage()`、`PlayArmMontage()`）。不要合并成"通用蒙太奇入口"，除非恢复语义真正收敛。
+**Montage Helper**: `ABaseCharacter::PlayMontageSection(UAnimMontage*, const FName&)` 只做 `Montage_Play()` + `Montage_JumpToSection()`。End-delegate 绑定留在语义调用方（`PlayAttackMontage()`、`PlayHitReactMontage()`）。不要合并成"通用蒙太奇入口"，除非恢复语义真正收敛。
 
 ### Class Hierarchy
 ```
@@ -164,18 +163,17 @@ UDataAsset → UTreasureData (static mesh, gold value, pickup sound, scale)
 - 方向性缩放: 前(100%) → 侧(80%) → 后(65%)，阈值 DotProduct ±0.2。
 - 冲刺体力消耗: 12/秒，仅地面 + 前方移动 + 非防御时扣，每帧 `ResetStaminaRegenCooldown()`。
 - 防御移速: `bIsBlocking` 时 `SpeedMultiplier = Shield->BlockMoveSpeedMultiplier`(默认1.0)，优先于方向缩放。
-- 拔刀移速: `ArmWeaponState == AWS_Arming` 时 `SpeedMultiplier = 0.875`。
 
 ### Shield & Blocking System
 - `IBlockableInterface` + `FBlockResult` — 纯 C++ virtual interface，独立于 `IHitInterface`，通过 `Cast<IBlockableInterface>(HitActor)` 调用。
 - `AShield` — 副手装备，参数载体：`BlockHalfAngleDegrees`(角度)、`BlockedDamageMultiplier`(减伤)、`BlockStaminaCostPerDamage`(体力/伤害比)、`BlockMoveSpeedMultiplier`(移速)、`BlockSound`/`BlockParticle`(反馈)。
 - `EquipToOffhand()` 只设 Owner 不设 Instigator（与 `Weapon::Equip()` 不同），因为盾牌不造成伤害。
 - 按住防御：`bBlockInputHeld` + `bIsBlocking` 双标志，不新增 `EActionState`，防御中 `ActionState` 保持 `EAS_UnOccupied`。
-- `CanStartBlock()` 前置条件：有盾 + UnOccupied + 非拔刀中 + 地面。（**独立于 `ArmWeaponState`**，不要加武器状态检查）
+- `CanStartBlock()` 前置条件：有盾 + UnOccupied + 地面。
 - `TryBlockHit()` 判定链：存活 → 方向(`DotProduct` vs `Cos(HalfAngle)`) → 体力成本检查 → 扣体力 + 减伤。
 - 中断规则：`InterruptBlock(false)` = 临时（受击/空中），保留 `bBlockInputHeld` 自动补入；`InterruptBlock(true)` = 永久（耗尽/死亡），必须重按。
 - Tick 自动恢复：每帧 `TryResumeBlock()` 检查 `bBlockInputHeld && !bIsBlocking && CanStartBlock()`。
-- 防御中限制：不能攻击/跳跃/冲刺/拔收刀/拾取，移速由 `BlockMoveSpeedMultiplier` 控制（默认1.0）。
+- 防御中限制：不能攻击/跳跃/冲刺/拾取，移速由 `BlockMoveSpeedMultiplier` 控制（默认1.0）。
 - 格挡拦截点：`Weapon::ExecuteWeaponTrace()` 命中后、`ApplyDamage()` 前，仅跨阵营触发。格挡成功时 `bPlayNormalHitReact = false` 跳过受击硬直。
 - 格挡命中仍走 `GetHit` → `FPendingHitContext`，所以缩放击退和类特定反馈仍生效。
 - 调参时同步更新 C++ 默认值（`AShield::BlockedDamageMultiplier`）和蓝图覆盖值。

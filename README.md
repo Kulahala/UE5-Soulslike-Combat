@@ -34,7 +34,6 @@ The project follows a decoupled, component-based architecture to ensure scalabil
 - **Health Buffer Visuals**: Implements a delayed buffer bar effect for better visual clarity on damage received.
 - **Lock-On Camera Framing**: Uses `SpringArm->SocketOffset` interpolation to shift the camera into a right-shoulder view while preserving the existing controller-driven yaw lock. Non-lock camera offset and arm length are both cached from the live SpringArm values at `BeginPlay()`, so Blueprint overrides remain the source of truth. Lock-on Sprint free-run layers a small controller-local input driven camera offset on top of the base shoulder framing, with optional backward arm-length pull-back left at `0` by default.
 - **Enemy Attack Pipeline**: Combat state facing verification (DotProduct ±15°) before attack, with full movement lock during attack montage.
-- **Upper Body Animation Layering**: Layered Blend Per Bone + Slot node for weapon arming/disarming while moving, controlled by transient `bIsArming` state.
 - **Shield Blocking Algorithm**: Block check executes after weapon trace hits but before damage is applied. Uses `DotProduct(character forward, to-attacker)` vs `Cos(BlockHalfAngleDegrees)` for arc detection. Stamina cost scales with damage. Successful block reduces damage by configurable percentage (default 80%) and suppresses hit-react. Exhaustion triggers synchronous block-break via `OnExhausted` delegate chain.
 - **Hit Feedback Visuals**: Edge vignette uses `UTexture2D::CreateTransient` to procedurally generate a 256x256 RGBA texture. Alpha formula: `EdgeDist = Min(U, 1-U, V, 1-V)` (distance to nearest screen edge), then smoothstep interpolation within configurable `VignetteFadeWidth` (default 0.2 = outer 20%). Flash intensity scales via `LastDamageFlashScale` (set by `TryBlockHit`, pushed by `TakeDamage()` through `SetPendingDamageFlashScale(...)`, and consumed only when `SetHealthPercent()` sees a real health drop). Decay uses exponential falloff `pow(0.01, dt/Duration)` for natural trailing.
 - **Hit Knockback Algorithm**: Tick-driven `AddActorWorldOffset` with quadratic ease-out (`1 - (1-α)²`). Distance = `BaseHitKnockbackDistance * KnockbackScale` where Scale = `DamageAfterBlock / Damage`. Wall collision handled by tracking actual displacement via `FVector::Dist2D(OldLocation, NewLocation)` instead of target distance. `PendingHitContext` pattern: weapon writes context → `GetHit` consumes knockback → subclass reads bApplyStun → subclass clears context. Zero-scale hits clear active knockback state, ensuring new hits always override.
@@ -76,7 +75,6 @@ The project follows a decoupled, component-based architecture to ensure scalabil
 |------|------|
 | `EAS_UnOccupied` | 正常态，可移动/攻击/跳跃/奔跑/防御（防御为子状态，用 `bIsBlocking` 标志） |
 | `EAS_Attacking` | 攻击蒙太奇播放中，锁定攻击输入 |
-| `EAS_Arming` | 拔刀/收刀蒙太奇播放中 |
 | `EAS_Stunning` | 受击硬直，短暂锁定 |
 | `EAS_Exhausted` | 体力耗尽，只能行走，数秒后恢复 |
 | `EAS_Dead` | 死亡，关闭碰撞与移动 |
@@ -86,7 +84,6 @@ stateDiagram-v2
     [*] --> UnOccupied
 
     UnOccupied --> Attacking : 攻击 (消耗15体力)
-    UnOccupied --> Arming : 拔刀/收刀
     UnOccupied --> Stunning : 受击
     UnOccupied --> Exhausted : 体力归零
 
@@ -97,7 +94,6 @@ stateDiagram-v2
     end note
 
     Attacking --> UnOccupied : 蒙太奇结束
-    Arming --> UnOccupied : 蒙太奇结束
     Stunning --> UnOccupied : 硬直结束
     Exhausted --> UnOccupied : 数秒后自动恢复
 
@@ -125,7 +121,7 @@ flowchart LR
     M --> K
 ```
 
-**武器装备状态 (`EWeaponState` + `EArmWeaponState`)**
+**武器装备状态 (`EWeaponState`)**
 
 ```mermaid
 stateDiagram-v2
@@ -133,11 +129,6 @@ stateDiagram-v2
 
     Unequipped --> OneHandEquipped : 拾取武器 (E键)
     OneHandEquipped --> Unequipped : (未来: 丢弃)
-
-    state OneHandEquipped {
-        Arming --> Disarming : 拔刀蒙太奇结束
-        Disarming --> Arming : 收刀蒙太奇结束
-    }
 ```
 
 ### 🧠 核心技术与算法亮点
@@ -161,9 +152,6 @@ stateDiagram-v2
 
 - **敌人攻击流水线 (Enemy Attack Pipeline)**
   战斗状态下先通过 `DotProduct` 校验面朝角度（±15°），满足条件才触发攻击。攻击蒙太奇期间完全锁定移动与旋转，结束后回到追击状态重新逼近。
-
-- **上半身动画分层 (Upper Body Animation Layering)**
-  通过 Layered Blend Per Bone + Slot 节点实现移动中拔刀/收刀动画，由瞬态变量 `bIsArming` 控制混合权重，与持久状态 `ArmWeaponState` 分离。
 
 - **盾牌格挡算法 (Shield Blocking)**
   防御判定在 `ExecuteWeaponTrace` 命中后、`ApplyDamage` 前执行。通过 `DotProduct(角色前方, 到攻击者方向)` 与 `Cos(BlockHalfAngleDegrees)` 比较判断角度范围，体力不足时格挡自动失败。成功格挡按可配置比例减伤（默认 80%）并跳过受击硬直，体力耗尽触发同步掉盾。

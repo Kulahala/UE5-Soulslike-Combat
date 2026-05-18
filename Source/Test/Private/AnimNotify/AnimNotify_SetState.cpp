@@ -15,18 +15,6 @@ void UAnimNotify_SetActionState::Notify(USkeletalMeshComponent* MeshComp, UAnimS
 	}
 }
 
-void UAnimNotify_SetArmWeaponState::Notify(USkeletalMeshComponent* MeshComp, UAnimSequenceBase* Animation, const FAnimNotifyEventReference& EventReference)
-{
-	Super::Notify(MeshComp, Animation, EventReference);
-	if (MeshComp && MeshComp->GetOwner())
-	{
-		if (AMyCharacter* MyCharacter = Cast<AMyCharacter>(MeshComp->GetOwner()))
-		{
-			MyCharacter->SetArmWeaponState(NewArmState);
-		}
-	}
-}
-
 void UAnimNotify_EnemyHitReactEnd::Notify(USkeletalMeshComponent* MeshComp, UAnimSequenceBase* Animation, const FAnimNotifyEventReference& EventReference)
 {
 	Super::Notify(MeshComp, Animation, EventReference);

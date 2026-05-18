@@ -42,7 +42,7 @@ ACharacter
  ├── AMyCharacter + IBlockableInterface (UAttributeComponent, spring arm + camera, weapon/shield equipping, hold-to-block)
  └── AEnemy + IHitInterface (AI patrol/search/chase/combat state machine, directional hit react)
 
-APlayerController -> ACharacterController (Enhanced Input: move/look/jump/equip/attack/arm/sprint/walk/block, plus input debug snapshot ownership for HUD overlay)
+APlayerController -> ACharacterController (Enhanced Input: move/look/jump/equip/attack/sprint/walk/block, plus input debug snapshot ownership for HUD overlay)
 UActorComponent -> UAttributeComponent (health, stamina, gold, delegates for health/stamina/exhausted)
 UWidgetComponent -> UHealthBarComponent
 UUserWidget -> UBaseHealthBarWidget (PB_Health + PB_Buffer progress bars, buffer delay logic)
@@ -64,8 +64,7 @@ All gameplay states are defined as `UENUM` enums. This is the single source of t
 - Do not hardcode recovery transitions in `Tick()`.
 
 - `EWeaponState`: `EWS_Unequipped`, `EWS_OneHandEquipped`, `EWS_TwoHandEquipped`
-- `EActionState`: `EAS_UnOccupied`, `EAS_Attacking`, `EAS_Arming`, `EAS_Stunning`, `EAS_Exhausted`, `EAC_Dead`
-- `EArmWeaponState`: `AWS_Arming`, `AWS_Disarming`
+- `EActionState`: `EAS_UnOccupied`, `EAS_Attacking`, `EAS_Stunning`, `EAS_Exhausted`, `EAS_Dead`
 - `EEnemyState`: `EES_UnOccupied`, `EES_Patrolling`, `EES_Searching`, `EES_Chasing`, `EES_Combating`, `EES_Attacking`, `EES_Stunned`, `EES_Dead`
 
 ### Character System (`Source/Test/Public/Character/`)
@@ -74,7 +73,7 @@ All gameplay states are defined as `UENUM` enums. This is the single source of t
   - Walk: `150`
   - Default: `300`
   - Sprint: `450`
-- **Weapon Flow**: Equip weapon -> arm/disarm state machine -> attack montage -> montage-end recovery.
+- **Weapon Flow**: Equip weapon to `RightHandSocket` -> attacks are allowed while `WeaponState != EWS_Unequipped` -> attack montage -> montage-end recovery.
 - **Shield Flow**: Equip shield to the offhand -> hold block input -> angle/stamina-based block resolution -> reduced movement speed while blocking.
 
 ### Enemy System (`Source/Test/Public/Enemy/`)

@@ -75,9 +75,6 @@ protected:
 	UPROPERTY(BlueprintReadOnly, Category = "State", meta = (AllowPrivateAccess = "true"))
 	EWeaponState WeaponState = EWeaponState::EWS_Unequipped; // 装备状态
 
-	UPROPERTY(BlueprintReadOnly, Category = "State", meta = (AllowPrivateAccess = "true"))
-	EArmWeaponState ArmWeaponState = EArmWeaponState::AWS_Disarming; // 拔刀/收刀状态
-
 	/* 动画驱动变量 */
 	UPROPERTY(BlueprintReadOnly, Category = "Animation", meta = (AllowPrivateAccess = "true"))
 	float GroundSpeed; // 地速（2D），驱动 BlendSpace
@@ -129,5 +126,4 @@ public:
 	FORCEINLINE float GetGroundSpeed() const { return GroundSpeed; }
 	FORCEINLINE float GetDirection() const { return Direction; }
 	FORCEINLINE EWeaponState GetCharacterState() const { return WeaponState; }
-	FORCEINLINE EArmWeaponState GetArmWeaponState() const { return ArmWeaponState; }
 };

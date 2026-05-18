@@ -207,8 +207,7 @@ float AMyCharacter::TakeDamage(float DamageAmount, const struct FDamageEvent& Da
 
 bool AMyCharacter::CanAttack() const
 {
-	return ActionState == EActionState::EAS_UnOccupied && WeaponState != EWeaponState::EWS_Unequipped &&
-		ArmWeaponState == EArmWeaponState::AWS_Arming;
+	return ActionState == EActionState::EAS_UnOccupied && WeaponState != EWeaponState::EWS_Unequipped;
 }
 
 // ==================== 防御 ====================
@@ -217,7 +216,6 @@ bool AMyCharacter::CanStartBlock() const
 {
 	return EquippedShield
 		&& ActionState == EActionState::EAS_UnOccupied
-		&& !bIsArming
 		&& !GetCharacterMovement()->IsFalling();
 }
 
@@ -317,29 +315,7 @@ void AMyCharacter::Equip()
 				EquippedWeapon = Weapon;
 			}
 			WeaponState = EWeaponState::EWS_OneHandEquipped;
-			ArmWeaponState = EArmWeaponState::AWS_Arming;
 		}
-	}
-}
-
-void AMyCharacter::ArmWeapon()
-{
-	if (bIsBlocking) return;
-	if (ActionState != EActionState::EAS_UnOccupied || WeaponState == EWeaponState::EWS_Unequipped)
-	{
-		return;
-	}
-
-	ActionState = EActionState::EAS_Arming;
-	bIsArming = true;
-
-	if (ArmWeaponState == EArmWeaponState::AWS_Disarming)
-	{
-		PlayArmMontage(FName("ArmWeapon"));
-	}
-	else
-	{
-		PlayArmMontage(FName("DisarmWeapon"));
 	}
 }
 
@@ -373,8 +349,7 @@ void AMyCharacter::UpdateMovementSpeed()
 	FVector Velocity = GetVelocity();
 	Velocity.Z = 0.f;
 
-	float SpeedMultiplier = (bIsBlocking && EquippedShield) ? EquippedShield->BlockMoveSpeedMultiplier
-		: bIsArming ? 0.875f : 1.0f;
+	float SpeedMultiplier = (bIsBlocking && EquippedShield) ? EquippedShield->BlockMoveSpeedMultiplier : 1.0f;
 
 	if (!Velocity.IsNearlyZero())
 	{
@@ -444,18 +419,6 @@ float AMyCharacter::CalcBaseSpeed(float DotProduct) const
 
 // ==================== 蒙太奇 ====================
 
-void AMyCharacter::PlayArmMontage(const FName& SectionName)
-{
-	PlayMontageSection(ArmMontage, SectionName);
-
-	if (UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance(); AnimInstance && ArmMontage)
-	{
-		FOnMontageEnded EndDelegate;
-		EndDelegate.BindUObject(this, &AMyCharacter::OnArmMontageEnded);
-		AnimInstance->Montage_SetEndDelegate(EndDelegate, ArmMontage);
-	}
-}
-
 void AMyCharacter::PlayBlockMontage(const FName& SectionName)
 {
 	PlayMontageSection(BlockMontage, SectionName);
@@ -472,23 +435,6 @@ void AMyCharacter::OnAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted
 
 	ActionState = EActionState::EAS_UnOccupied;
 	Attributes->ResumeStaminaRegen();
-}
-
-void AMyCharacter::OnArmMontageEnded(UAnimMontage* Montage, bool bInterrupted)
-{
-	bIsArming = false;
-	if (bInterrupted) return;  // 更高优先级逻辑已接管状态
-
-	ActionState = EActionState::EAS_UnOccupied;
-
-	if (ArmWeaponState == EArmWeaponState::AWS_Arming)
-	{
-		ArmWeaponState = EArmWeaponState::AWS_Disarming;
-	}
-	else
-	{
-		ArmWeaponState = EArmWeaponState::AWS_Arming;
-	}
 }
 
 // ==================== 锁定 ====================
@@ -775,7 +721,7 @@ void AMyCharacter::DrawDebugInfo() const
 	FDebugDrawHelper::Add(FString::Printf(TEXT("SP: %.1f / %.1f"), Attributes->GetCurrentStamina(), Attributes->GetMaxStamina()), FColor::Green);
 
 	static const TCHAR* ActionStateNames[] = {
-		TEXT("UnOccupied"), TEXT("Attacking"), TEXT("Arming"), TEXT("Stunning"), TEXT("Exhausted"), TEXT("Dead")
+		TEXT("UnOccupied"), TEXT("Attacking"), TEXT("Stunning"), TEXT("Exhausted"), TEXT("Dead")
 	};
 	FDebugDrawHelper::Add(FString::Printf(TEXT("State: %s"), ActionStateNames[static_cast<uint8>(ActionState)]), FColor::Yellow);
 
@@ -798,7 +744,6 @@ void AMyCharacter::DrawDebugInfo() const
 	if (bIsBlocking) BlockDebug += TEXT("[blocking] ");
 	if (CanStartBlock()) BlockDebug += TEXT("[canStart] ");
 	if (!EquippedShield) BlockDebug += TEXT("[noShield] ");
-	if (bIsArming) BlockDebug += TEXT("[isArming] ");
 	if (GetCharacterMovement()->IsFalling()) BlockDebug += TEXT("[falling] ");
 	if (!BlockDebug.IsEmpty())
 	{

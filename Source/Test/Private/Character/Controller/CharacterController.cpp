@@ -35,7 +35,6 @@ void ACharacterController::SetupInputComponent()
 
 		EnhancedInputComponent->BindAction(EquipAction, ETriggerEvent::Started, this, &ACharacterController::Input_Equip);
 		EnhancedInputComponent->BindAction(AttackAction, ETriggerEvent::Started, this, &ACharacterController::Input_Attack);
-		EnhancedInputComponent->BindAction(ArmAction, ETriggerEvent::Started, this, &ACharacterController::Input_Arm);
 
 		EnhancedInputComponent->BindAction(SprintAction, ETriggerEvent::Started, this, &ACharacterController::Input_SprintStart);
 		EnhancedInputComponent->BindAction(SprintAction, ETriggerEvent::Completed, this, &ACharacterController::Input_SprintEnd);
@@ -135,15 +134,6 @@ void ACharacterController::Input_Attack()
 	DebugAttackExpireTime = GetWorld()->GetTimeSeconds() + 0.15f;  // [调试]
 }
 
-void ACharacterController::Input_Arm()
-{
-	if (AMyCharacter* MyCharacter = GetMyCharacter())
-	{
-		MyCharacter->ArmWeapon();
-	}
-	DebugArmExpireTime = GetWorld()->GetTimeSeconds() + 0.15f;  // [调试]
-}
-
 void ACharacterController::Input_SprintStart()
 {
 	if (AMyCharacter* MyCharacter = GetMyCharacter())
@@ -224,7 +214,6 @@ FString ACharacterController::GetDebugInputText() const
 	if (Now < DebugAttackExpireTime) Result += TEXT("Attack ");
 	if (Now < DebugJumpExpireTime)   Result += TEXT("Jump ");
 	if (Now < DebugEquipExpireTime)  Result += TEXT("Equip ");
-	if (Now < DebugArmExpireTime)    Result += TEXT("Arm ");
 	if (Now < DebugLockOnExpireTime) Result += TEXT("LockOn ");
 
 	if (!DebugMoveInput.IsNearlyZero())
