@@ -32,6 +32,7 @@ AMyCharacter::AMyCharacter()
 	SpringArm = CreateDefaultSubobject<USpringArmComponent>(TEXT("SpringArm"));
 	SpringArm->SetupAttachment(GetRootComponent());
 	SpringArm->TargetArmLength = 300.f;
+	SpringArm->bUsePawnControlRotation = true;
 
 	Camera = CreateDefaultSubobject<UCameraComponent>(TEXT("Camera"));
 	Camera->SetupAttachment(SpringArm);
@@ -140,6 +141,7 @@ void AMyCharacter::GetHit_Implementation(const FVector& ImpactPoint, AActor* Hit
 	if (Attributes->IsAlive() && PendingHitContext.bApplyStun)
 	{
 		InterruptBlock(false);
+		if (bIsParrying) InterruptParry();
 		ActionState = EActionState::EAS_Stunning;
 		Attributes->ResumeStaminaRegen();  // 硬直接管，恢复体力暂停
 	}
@@ -150,6 +152,7 @@ void AMyCharacter::GetHit_Implementation(const FVector& ImpactPoint, AActor* Hit
 void AMyCharacter::Die()
 {
 	InterruptBlock(true);
+	ClearParryState();
 	ClearLockOn();
 	ActionState = EActionState::EAS_Dead;
 
@@ -255,6 +258,45 @@ FBlockResult AMyCharacter::TryBlockHit(const FVector& ImpactPoint, float Incomin
 	FBlockResult Result;
 	Result.DamageAfterBlock = IncomingDamage;
 
+	// 弹反分支优先（弹反期间不可格挡）
+	if (bIsParrying)
+	{
+		if (!EquippedShield || !Attributes || !Attributes->IsAlive())
+			return Result;
+
+		if (bParryActive)
+		{
+			// 弹反方向限制（必须面对敌人）
+			AActor* DirSrc = Attacker ? Attacker : DamageCauser;
+			if (DirSrc)
+			{
+				FVector ToAttacker = (DirSrc->GetActorLocation() - GetActorLocation()).GetSafeNormal2D();
+				float Dot = CalcForwardDot2D(ToAttacker);
+				float CosHalf = FMath::Cos(FMath::DegreesToRadians(EquippedShield->BlockHalfAngleDegrees));
+				if (Dot < CosHalf) return Result; // 角度不匹配，弹反失败
+			}
+
+			// 弹反成功！完全免伤 + 攻击方硬直
+			Result.bBlocked = true;
+			Result.bParried = true;
+			Result.DamageAfterBlock = 0.f;
+			Result.bPlayNormalHitReact = false;
+			Result.ParryStaggerDuration = EquippedShield->ParryStaggerDuration;
+			Result.ParryStaggerPlayRate = EquippedShield->ParryStaggerPlayRate;
+			if (EquippedShield->ParrySound)
+			{
+				UGameplayStatics::PlaySoundAtLocation(this, EquippedShield->ParrySound, ImpactPoint);
+			}
+			if (EquippedShield->ParryParticle)
+			{
+				UNiagaraFunctionLibrary::SpawnSystemAtLocation(this, EquippedShield->ParryParticle, ImpactPoint);
+			}
+			return Result;
+		}
+		// 弹反起手/收招帧——裸吃伤害
+		return Result;
+	}
+
 	if (!bIsBlocking || !EquippedShield || !Attributes || !Attributes->IsAlive())
 		return Result;
 
@@ -285,6 +327,88 @@ FBlockResult AMyCharacter::TryBlockHit(const FVector& ImpactPoint, float Incomin
 		UNiagaraFunctionLibrary::SpawnSystemAtLocation(this, EquippedShield->BlockParticle, ImpactPoint);
 	}
 	return Result;
+}
+
+// ==================== 弹反 ====================
+
+bool AMyCharacter::CanStartParry() const
+{
+	return EquippedShield
+		&& ActionState == EActionState::EAS_UnOccupied
+		&& !bIsBlocking
+		&& !bParryOnCooldown
+		&& Attributes && Attributes->GetCurrentStamina() > EquippedShield->ParryStaminaCost
+		&& !GetCharacterMovement()->IsFalling();
+}
+
+void AMyCharacter::Input_Parry()
+{
+	if (!CanStartParry()) return;
+
+	// 先确认蒙太奇可播放，再扣体力和进入状态（防止卡在 EAS_Parrying）
+	if (!ParryMontage || !GetMesh() || !GetMesh()->GetAnimInstance()) return;
+
+	Attributes->UseStamina(EquippedShield->ParryStaminaCost);
+	Attributes->ResetStaminaRegenCooldown();
+
+	bIsParrying = true;
+	bParryActive = false;
+	ActionState = EActionState::EAS_Parrying;
+	PlayMontageSection(ParryMontage, FName("Parry"));
+
+	UAnimInstance* Anim = GetMesh()->GetAnimInstance();
+	FOnMontageEnded EndDelegate;
+	EndDelegate.BindUObject(this, &AMyCharacter::OnParryMontageEnded);
+	Anim->Montage_SetEndDelegate(EndDelegate, ParryMontage);
+}
+
+void AMyCharacter::SetParryActive(bool bActive)
+{
+	bParryActive = bActive;
+}
+
+void AMyCharacter::StartParryCooldown()
+{
+	const float Cooldown = EquippedShield ? EquippedShield->ParryCooldown : 0.4f;
+	if (Cooldown <= 0.f)
+	{
+		bParryOnCooldown = false;
+		return;
+	}
+	bParryOnCooldown = true;
+	GetWorldTimerManager().SetTimer(
+		ParryCooldownTimer, this, &AMyCharacter::ResetParryCooldown, Cooldown, false);
+}
+
+void AMyCharacter::ResetParryCooldown()
+{
+	bParryOnCooldown = false;
+}
+
+void AMyCharacter::InterruptParry()
+{
+	bIsParrying = false;
+	bParryActive = false;
+	StartParryCooldown();
+}
+
+void AMyCharacter::ClearParryState()
+{
+	bIsParrying = false;
+	bParryActive = false;
+	bParryOnCooldown = false;
+	GetWorldTimerManager().ClearTimer(ParryCooldownTimer);
+}
+
+void AMyCharacter::OnParryMontageEnded(UAnimMontage* Montage, bool bInterrupted)
+{
+	if (bInterrupted) return;  // InterruptParry() 已处理清理
+	if (ActionState != EActionState::EAS_Parrying) return;
+
+	ActionState = EActionState::EAS_UnOccupied;
+	bIsParrying = false;
+	bParryActive = false;
+	StartParryCooldown();
 }
 
 // ==================== 装备 ====================
@@ -377,7 +501,7 @@ void AMyCharacter::UpdateMovementSpeed()
 	}
 	else
 	{
-		GetCharacterMovement()->MaxWalkSpeed = 300.f * SpeedMultiplier;
+		GetCharacterMovement()->MaxWalkSpeed = RunSpeed * SpeedMultiplier;
 	}
 
 	FDebugDrawHelper::Add(FString::Printf(TEXT("Speed: %.0f"), GetCharacterMovement()->MaxWalkSpeed), FColor::Cyan);  // [调试]
@@ -408,13 +532,13 @@ float AMyCharacter::CalcBaseSpeed(float DotProduct) const
 {
 	if (bIsSprinting && ActionState == EActionState::EAS_UnOccupied && DotProduct > 0.2f)
 	{
-		return 450.f;
+		return SprintSpeed;
 	}
 	if (bIsWalking && ActionState == EActionState::EAS_UnOccupied)
 	{
-		return 150.f;
+		return WalkSpeed;
 	}
-	return 300.f;
+	return RunSpeed;
 }
 
 // ==================== 蒙太奇 ====================
@@ -721,7 +845,7 @@ void AMyCharacter::DrawDebugInfo() const
 	FDebugDrawHelper::Add(FString::Printf(TEXT("SP: %.1f / %.1f"), Attributes->GetCurrentStamina(), Attributes->GetMaxStamina()), FColor::Green);
 
 	static const TCHAR* ActionStateNames[] = {
-		TEXT("UnOccupied"), TEXT("Attacking"), TEXT("Stunning"), TEXT("Exhausted"), TEXT("Dead")
+		TEXT("UnOccupied"), TEXT("Attacking"), TEXT("Stunning"), TEXT("Exhausted"), TEXT("Parrying"), TEXT("Dead")
 	};
 	FDebugDrawHelper::Add(FString::Printf(TEXT("State: %s"), ActionStateNames[static_cast<uint8>(ActionState)]), FColor::Yellow);
 
@@ -736,6 +860,17 @@ void AMyCharacter::DrawDebugInfo() const
 			*ActiveMontage->GetName(),
 			ActiveSection.IsNone() ? TEXT("?") : *ActiveSection.ToString()),
 			FColor::Cyan);
+	}
+
+	// [调试] 弹反 — 仅激活时显示
+	if (bIsParrying || bParryOnCooldown)
+	{
+		FString ParryDebug;
+		if (bIsParrying) ParryDebug += TEXT("[parrying] ");
+		if (bParryActive) ParryDebug += TEXT("[active] ");
+		if (bParryOnCooldown) ParryDebug += TEXT("[CD] ");
+		FDebugDrawHelper::Add(FString::Printf(TEXT("Parry: %s"), *ParryDebug),
+			bParryActive ? FColor::Yellow : FColor::White);
 	}
 
 	// [调试] 防御门卫 — 仅激活时显示

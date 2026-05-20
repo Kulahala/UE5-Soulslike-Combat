@@ -60,7 +60,7 @@ private:
 	float LockOnBackSpeedMultiplier = 0.9f;
 
 	UPROPERTY(EditDefaultsOnly, Category = "LockOnCamera", meta = (ToolTip = "锁定时 SpringArm 右肩偏移（Y=右, Z=上）。"))
-	FVector LockOnSocketOffset = FVector(0.f, 80.f, 80.f);
+	FVector LockOnSocketOffset = FVector(0.f, 40.f, 60.f);
 
 	UPROPERTY(EditDefaultsOnly, Category = "LockOnCamera", meta = (ToolTip = "SocketOffset 插值速度。"))
 	float LockOnSocketOffsetInterpSpeed = 6.f;
@@ -69,10 +69,10 @@ private:
 	float LockOnFreeRunCameraSideOffset = 60.f;
 
 	UPROPERTY(EditDefaultsOnly, Category = "LockOnCamera|FreeRun", meta = (ClampMin = "0.0", ToolTip = "锁定冲刺后撤时相机抬高幅度（cm）。"))
-	float LockOnFreeRunCameraBackHeightOffset = 40.f;
+	float LockOnFreeRunCameraBackHeightOffset = 30.f;
 
 	UPROPERTY(EditDefaultsOnly, Category = "LockOnCamera|FreeRun", meta = (ClampMin = "0.0", ToolTip = "锁定冲刺后撤时弹簧臂额外拉远（cm），默认 0 不改变距离手感。"))
-	float LockOnFreeRunCameraBackArmLengthBonus = 0.f;
+	float LockOnFreeRunCameraBackArmLengthBonus = 80.f;
 
 	UPROPERTY(EditDefaultsOnly, Category = "LockOnCamera|FreeRun", meta = (ToolTip = "锁定冲刺动态偏移插值速度。"))
 	float LockOnFreeRunCameraInterpSpeed = 10.f;

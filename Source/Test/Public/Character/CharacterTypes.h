@@ -14,6 +14,7 @@ enum class EActionState : uint8
 	EAS_Attacking UMETA(DisplayName = "Attacking"),
 	EAS_Stunning UMETA(DisplayName = "Stunning"),
 	EAS_Exhausted UMETA(DisplayName = "Exhausted"),
+	EAS_Parrying UMETA(DisplayName = "Parrying"),
 	EAS_Dead UMETA(DisplayName = "Dead")
 };
 
@@ -26,5 +27,6 @@ enum class EEnemyState : uint8 {
 	EES_Attacking UMETA(DisplayName = "Attacking"),   // 攻击硬直
 	EES_Combating UMETA(DisplayName = "Combating"),	  // 战斗中
 	EES_Stunned UMETA(DisplayName = "Stunned"),       // 受击硬直
+	EES_Parried UMETA(DisplayName = "Parried"),       // 被弹反硬直
 	EES_Dead UMETA(DisplayName = "Dead")              // 已死亡
 };

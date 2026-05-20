@@ -38,6 +38,9 @@ public:
 		float KnockbackScale = 1.f;
 		bool bApplyStun = true;
 		bool bSameTeam = false;
+		bool bParried = false;
+		float ParryStaggerDuration = 0.f;
+		float ParryStaggerPlayRate = 0.f;
 	};
 
 protected:

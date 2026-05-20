@@ -48,6 +48,7 @@ No CI pipeline, no lint/test commands configured.
 - `plan.md` is the shared agent-to-agent communication and handoff file.
 - Before continuing prior collaboration work, read the header rules in `plan.md`.
 - Write agent feedback and implementation plans there as working context, not end-user documentation.
+- For code review and closeout passes, ignore `Content/*.uasset` by default unless the user explicitly asks to inspect or include asset changes.
 
 ## Architecture
 

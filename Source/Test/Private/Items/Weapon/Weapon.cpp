@@ -4,6 +4,7 @@
 #include "Character/BaseCharacter.h"
 #include "Character/MyCharacter.h"
 #include "Combat/CombatTeamHelper.h"
+#include "Enemy/Enemy.h"
 #include "Components/BoxComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "Kismet/KismetSystemLibrary.h"
@@ -160,6 +161,12 @@ AWeapon::FWeaponHitResult AWeapon::ResolveHit(AActor* HitActor, const FHitResult
 			Result.KnockbackScale = Damage > 0.f ? BlockResult.DamageAfterBlock / Damage : 0.f;
 			Result.bApplyStun = BlockResult.bPlayNormalHitReact;
 		}
+		if (BlockResult.bParried)
+		{
+			Result.bParried = true;
+			Result.ParryStaggerDuration = BlockResult.ParryStaggerDuration;
+			Result.ParryStaggerPlayRate = BlockResult.ParryStaggerPlayRate;
+		}
 	}
 
 	return Result;
@@ -167,6 +174,15 @@ AWeapon::FWeaponHitResult AWeapon::ResolveHit(AActor* HitActor, const FHitResult
 
 void AWeapon::DispatchHitFeedback(AActor* HitActor, const FHitResult& HitPoint, const FWeaponHitResult& Result)
 {
+	// 弹反分支：对攻击方调弹反硬直（在 GetHit 之前，确保敌人先进入 EES_Parried）
+	if (Result.bParried)
+	{
+		if (AEnemy* AttackerEnemy = Cast<AEnemy>(GetOwner()))
+		{
+			AttackerEnemy->ApplyParried(Result.ParryStaggerDuration, Result.ParryStaggerPlayRate, HitActor);
+		}
+	}
+
 	// 写入命中上下文（所有命中，含格挡）
 	if (ABaseCharacter* HitChar = Cast<ABaseCharacter>(HitActor))
 	{

@@ -51,6 +51,16 @@ public:
 	virtual FBlockResult TryBlockHit(const FVector& ImpactPoint, float IncomingDamage,
 	                                 AActor* Attacker, AActor* DamageCauser) override;
 
+	/* 弹反 */
+	void Input_Parry();
+	bool CanStartParry() const;
+	void SetParryActive(bool bActive);
+	void StartParryCooldown();
+	void ResetParryCooldown();
+	void InterruptParry();
+	void ClearParryState();
+	void OnParryMontageEnded(UAnimMontage* Montage, bool bInterrupted);
+
 	/* 移动状态 */
 	void Sprint();
 	void StopSprinting();
@@ -80,6 +90,16 @@ protected:
 	// 体力耗尽后恢复时间
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "State", meta = (ToolTip = "体力耗尽后自动恢复的时间（秒）。"))
 	float ExhaustedTime = 5.f;
+
+	/* 移动速度 */
+	UPROPERTY(EditDefaultsOnly, Category = "Movement", meta = (ToolTip = "步行速度。"))
+	float WalkSpeed = 200.f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Movement", meta = (ToolTip = "普通奔跑速度。"))
+	float RunSpeed = 300.f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Movement", meta = (ToolTip = "冲刺速度。"))
+	float SprintSpeed = 360.f;
 
 private:
 	/* 提取方法 */
@@ -143,6 +163,14 @@ private:
 	bool bBlockInputHeld = false;
 	UPROPERTY()
 	AShield* EquippedShield;
+
+	/* 弹反 */
+	bool bIsParrying = false;
+	bool bParryActive = false;
+	bool bParryOnCooldown = false;
+	FTimerHandle ParryCooldownTimer;
+	UPROPERTY(EditDefaultsOnly, Category = "Montages", meta = (ToolTip = "弹反蒙太奇。"))
+	UAnimMontage* ParryMontage;
 
 	FTimerHandle ExhaustionTimerHandle;
 

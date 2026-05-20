@@ -49,6 +49,11 @@ void ACharacterController::SetupInputComponent()
 		EnhancedInputComponent->BindAction(BlockAction, ETriggerEvent::Canceled, this, &ACharacterController::Input_BlockEnd);  // [调试] 防止 held 挂住
 
 		EnhancedInputComponent->BindAction(LockOnAction, ETriggerEvent::Started, this, &ACharacterController::Input_LockOn);
+
+		if (ParryAction)
+		{
+			EnhancedInputComponent->BindAction(ParryAction, ETriggerEvent::Started, this, &ACharacterController::Input_Parry);
+		}
 	}
 }
 
@@ -197,6 +202,15 @@ void ACharacterController::Input_LockOn()
 	}
 }
 
+void ACharacterController::Input_Parry()
+{
+	DebugParryExpireTime = GetWorld()->GetTimeSeconds() + 0.15f;  // [调试]
+	if (AMyCharacter* MyCharacter = GetMyCharacter())
+	{
+		MyCharacter->Input_Parry();
+	}
+}
+
 AMyCharacter* ACharacterController::GetMyCharacter() const
 {
 	return Cast<AMyCharacter>(GetPawn());
@@ -215,6 +229,7 @@ FString ACharacterController::GetDebugInputText() const
 	if (Now < DebugJumpExpireTime)   Result += TEXT("Jump ");
 	if (Now < DebugEquipExpireTime)  Result += TEXT("Equip ");
 	if (Now < DebugLockOnExpireTime) Result += TEXT("LockOn ");
+	if (Now < DebugParryExpireTime) Result += TEXT("Parry ");
 
 	if (!DebugMoveInput.IsNearlyZero())
 		Result += FString::Printf(TEXT("Move(%.1f, %.1f) "), DebugMoveInput.X, DebugMoveInput.Y);

@@ -54,6 +54,9 @@ public:
 	virtual void OnAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted) override;
 	virtual void OnHitReactMontageEnded(UAnimMontage* Montage, bool bInterrupted) override;
 
+	/* 弹反 */
+	void ApplyParried(float Duration, float PlayRate, AActor* ParryInstigator);
+
 	/* 锁定联动 */
 	void SetTargetedByPlayer(bool bTargeted);
 
@@ -288,8 +291,10 @@ private:
 	FTimerHandle LookTimer; // 张望定时器
 	FTimerHandle AttackCooldownTimer; // 攻击冷却定时器
 	FTimerHandle HealthBarHideTimer; // 血条延迟隐藏定时器
+	FTimerHandle ParryRecoveryTimer; // 弹反硬直恢复定时器
 	bool bAttackOnCooldown = false; // 攻击冷却中
 	bool bIsTargetedByPlayer = false; // 被玩家锁定中
+	void RecoverFromParry(); // 弹反硬直恢复回调
 	void ClearPatrolTimers(); // 清理巡逻相关定时器
-	void ClearAllTimers(); // 清理所有定时器（巡逻 + 冷却 + 血条）
+	void ClearAllTimers(); // 清理所有定时器（巡逻 + 冷却 + 血条 + 弹反）
 };
