@@ -32,6 +32,7 @@ AMyCharacter::AMyCharacter()
 	SpringArm = CreateDefaultSubobject<USpringArmComponent>(TEXT("SpringArm"));
 	SpringArm->SetupAttachment(GetRootComponent());
 	SpringArm->TargetArmLength = 300.f;
+	SpringArm->bUsePawnControlRotation = true;
 
 	Camera = CreateDefaultSubobject<UCameraComponent>(TEXT("Camera"));
 	Camera->SetupAttachment(SpringArm);
@@ -267,6 +268,16 @@ FBlockResult AMyCharacter::TryBlockHit(const FVector& ImpactPoint, float Incomin
 
 		if (bParryActive)
 		{
+			// 弹反方向限制（必须面对敌人）
+			AActor* DirSrc = Attacker ? Attacker : DamageCauser;
+			if (DirSrc)
+			{
+				FVector ToAttacker = (DirSrc->GetActorLocation() - GetActorLocation()).GetSafeNormal2D();
+				float Dot = CalcForwardDot2D(ToAttacker);
+				float CosHalf = FMath::Cos(FMath::DegreesToRadians(EquippedShield->BlockHalfAngleDegrees));
+				if (Dot < CosHalf) return Result; // 角度不匹配，弹反失败
+			}
+
 			// 弹反成功！完全免伤 + 攻击方硬直
 			Result.bBlocked = true;
 			Result.bParried = true;
@@ -515,7 +526,7 @@ void AMyCharacter::UpdateMovementSpeed()
 	}
 	else
 	{
-		GetCharacterMovement()->MaxWalkSpeed = 300.f * SpeedMultiplier;
+		GetCharacterMovement()->MaxWalkSpeed = RunSpeed * SpeedMultiplier;
 	}
 
 	FDebugDrawHelper::Add(FString::Printf(TEXT("Speed: %.0f"), GetCharacterMovement()->MaxWalkSpeed), FColor::Cyan);  // [调试]
@@ -546,13 +557,13 @@ float AMyCharacter::CalcBaseSpeed(float DotProduct) const
 {
 	if (bIsSprinting && ActionState == EActionState::EAS_UnOccupied && DotProduct > 0.2f)
 	{
-		return 450.f;
+		return SprintSpeed;
 	}
 	if (bIsWalking && ActionState == EActionState::EAS_UnOccupied)
 	{
-		return 150.f;
+		return WalkSpeed;
 	}
-	return 300.f;
+	return RunSpeed;
 }
 
 // ==================== 蒙太奇 ====================

@@ -98,6 +98,16 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "State", meta = (ToolTip = "体力耗尽后自动恢复的时间（秒）。"))
 	float ExhaustedTime = 5.f;
 
+	/* 移动速度 */
+	UPROPERTY(EditDefaultsOnly, Category = "Movement", meta = (ToolTip = "步行速度。"))
+	float WalkSpeed = 200.f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Movement", meta = (ToolTip = "普通奔跑速度。"))
+	float RunSpeed = 300.f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Movement", meta = (ToolTip = "冲刺速度。"))
+	float SprintSpeed = 360.f;
+
 private:
 	/* 提取方法 */
 	void InitializePlayerHUD();

@@ -185,6 +185,7 @@ UDataAsset → UTreasureData (static mesh, gold value, pickup sound, scale)
 - C++ source under `Source/Test/` (Public/Private mirrors UE module structure).
 - Game assets under `Content/_GAME/` — this is the only Content directory that should be modified.
 - Large reference assets (AncientContent, AnimalVarietyPack, ParagonAurora, Mixamo, etc.) are ignored for AI context — they're read-only marketplace/paragon content.
+- For code review and closeout passes, ignore tracked `.uasset` changes under `Content/` by default unless the user explicitly asks to inspect or include asset changes.
 
 ### Debug System (`FDebugDrawHelper`)
 - `FDebugDrawHelper` — 静态工具类，集中管理屏幕调试文字 + 世界调试图形。路径：`Utils/DebugDrawHelper.h/cpp`。

@@ -25,6 +25,7 @@ plan.md
 .geminiignore
 .claude/
 .claudeignore
+.antigravitycli/
 
 # Git-LFS S3 Adapter
 lfs-s3.exe

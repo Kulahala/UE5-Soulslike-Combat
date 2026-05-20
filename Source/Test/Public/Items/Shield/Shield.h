@@ -19,7 +19,7 @@ public:
 
 	// 格挡判定半角，总防御弧 = 此值 × 2（默认 ±60°）
 	UPROPERTY(EditAnywhere, Category = "Block", meta = (ToolTip = "格挡判定半角，总防御弧 = 此值 × 2。"))
-	float BlockHalfAngleDegrees = 60.f;
+	float BlockHalfAngleDegrees = 45.f;
 
 	// 格挡后伤害倍率（0.05 = 减伤 95%，0 = 完全免伤）
 	UPROPERTY(EditAnywhere, Category = "Block", meta = (ToolTip = "格挡后伤害倍率。0.05=减伤95%，0=完全免伤。"))
