@@ -111,11 +111,12 @@ All gameplay states are defined as `UENUM` enums. This is the single source of t
 - Quadratic ease-out. A new hit overrides previous knockback. Zero-scale hit (full block) clears it.
 - Successful blocks scale knockback by post-block damage ratio.
 
-### Block System
+### Block & Parry System
 - `AMyCharacter` implements `IBlockableInterface` (`bBlockInputHeld` + `bIsBlocking`).
 - `AShield` provides block tuning (`BlockHalfAngleDegrees`, `BlockedDamageMultiplier`, etc.).
 - Block reduces/redirects damage via `FBlockResult`, suppresses shared hit react, plays block FX.
 - Blocked hits still flow through `GetHit` via `FPendingHitContext`.
+- **Parry**: Handled inside `TryBlockHit()` under `bParryActive` window. Success requires facing the attacker (angle strictly within `BlockHalfAngleDegrees`). Success completely nullifies damage, sets `bParried = true`, and triggers attacker stun.
 
 ### Lock-On System
 - `ACharacterController` owns lock-on input. `UPlayerLockOnComponent` owns target search/scoring state.
