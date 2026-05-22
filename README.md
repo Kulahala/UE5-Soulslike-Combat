@@ -24,6 +24,7 @@ The project follows a decoupled, component-based architecture to ensure scalabil
    - **Combat Distance System**: Enemy behavior is controlled by layered combat radii. Current default relationship is `CombatTooCloseRadius(90) < CombatAttackMaxRadius(170) <= CombatPreferredMinRadius(210) <= CombatPreferredMaxRadius(270) < CombatingRadius(300) < ChasingRadius(1000)`. `CombatAttackMaxRadius` is the real attack-start distance; `CombatPreferredMinRadius` / `CombatPreferredMaxRadius` define the cooldown spacing ring. Keep `CombatPreferredMaxRadius` below `CombatingRadius` so retreat/strafe targets do not immediately push the enemy back into `EES_Chasing`. Keep `CombatPressMargin(25)` greater than `CombatRepositionAcceptanceRadius(12)` so press movement cannot stop just outside attack range. Combat state exit uses hysteresis (`CombatingRadius + CombatExitBuffer`) to prevent boundary oscillation between Chasing and Combating.
    - **Lock-On System**: Middle-mouse lock-on built on Enhanced Input (`IA_LockOn` + `IMC_CharacterInput`). `UPlayerLockOnComponent` owns lock-on state, target scoring, and camera tunables, while `AMyCharacter` keeps all direct writes to control rotation, `CharacterMovement`, and `SpringArm`. Target selection filters living `AEnemy` actors by radius and camera-facing angle, then prefers the candidate closest to view center. While locked, look input is suppressed, enemy health bars stay visible, and the camera shifts into an over-the-shoulder view through `SpringArm->SocketOffset` interpolation. Normal lock-on movement keeps the character facing the target; holding Sprint with movement input enters a temporary free-run mode where the target and camera stay locked, but the character body faces the movement direction. During that free-run, the camera also adds a small movement-direction framing offset: strafe input shifts the shoulder laterally, backward input raises the camera, and backward pull-back remains available as an optional arm-length bonus with a default of `0`.
    - **Shield Blocking & Parry System**: Hold-to-block defense and timed parry via `IBlockableInterface`. **Blocking**: DotProduct angle check (default ±45°) determines if an incoming attack is within block arc. Successful block reduces damage by configurable percentage (default 95% via `BlockedDamageMultiplier`), costs stamina proportional to damage, and skips hit-react. Supports auto-resume after interruption, air-block prevention, and exhaustion-forced unblock. **Parrying**: Separate input triggers a short animation with an active window marked by `UAnimNotifyState_ParryActive`. Successful parry within the window (same angle check as blocking) costs fixed stamina (default 15), grants 100% damage immunity, and forces the attacker into a long stagger state (`EES_Parried`) with slowed animation playback (default 0.5x speed for 1.5s). Parry has a hidden cooldown (default 0.4s) after animation ends to prevent spam.
+   - **Dodge Roll System**: Space-key dodge with root motion-driven displacement and full invulnerability frames. **Unlocked**: character turns toward input direction, always plays `Dodge_F` forward roll. **Lock-On**: directional dodge using section selection — forward (`Dodge_F`), left (`Dodge_L`), right (`Dodge_R`), or backward (180° turn + `Dodge_F`). Section selection converts world-space movement input to character-local space via `UnrotateVector`, with a 0.3 threshold to prevent diagonal misclassification. Dodge costs 15 stamina, interrupts block/parry, and locks rotation during playback. Invulnerability is driven by `UAnimNotifyState_DodgeInvulnerable` covering the full montage, with guards in both `GetHit_Implementation()` and `TakeDamage()`. Rotation mode is restored via `RestoreRotationMode()` on montage end.
    - **Hit Feedback System**: Two-layer victim-side feedback: (1) Screen edge red vignette flash — programmatic 256x256 texture generated via edge-distance formula with smoothstep, intensity scales with damage reduction rate (full flash on unblocked, scaled on partial block, none on 100% block). Fade-in + exponential decay curve for natural feel. (2) Camera shake on hit-react path via `ClientStartCameraShake`.
    - **Hit Knockback System**: Tick-driven displacement on hit, distance scaled by damage reduction rate (Player=10cm, Enemy=5cm). Uses `PendingHitContext` written by weapon hit chain to decouple knockback from stun/block state. Quadratic ease-out curve for natural deceleration. `AddActorWorldOffset` with sweep prevents wall penetration; actual displacement tracked to handle partial blocks. Same-team hits trigger knockback but no damage.
 
@@ -35,6 +36,7 @@ The project follows a decoupled, component-based architecture to ensure scalabil
 - **Lock-On Camera Framing**: Uses `SpringArm->SocketOffset` interpolation to shift the camera into a right-shoulder view while preserving the existing controller-driven yaw lock. Non-lock camera offset and arm length are both cached from the live SpringArm values at `BeginPlay()`, so Blueprint overrides remain the source of truth. Lock-on Sprint free-run layers a small controller-local input driven camera offset on top of the base shoulder framing, with optional backward arm-length pull-back left at `0` by default.
 - **Enemy Attack Pipeline**: Combat state facing verification (DotProduct ±15°) before attack, with full movement lock during attack montage.
 - **Shield Blocking Algorithm**: Block check executes after weapon trace hits but before damage is applied. Uses `DotProduct(character forward, to-attacker)` vs `Cos(BlockHalfAngleDegrees)` for arc detection. Stamina cost scales with damage. Successful block reduces damage by configurable percentage (default 95%) and suppresses hit-react. Exhaustion triggers synchronous block-break via `OnExhausted` delegate chain.
+- **Directional Dodge Section Selection**: During lock-on, `SelectDodgeSection()` converts world-space movement input to character-local space (`GetActorRotation().UnrotateVector()`) and selects the montage section: `|Y| > |X|` and `|Y| > 0.3` → `Dodge_L`/`Dodge_R` (side), `X > 0.3` → `Dodge_F` (forward), otherwise → `Dodge_B` (backward, converts to 180° turn + `Dodge_F`). Non-lock-on always uses `Dodge_F`. Section selection runs **before** `FaceDirection2D()` to avoid corrupting the local-space reference frame.
 - **Hit Feedback Visuals**: Edge vignette uses `UTexture2D::CreateTransient` to procedurally generate a 256x256 RGBA texture. Alpha formula: `EdgeDist = Min(U, 1-U, V, 1-V)` (distance to nearest screen edge), then smoothstep interpolation within configurable `VignetteFadeWidth` (default 0.2 = outer 20%). Flash intensity scales via `LastDamageFlashScale` (set by `TryBlockHit`, pushed by `TakeDamage()` through `SetPendingDamageFlashScale(...)`, and consumed only when `SetHealthPercent()` sees a real health drop). Decay uses exponential falloff `pow(0.01, dt/Duration)` for natural trailing.
 - **Hit Knockback Algorithm**: Tick-driven `AddActorWorldOffset` with quadratic ease-out (`1 - (1-α)²`). Distance = `BaseHitKnockbackDistance * KnockbackScale` where Scale = `DamageAfterBlock / Damage`. Wall collision handled by tracking actual displacement via `FVector::Dist2D(OldLocation, NewLocation)` instead of target distance. `PendingHitContext` pattern: weapon writes context → `GetHit` consumes knockback → subclass reads bApplyStun → subclass clears context. Zero-scale hits clear active knockback state, ensuring new hits always override.
 
@@ -60,6 +62,7 @@ The project follows a decoupled, component-based architecture to ensure scalabil
    - **战斗距离系统**：敌人战斗距离由多层半径控制。当前默认关系是 `CombatTooCloseRadius(90) < CombatAttackMaxRadius(170) <= CombatPreferredMinRadius(210) <= CombatPreferredMaxRadius(270) < CombatingRadius(300) < ChasingRadius(1000)`。`CombatAttackMaxRadius` 是真正允许出手的距离；`CombatPreferredMinRadius` / `CombatPreferredMaxRadius` 是攻击冷却期想保持的距离环。`CombatPreferredMaxRadius` 必须小于 `CombatingRadius`，否则敌人后撤或侧移到目标距离后会立刻离开 `EES_Combating`，切回 `EES_Chasing`。`CombatPressMargin(25)` 必须大于 `CombatRepositionAcceptanceRadius(12)`，否则前压可能停在攻击范围边缘外。战斗状态退出使用滞后半径（`CombatingRadius + CombatExitBuffer`）防止 Chasing/Combating 边界抖动。
    - **锁定系统**：基于增强输入的中键锁定（`IA_LockOn` + `IMC_CharacterInput`）。`UPlayerLockOnComponent` 持有锁定状态、目标评分和相机调参，`AMyCharacter` 继续负责控制旋转、`CharacterMovement` 和 `SpringArm` 的实际写入。目标搜索会按半径、相机前方夹角过滤存活的 `AEnemy`，再优先选择更靠近视野中心的目标。锁定期间会屏蔽自由视角输入、保持敌人血条显示，并通过 `SpringArm->SocketOffset` 插值切到越肩视角。普通锁定移动让角色朝向目标；按住 Sprint 并有移动输入时进入临时 free-run，目标和相机仍锁敌，但角色身体朝移动方向奔跑。free-run 期间相机也会做小幅的运动方向构图补偿：侧移时横向挪肩，后撤时轻微抬高视角，后撤拉远作为可调项保留但默认 `0`。
    - **盾牌防御与弹反系统**：基于 `IBlockableInterface` 的双层防御机制。**普通格挡**：按住按键举盾，成功格挡按可配置比例减伤（默认 95%）并按伤害比例消耗体力，跳过受击硬直。支持空中中断、体力耗尽强制解除、落地自动恢复。**弹反（Parrying）**：独立按键触发短暂动画，通过 `UAnimNotifyState_ParryActive` 标记激活窗口。窗口期内成功拦截且面向攻击者（DotProduct 检测，默认 ±45°）即可触发弹反，固定消耗体力（默认 15），实现 100% 免伤并强制攻击方进入 `EES_Parried` 大硬直状态（默认 1.5 秒，动画播放速率 0.5 倍慢放）。弹反动画结束后有隐形冷却（默认 0.4 秒）防止连续点按。
+   - **翻滚闪避系统**：Space 键翻滚，根运动驱动位移，全程无敌帧覆盖。**非锁定**：角色转向输入方向，统一播放 `Dodge_F` 前滚。**锁定**：方向性翻滚 Section 选择——前滚（`Dodge_F`）、左滚（`Dodge_L`）、右滚（`Dodge_R`）、后退（180° 转身 + `Dodge_F`）。Section 判定通过 `UnrotateVector` 将世界空间输入转换到角色局部空间，阈值 0.3 防止斜向误判。翻滚消耗 15 体力，打断格挡/弹反，播放期间锁定旋转。无敌帧由 `UAnimNotifyState_DodgeInvulnerable` 覆盖全程，`GetHit_Implementation()` 和 `TakeDamage()` 双守卫保证免疫一切伤害。旋转模式通过 `RestoreRotationMode()` 在蒙太奇结束时恢复。
    - **受击视觉反馈系统**：双层受击方反馈——(1) 屏幕边缘红晕闪烁，程序化生成 256×256 边缘距离渐变纹理（smoothstep），强度按减伤率缩放（未格挡=满闪，部分格挡=缩放，100%格挡=不闪），渐入 + 指数衰减曲线模拟自然冲击余韵；(2) 受击相机晃动，仅在 `GetHit` 受击反应路径触发，致死一击也有反馈。
    - **受击后退系统**：Tick 驱动位移，距离按减伤率缩放（玩家=10cm，敌人=5cm）。通过 `PendingHitContext` 模式将后退与硬直/格挡状态解耦——武器命中链写入上下文，`GetHit` 统一消费。Quadratic ease-out 曲线（`1 - (1-α)²`）实现先快后慢的自然减速。`AddActorWorldOffset` 带 sweep 防穿墙，撞墙时按实际位移累计保留剩余距离。同阵营命中触发后退但不扣血。
 
@@ -73,21 +76,23 @@ The project follows a decoupled, component-based architecture to ensure scalabil
 
 | 状态 | 说明 |
 |------|------|
-| `EAS_UnOccupied` | 正常态，可移动/攻击/跳跃/奔跑/防御/弹反（防御为子状态，用 `bIsBlocking` 标志） |
+| `EAS_UnOccupied` | 正常态，可移动/攻击/跳跃/奔跑/防御/弹反/翻滚（防御为子状态，用 `bIsBlocking` 标志） |
 | `EAS_Attacking` | 攻击蒙太奇播放中，锁定攻击输入 |
 | `EAS_Stunning` | 受击硬直，短暂锁定 |
 | `EAS_Exhausted` | 体力耗尽，只能行走，数秒后恢复 |
 | `EAS_Parrying` | 弹反蒙太奇播放中，`bParryActive` 标记激活窗口 |
+| `EAS_Dodging` | 翻滚闪避中，全程无敌帧覆盖，根运动驱动位移 |
 | `EAS_Dead` | 死亡，关闭碰撞与移动 |
 
 ```mermaid
 stateDiagram-v2
     [*] --> UnOccupied
 
-    UnOccupied --> Attacking : 攻击 (消耗15体力)
+    UnOccupied --> Attacking : 攻击 (消耗体力)
     UnOccupied --> Stunning : 受击
     UnOccupied --> Exhausted : 体力归零
-    UnOccupied --> Parrying : 弹反输入 (消耗15体力)
+    UnOccupied --> Parrying : 弹反输入 (消耗体力)
+    UnOccupied --> Dodging : 翻滚输入 (消耗体力)
 
     note right of UnOccupied
         防御子状态 (bIsBlocking):
@@ -99,6 +104,7 @@ stateDiagram-v2
     Stunning --> UnOccupied : 硬直结束
     Exhausted --> UnOccupied : 数秒后自动恢复
     Parrying --> UnOccupied : 蒙太奇结束 + 启动冷却
+    Dodging --> UnOccupied : 蒙太奇结束
 
     Parrying --> Stunning : 弹反失误被击中
     Parrying --> Dead : 弹反失误致死
@@ -165,6 +171,9 @@ stateDiagram-v2
   * **格挡**：通过 `DotProduct(角色前方, 到攻击者方向)` 与 `Cos(BlockHalfAngleDegrees)` 比较判断角度范围（默认 ±45°），体力不足时格挡自动失败。成功格挡按可配置比例减伤（默认 95%）并按伤害比例消耗体力，跳过受击硬直。
   * **弹反**：在 `bParryActive` 为 true 的极短动画通知窗口内触发（由 `UAnimNotifyState_ParryActive` 控制）。必须满足方向角度检测（避免背刺弹反）。弹反成功固定消耗体力（默认 15），返回包含 `bParried=true` 的 `FBlockResult`，完全免除伤害，并在 `DispatchHitFeedback()` 中对攻击方调用 `AEnemy::ApplyParried()`，让其进入 `EES_Parried` 大硬直状态（默认 1.5 秒，播放速率 0.5 倍）。弹反动画结束后启动隐形冷却（默认 0.4 秒）防止连续点按。
 
+- **方向性翻滚 Section 选择算法 (Directional Dodge Section Selection)**
+  锁定时 `SelectDodgeSection()` 将世界空间移动输入转换到角色局部空间（`GetActorRotation().UnrotateVector()`），按以下优先级选择蒙太奇 Section：`|Y| > |X|` 且 `|Y| > 0.3` → `Dodge_L`/`Dodge_R` 侧滚；`X > 0.3` → `Dodge_F` 前滚；其余 → `Dodge_B`（转化为 180° 转身 + `Dodge_F`）。非锁定状态始终使用 `Dodge_F`。**关键执行顺序**：Section 选择必须在 `FaceDirection2D()` 之前完成，否则角色转身后参考系发生变化，`UnrotateVector()` 将总是判为前滚。
+
 - **受击视觉反馈 (Hit Feedback Visuals)**
   边缘红晕通过 `UTexture2D::CreateTransient` 程序化生成 256×256 RGBA 纹理，Alpha 公式：`EdgeDist = Min(U, 1-U, V, 1-V)`（到最近屏幕边缘的距离），在可配置的 `VignetteFadeWidth`（默认 0.2 = 外围 20%）范围内 smoothstep 插值。闪烁强度通过 `LastDamageFlashScale` 缩放（`TryBlockHit` 设置 → `TakeDamage()` 通过 `SetPendingDamageFlashScale(...)` 推送给 HUD → `SetHealthPercent()` 仅在真实掉血时消费）。衰减采用指数曲线 `pow(0.01, dt/Duration)`，前快后慢自然拖尾。
 
@@ -218,7 +227,7 @@ stateDiagram-v2
     攻击 --> 被弹反 : 攻击被玩家弹反成功
 
     硬直 --> 状态重判 : 硬直结束
-    被弹反 --> 状态重判 : 大硬直结束 (1.5s)
+    被弹反 --> 状态重判 : 大硬直结束
     状态重判 --> 战斗 : 仍在战斗圈
     状态重判 --> 追击 : 退回追击圈
     状态重判 --> 巡逻 : 目标失效
@@ -259,7 +268,7 @@ flowchart TD
 ```mermaid
 flowchart LR
     A[Attack] --> B[设置冷却标记]
-    B --> C[Timer 3~5秒]
+    B --> C[冷却计时]
     B --> D[切 Attacking + 播蒙太奇]
     D --> E[蒙太奇结束]
     E --> F[CheckCombatTarget]

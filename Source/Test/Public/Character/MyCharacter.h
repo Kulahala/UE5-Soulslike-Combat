@@ -39,6 +39,10 @@ public:
 	void HandleExhausted(); // 体力耗尽回调
 	void RecoverFromExhaustion(); // ExhaustedTime 后恢复
 
+	/* 翻滚 */
+	void Dodge();
+	void OnDodgeMontageEnded(UAnimMontage* Montage, bool bInterrupted);
+
 	/* 装备 */
 	virtual void Equip() override;
 
@@ -55,6 +59,7 @@ public:
 	void Input_Parry();
 	bool CanStartParry() const;
 	void SetParryActive(bool bActive);
+	void SetDodgeInvulnerable(bool bInvulnerable);
 	void StartParryCooldown();
 	void ResetParryCooldown();
 	void InterruptParry();
@@ -82,6 +87,10 @@ protected:
 	// 防御蒙太奇（Section: BlockRaise, BlockIdle）
 	UPROPERTY(EditDefaultsOnly, Category = "Montages", meta = (ToolTip = "防御蒙太奇，含 Section：BlockRaise, BlockIdle。"))
 	UAnimMontage* BlockMontage;
+
+	// 翻滚蒙太奇（需含根运动）
+	UPROPERTY(EditDefaultsOnly, Category = "Montages", meta = (ToolTip = "翻滚蒙太奇，需含根运动。"))
+	UAnimMontage* DodgeMontage;
 
 	/* 动作状态 */
 	UPROPERTY(BlueprintReadOnly, Category = "State")
@@ -126,8 +135,11 @@ private:
 	void SetMovementRotationMode(bool bOrientToMovement, bool bUseControllerYaw);
 	void ApplyCurrentLockOnRotationMode();
 	void ApplyLockOnRotationMode();
-	void RestorePostAttackRotationMode();
+	void RestoreRotationMode();
 	void FaceDirection2D(const FVector& FacingDirection);
+	bool CanDodge() const;
+	FVector ComputeDodgeDirection() const;
+	FName SelectDodgeSection(const FVector& WorldDirection) const;
 
 	/* 相机组件 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true", ToolTip = "玩家相机。"))
@@ -171,6 +183,11 @@ private:
 	FTimerHandle ParryCooldownTimer;
 	UPROPERTY(EditDefaultsOnly, Category = "Montages", meta = (ToolTip = "弹反蒙太奇。"))
 	UAnimMontage* ParryMontage;
+
+	/* 翻滚 */
+	UPROPERTY(EditDefaultsOnly, Category = "Combat|Dodge", meta = (ToolTip = "翻滚体力消耗。"))
+	float DodgeStaminaCost = 15.f;
+	bool bDodgeInvulnerable = false;
 
 	FTimerHandle ExhaustionTimerHandle;
 

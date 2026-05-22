@@ -54,6 +54,11 @@ void ACharacterController::SetupInputComponent()
 		{
 			EnhancedInputComponent->BindAction(ParryAction, ETriggerEvent::Started, this, &ACharacterController::Input_Parry);
 		}
+
+		if (DodgeAction)
+		{
+			EnhancedInputComponent->BindAction(DodgeAction, ETriggerEvent::Started, this, &ACharacterController::Input_Dodge);
+		}
 	}
 }
 
@@ -211,6 +216,15 @@ void ACharacterController::Input_Parry()
 	}
 }
 
+void ACharacterController::Input_Dodge()
+{
+	DebugDodgeExpireTime = GetWorld()->GetTimeSeconds() + 0.15f;
+	if (AMyCharacter* MyCharacter = GetMyCharacter())
+	{
+		MyCharacter->Dodge();
+	}
+}
+
 AMyCharacter* ACharacterController::GetMyCharacter() const
 {
 	return Cast<AMyCharacter>(GetPawn());
@@ -230,6 +244,7 @@ FString ACharacterController::GetDebugInputText() const
 	if (Now < DebugEquipExpireTime)  Result += TEXT("Equip ");
 	if (Now < DebugLockOnExpireTime) Result += TEXT("LockOn ");
 	if (Now < DebugParryExpireTime) Result += TEXT("Parry ");
+	if (Now < DebugDodgeExpireTime) Result += TEXT("Dodge ");
 
 	if (!DebugMoveInput.IsNearlyZero())
 		Result += FString::Printf(TEXT("Move(%.1f, %.1f) "), DebugMoveInput.X, DebugMoveInput.Y);

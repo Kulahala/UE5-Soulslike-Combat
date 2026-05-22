@@ -25,7 +25,7 @@ All gameplay states are defined as `UENUM` enums in `CharacterTypes.h`. This is 
 | Enum | States | Used By |
 |------|--------|---------|
 | `EWeaponState` | Unequipped, OneHandEquipped, TwoHandEquipped | `AMyCharacter`, `USlashAnimInstance` |
-| `EActionState` | UnOccupied, Attacking, Stunning, Exhausted, Parrying, Dead | `AMyCharacter` |
+| `EActionState` | UnOccupied, Attacking, Stunning, Exhausted, Parrying, Dodging, Dead | `AMyCharacter` |
 | `EEnemyState` | UnOccupied, Patrolling, Searching, Chasing, Combating, Attacking, Stunned, Parried, Dead | `AEnemy` |
 
 **State transition pattern**: Mixed C++ + AnimNotify driven. Entry states are set directly in C++ (`Attack()`, `GetHit_Implementation()`, `Die()`). Recovery transitions use `FOnMontageEnded` delegates with `bInterrupted` guards as primary path. `UAnimNotify_CharacterHitReactEnd` is the exception — used for player hit react recovery so designers can tune stun duration in the animation editor. Enemy recovery has double coverage (delegate + AnimNotify with state guards).
@@ -267,6 +267,19 @@ UDataAsset → UTreasureData (static mesh, gold value, pickup sound, scale)
 - 当需要在一个系统（如格挡判定）设置数据、另一个系统（如 HUD）消费时，用瞬时 float + 归位守卫。
 - 设置方写入值，消费方读取后立即归位到默认值（如 1.f），兜底路径处理消费方未执行的边界情况。
 - 本项目实例：`TryBlockHit` 设置 → `SetHealthPercent` 消费归位 → `TakeDamage` 零伤害兜底归位。
+
+### 翻滚系统（Dodge Roll）
+- **状态**：`EAS_Dodging`（插入在 `EAS_Parrying` 和 `EAS_Dead` 之间）
+- **前置条件**：`EAS_UnOccupied` + 地面 + 体力 > 0
+- **无敌帧**：`AnimNotifyState_DodgeInvulnerable` 覆盖整个动画，`GetHit` 和 `TakeDamage` 顶部早退
+- **旋转恢复**：`RestoreRotationMode()`（重命名后的函数）复用锁定系统缓存，不新增重复成员
+- **体力扣除时机**：所有检查（含动画资源）通过后才扣体力，防止失败路径泄漏
+- **方向判定**：
+  - 非锁定：转身面向输入方向，播放前滚
+  - 锁定前滚/侧滚：不转身，保持面朝敌人
+  - 锁定后滚：转身 180° + 播放前滚（因无独立后滚 Section）
+- **⚠️ 执行顺序约束**：`SelectDodgeSection()` 必须在 `FaceDirection2D()` 之前调用，否则角色朝向已变，`UnrotateVector()` 参考系错误
+- **方向判定逻辑**：`UnrotateVector()` 转角色局部空间，优先侧滚（|Y| > |X| 且 |Y| > 0.3），阈值 0.3 防止 45° 斜向误判
 
 ### 替换式状态更新：先清后判
 当函数需要"覆盖旧状态"时，先清空旧状态再做 early-return 守卫。

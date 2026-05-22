@@ -127,6 +127,8 @@ void AMyCharacter::Jump()
 
 void AMyCharacter::GetHit_Implementation(const FVector& ImpactPoint, AActor* HitInstigator)
 {
+	if (bDodgeInvulnerable) return;  // 翻滚无敌帧
+
 	Super::GetHit_Implementation(ImpactPoint, HitInstigator);
 
 	// 受击相机晃动
@@ -191,8 +193,10 @@ void AMyCharacter::RecoverFromExhaustion()
 }
 
 float AMyCharacter::TakeDamage(float DamageAmount, const struct FDamageEvent& DamageEvent,
-                               class AController* EventInstigator, AActor* DamageCauser)
+                                class AController* EventInstigator, AActor* DamageCauser)
 {
+	if (bDodgeInvulnerable) return 0.f;  // 翻滚无敌帧
+
 	if (PlayerHUDWidget)
 	{
 		const float FlashScale = DamageAmount > 0.f ? LastDamageFlashScale : 1.f;
@@ -367,6 +371,11 @@ void AMyCharacter::SetParryActive(bool bActive)
 	bParryActive = bActive;
 }
 
+void AMyCharacter::SetDodgeInvulnerable(bool bInvulnerable)
+{
+	bDodgeInvulnerable = bInvulnerable;
+}
+
 void AMyCharacter::StartParryCooldown()
 {
 	const float Cooldown = EquippedShield ? EquippedShield->ParryCooldown : 0.4f;
@@ -409,6 +418,97 @@ void AMyCharacter::OnParryMontageEnded(UAnimMontage* Montage, bool bInterrupted)
 	bIsParrying = false;
 	bParryActive = false;
 	StartParryCooldown();
+}
+
+// ==================== 翻滚 ====================
+
+bool AMyCharacter::CanDodge() const
+{
+	return ActionState == EActionState::EAS_UnOccupied
+		&& !GetCharacterMovement()->IsFalling()
+		&& Attributes && Attributes->GetCurrentStamina() > 0.f;
+}
+
+void AMyCharacter::Dodge()
+{
+	if (!CanDodge()) return;
+	if (!DodgeMontage || !GetMesh() || !GetMesh()->GetAnimInstance()) return;
+
+	if (bIsBlocking) InterruptBlock(true);
+	if (bIsParrying) InterruptParry();
+
+	FVector DodgeDir = ComputeDodgeDirection();
+	FName Section = SelectDodgeSection(DodgeDir);
+
+	// 非锁定 或 锁定后滚：转身
+	if (!IsLockingOn() || Section == FName("Dodge_B"))
+	{
+		if (!DodgeDir.IsNearlyZero()) FaceDirection2D(DodgeDir);
+		// 后滚转身后改用前滚动画
+		if (Section == FName("Dodge_B")) Section = FName("Dodge_F");
+	}
+
+	SetMovementRotationMode(false, false);
+
+	Attributes->UseStamina(DodgeStaminaCost);
+	Attributes->PauseStaminaRegen();
+
+	ActionState = EActionState::EAS_Dodging;
+
+	PlayMontageSection(DodgeMontage, Section);
+	UAnimInstance* Anim = GetMesh()->GetAnimInstance();
+	FOnMontageEnded EndDelegate;
+	EndDelegate.BindUObject(this, &AMyCharacter::OnDodgeMontageEnded);
+	Anim->Montage_SetEndDelegate(EndDelegate, DodgeMontage);
+}
+
+FVector AMyCharacter::ComputeDodgeDirection() const
+{
+	FVector InputDir = GetLastMovementInputVector().GetSafeNormal2D();
+	if (!InputDir.IsNearlyZero()) return InputDir;
+
+	if (IsLockingOn())
+	{
+		return -GetControlRotation().Vector().GetSafeNormal2D();
+	}
+	return -GetActorForwardVector().GetSafeNormal2D();
+}
+
+FName AMyCharacter::SelectDodgeSection(const FVector& WorldDirection) const
+{
+	if (!IsLockingOn())
+	{
+		return FName("Dodge_F");
+	}
+
+	FVector LocalDir = GetActorRotation().UnrotateVector(WorldDirection);
+	float X = LocalDir.X;
+	float Y = LocalDir.Y;
+
+	const float Threshold = 0.3f;
+
+	if (FMath::Abs(Y) > FMath::Abs(X) && FMath::Abs(Y) > Threshold)
+	{
+		return Y > 0.f ? FName("Dodge_R") : FName("Dodge_L");
+	}
+
+	if (X > Threshold)
+	{
+		return FName("Dodge_F");
+	}
+
+	return FName("Dodge_B");
+}
+
+void AMyCharacter::OnDodgeMontageEnded(UAnimMontage* Montage, bool bInterrupted)
+{
+	bDodgeInvulnerable = false;
+	RestoreRotationMode();
+
+	if (bInterrupted) return;
+
+	ActionState = EActionState::EAS_UnOccupied;
+	Attributes->ResumeStaminaRegen();
 }
 
 // ==================== 装备 ====================
@@ -553,7 +653,7 @@ void AMyCharacter::OnAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted
 	Super::OnAttackMontageEnded(Montage, bInterrupted);
 
 	// 旋转恢复必须在 interrupted guard 之前：free-run 攻击设了双 false，打断后必须还原
-	RestorePostAttackRotationMode();
+	RestoreRotationMode();
 
 	if (bInterrupted) return;  // 更高优先级逻辑（受击/死亡）已接管状态
 
@@ -682,7 +782,7 @@ void AMyCharacter::ApplyCurrentLockOnRotationMode()
 void AMyCharacter::ApplyLockOnRotationMode()
 {
 	// 攻击中不覆盖旋转：普通锁定攻击保持双 true，free-run 攻击保持 Attack() 入口设的双 false
-	if (ActionState == EActionState::EAS_Attacking) return;
+	if (ActionState == EActionState::EAS_Attacking || ActionState == EActionState::EAS_Dodging) return;
 
 	if (IsLockingOn())
 	{
@@ -690,7 +790,7 @@ void AMyCharacter::ApplyLockOnRotationMode()
 	}
 }
 
-void AMyCharacter::RestorePostAttackRotationMode()
+void AMyCharacter::RestoreRotationMode()
 {
 	if (IsLockingOn())
 	{
@@ -845,7 +945,7 @@ void AMyCharacter::DrawDebugInfo() const
 	FDebugDrawHelper::Add(FString::Printf(TEXT("SP: %.1f / %.1f"), Attributes->GetCurrentStamina(), Attributes->GetMaxStamina()), FColor::Green);
 
 	static const TCHAR* ActionStateNames[] = {
-		TEXT("UnOccupied"), TEXT("Attacking"), TEXT("Stunning"), TEXT("Exhausted"), TEXT("Parrying"), TEXT("Dead")
+		TEXT("UnOccupied"), TEXT("Attacking"), TEXT("Stunning"), TEXT("Exhausted"), TEXT("Parrying"), TEXT("Dodging"), TEXT("Dead")
 	};
 	FDebugDrawHelper::Add(FString::Printf(TEXT("State: %s"), ActionStateNames[static_cast<uint8>(ActionState)]), FColor::Yellow);
 

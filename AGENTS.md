@@ -59,11 +59,11 @@ All gameplay states are defined as `UENUM` enums in `CharacterTypes.h` — the s
 | Enum | C++ Values | Used By |
 |------|-----------|---------|
 | `EWeaponState` | `EWS_Unequipped`, `EWS_OneHandEquipped`, `EWS_TwoHandEquipped` | `ABaseCharacter`, `AMyCharacter`, `USlashAnimInstance` |
-| `EActionState` | `EAS_UnOccupied`, `EAS_Attacking`, `EAS_Stunning`, `EAS_Exhausted`, `EAS_Dead` | `AMyCharacter` |
+| `EActionState` | `EAS_UnOccupied`, `EAS_Attacking`, `EAS_Stunning`, `EAS_Exhausted`, `EAS_Parrying`, `EAS_Dodging`, `EAS_Dead` | `AMyCharacter` |
 | `EEnemyState` | `EES_UnOccupied`, `EES_Patrolling`, `EES_Searching`, `EES_Chasing`, `EES_Combating`, `EES_Attacking`, `EES_Stunned`, `EES_Dead` | `AEnemy` |
 | `EItemState` | `EIS_Spawning`, `EIS_Dropped`, `EIS_Equipped` | `Aitem` (in `item.h`) |
 
-**Critical: state flow is mixed C++ + montage delegate + `AnimNotify` driven.** Entry states are often set directly in C++ (`Attack()`, `GetHit_Implementation()`, `Die()`, `SetEnemyState()`). Recovery commonly uses `FOnMontageEnded` delegates with `bInterrupted` guards, while `AnimNotify` classes handle collision windows and designer-timed recoveries (`UAnimNotifyState_WeaponCollision`, `UAnimNotify_SetActionState`, `UAnimNotify_EnemyHitReactEnd`, `UAnimNotify_EnemyAttackEnd`, `UAnimNotify_CharacterHitReactEnd`). Do not hardcode recovery transitions in `Tick()`.
+**Critical: state flow is mixed C++ + montage delegate + `AnimNotify` driven.** Entry states are often set directly in C++ (`Attack()`, `GetHit_Implementation()`, `Die()`, `Dodge()`, `SetEnemyState()`). Recovery commonly uses `FOnMontageEnded` delegates with `bInterrupted` guards, while `AnimNotify` classes handle collision windows and designer-timed recoveries (`UAnimNotifyState_WeaponCollision`, `UAnimNotifyState_DodgeInvulnerable`, `UAnimNotify_SetActionState`, `UAnimNotify_EnemyHitReactEnd`, `UAnimNotify_EnemyAttackEnd`, `UAnimNotify_CharacterHitReactEnd`). Do not hardcode recovery transitions in `Tick()`.
 
 ### Montage Helper Boundaries
 
@@ -86,7 +86,7 @@ ACharacter
 ├── AMyCharacter + IBlockableInterface (UAttributeComponent, spring arm + camera, weapon/shield equipping, hold-to-block)
 └── AEnemy + IHitInterface (AI patrol/search/chase/combat FSM, directional hit react)
 
-APlayerController → ACharacterController (Enhanced Input, move/look/jump/equip/attack/sprint/walk/block/lock-on bindings, input debug snapshot owner)
+APlayerController → ACharacterController (Enhanced Input, move/look/jump/equip/attack/sprint/walk/block/lock-on/dodge/parry bindings, input debug snapshot owner)
 UActorComponent → UAttributeComponent (health, gold, OnHealthChanged delegate)
                └── UPlayerLockOnComponent (lock-on state, target selection, camera tunables)
 UWidgetComponent → UHealthBarComponent
@@ -135,6 +135,22 @@ UInterface → UBlockableInterface (weapon hit interception before final damage 
 - Blocking is canceled when shield/state/falling conditions become invalid; blocked movement speed is reduced through `UpdateMovementSpeed()`.
 - When tuning block damage reduction, update both the C++ default (`AShield::BlockedDamageMultiplier`) and the actual `BP_Shield` asset if it overrides the value in Blueprint.
 
+### Dodge System
+
+- `ACharacterController` owns the dodge input binding through `DodgeAction` → `Input_Dodge()` → `AMyCharacter::Dodge()`.
+- `AMyCharacter::CanDodge()` gates on `EAS_UnOccupied`, grounded, and stamina > 0. Dodge interrupts active block and parry.
+- `ComputeDodgeDirection()` returns the world-space dodge direction: movement input if present, otherwise camera-backward (lock-on) or actor-backward (non-lock).
+- **Directional dodge in lock-on**: `SelectDodgeSection()` converts `ComputeDodgeDirection()` output to actor-local space via `GetActorRotation().UnrotateVector()` and selects montage Section:
+  - `|Y| > |X|` and `|Y| > 0.3` → `Dodge_L` / `Dodge_R` (side roll, no turn)
+  - `X > 0.3` → `Dodge_F` (forward roll, no turn)
+  - Otherwise → `Dodge_B` marker (triggers 180° turn + `Dodge_F` playback)
+- **Critical ordering**: `SelectDodgeSection()` must run **before** `FaceDirection2D()`, because turning changes `GetActorRotation()` and would corrupt the `UnrotateVector` result.
+- Non-lock-on dodge always turns toward input direction and plays `Dodge_F`.
+- `SetMovementRotationMode(false, false)` locks rotation during the roll; `OnDodgeMontageEnded` calls `RestoreRotationMode()` to recover.
+- `UAnimNotifyState_DodgeInvulnerable` toggles `bDodgeInvulnerable` during the roll; `GetHit_Implementation()` and `TakeDamage()` both early-return when the flag is set. `OnDodgeMontageEnded` provides a safety clear.
+- Dodge costs `DodgeStaminaCost` (default 15) and pauses stamina regen; regen resumes in `OnDodgeMontageEnded` (non-interrupted path).
+- `ApplyLockOnRotationMode()` skips `EAS_Dodging` to prevent Tick-time rotation from overwriting dodge facing.
+
 ### Lock-On System
 
 - `ACharacterController` owns the lock-on input binding through `LockOnAction` → `Input_LockOn()`; the current input assets are `Content/_GAME/BP/input/IA_LockOn.uasset`, `Content/_GAME/BP/input/IMC_CharacterInput.uasset`, and `Content/_GAME/BP/input/BP_CharacterController.uasset`.
@@ -146,7 +162,7 @@ UInterface → UBlockableInterface (weapon hit interception before final damage 
 - Lock-on camera framing currently stays on **yaw-only** control rotation. If future work wants target-height framing to matter, that requires changing the camera-aim math; adding a height offset alone is a no-op while `LookAt.Pitch` is cleared back to zero.
 - Lock-on Sprint free-run is a derived movement mode, **not** a separate `EActionState`. `ShouldUseLockOnFreeRun()` is based on lock-on, sprint intent, `EAS_UnOccupied`, grounded state, and live movement input.
 - During lock-on free-run, the target remains locked and the controller / camera still yaw toward the enemy, but the character body temporarily uses `bOrientRotationToMovement=true` and `bUseControllerRotationYaw=false` so movement direction drives facing.
-- Lock-on free-run attacks face the current movement input direction at attack start via `FaceDirection2D()`, then hold that attack-facing mode until the attack montage ends or is interrupted. Use `RestorePostAttackRotationMode()` for post-attack cleanup; do not let Tick-time lock-on rotation overwrite attack facing.
+- Lock-on free-run attacks face the current movement input direction at attack start via `FaceDirection2D()`, then hold that attack-facing mode until the attack montage ends or is interrupted. Use `RestoreRotationMode()` for post-attack cleanup; do not let Tick-time lock-on rotation overwrite attack facing.
 - Lock-on Sprint free-run camera framing now adds a small movement-direction offset under `LockOnCamera`: strafe input shifts the shoulder laterally, while backward input adds extra camera height plus an optional `TargetArmLength` bonus. Keep the target locked; do not turn this into a free-look mode.
 
 ### Lock-On Camera
