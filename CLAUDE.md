@@ -149,7 +149,9 @@ UDataAsset → UTreasureData (static mesh, gold value, pickup sound, scale)
 - When stamina hits 0, `OnExhausted` broadcasts → `HandleExhausted()` sets `EAS_Exhausted` + starts 5s timer.
 - During Exhausted: player can only walk. `RecoverFromExhaustion()` resets state to `EAS_UnOccupied` with state guard (`if (ActionState != EAS_Exhausted) return`).
 - `bStaminaJustDepleted` flag prevents repeated exhaustion broadcasts; reset by `ResetExhaustionFlag()` on recovery.
-- Stamina regen is paused during attacks (`PauseStaminaRegen`) and resumed by montage end delegates.
+- Stamina regen is paused during attacks/dodges (`PauseStaminaRegen`) and resumed by montage end delegates.
+- **"最后一击"设计**：透支时允许播放动画（不在 `UseStamina()` 后添加疲惫守卫），蒙太奇结束回调中检查 `IsExhaustionTimerActive()`，如果计时器活跃则恢复到 `EAS_Exhausted`。疲惫分支中也必须调用 `ResumeStaminaRegen()`，确保体力恢复被正确恢复（见 [[early-return-cleanup]] 和 [[last-action-design]]）。
+- **透支适用范围**：攻击、翻滚、弹反（单次动作）。跳跃不依赖蒙太奇，直接修改速度。格挡是按住式输入，不是单次动作。
 
 ### Health Regen System
 - `UAttributeComponent` 支持生命恢复：`EnableHealthRegen()` / `DisableHealthRegen()`，默认关闭。

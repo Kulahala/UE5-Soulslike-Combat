@@ -196,6 +196,8 @@ UInterface → UBlockableInterface (weapon hit interception before final damage 
 - `AMyCharacter::HandleExhausted()` interrupts block, enters `EAS_Exhausted`, and starts the recover timer through `ExhaustedTime` (current default `5.f`).
 - `AMyCharacter::RecoverFromExhaustion()` first checks the state guard, then calls `ResetExhaustionFlag()` before `AddStamina(1.f)` so the player cannot get stuck in a permanently exhausted gate after an overspend.
 - Attack flow pauses stamina regen through `PauseStaminaRegen()`, and montage recovery paths resume it through `ResumeStaminaRegen()`.
+- **Last Action Montages**: "Last action" overspend (like attack, dodge, parry) does **not** check for `EAS_Exhausted` before playing their montages. We intentionally allow the final montage to play to give the player visual feedback.
+- **Exhaustion State Recovery**: Higher priority states (like `EAS_Stunning` from getting hit) can interrupt `EAS_Exhausted`. Because of this, montage end delegates (e.g., `OnAttackMontageEnded`) and anim notify state resets (e.g., `UAnimNotify_CharacterHitReactEnd`) must check `IsExhaustionTimerActive()` before blindly reverting to `EAS_UnOccupied`. If the timer is still active, they must correctly revert back to `EAS_Exhausted` instead, and still call `ResumeStaminaRegen()` if applicable.
 
 ### Movement Speed
 

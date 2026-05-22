@@ -38,6 +38,7 @@ public:
 	UFUNCTION()
 	void HandleExhausted(); // 体力耗尽回调
 	void RecoverFromExhaustion(); // ExhaustedTime 后恢复
+	bool IsExhaustionTimerActive() const;
 
 	/* 翻滚 */
 	void Dodge();

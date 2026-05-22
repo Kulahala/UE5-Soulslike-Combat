@@ -55,8 +55,12 @@ void UAttributeComponent::UseStamina(float Amount)
 		bStaminaJustDepleted = true;
 		OnExhausted.Broadcast();
 	}
+	
+	if (CurrentStamina > 0.f)
+	{
+		bStaminaJustDepleted = false;
+	}
 	CurrentStamina = FMath::Max(CurrentStamina, 0.f);
-	if (CurrentStamina > 0.f) bStaminaJustDepleted = false;
 
 	OnStaminaChanged.Broadcast(GetStaminaPercent());
 }

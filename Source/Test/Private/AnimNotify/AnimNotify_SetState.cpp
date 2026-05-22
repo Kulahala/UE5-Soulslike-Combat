@@ -48,7 +48,14 @@ void UAnimNotify_CharacterHitReactEnd::Notify(USkeletalMeshComponent* MeshComp, 
 		{
 			if (MyCharacter->GetActionState() == EActionState::EAS_Stunning)
 			{
-				MyCharacter->SetActionState(EActionState::EAS_UnOccupied);
+				if (MyCharacter->IsExhaustionTimerActive())
+				{
+					MyCharacter->SetActionState(EActionState::EAS_Exhausted);
+				}
+				else
+				{
+					MyCharacter->SetActionState(EActionState::EAS_UnOccupied);
+				}
 			}
 		}
 	}

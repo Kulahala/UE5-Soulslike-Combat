@@ -192,6 +192,11 @@ void AMyCharacter::RecoverFromExhaustion()
 	Attributes->AddStamina(1.f);
 }
 
+bool AMyCharacter::IsExhaustionTimerActive() const
+{
+	return GetWorldTimerManager().IsTimerActive(ExhaustionTimerHandle);
+}
+
 float AMyCharacter::TakeDamage(float DamageAmount, const struct FDamageEvent& DamageEvent,
                                 class AController* EventInstigator, AActor* DamageCauser)
 {
@@ -341,7 +346,7 @@ bool AMyCharacter::CanStartParry() const
 		&& ActionState == EActionState::EAS_UnOccupied
 		&& !bIsBlocking
 		&& !bParryOnCooldown
-		&& Attributes && Attributes->GetCurrentStamina() > EquippedShield->ParryStaminaCost
+		&& Attributes
 		&& !GetCharacterMovement()->IsFalling();
 }
 
@@ -414,6 +419,15 @@ void AMyCharacter::OnParryMontageEnded(UAnimMontage* Montage, bool bInterrupted)
 	if (bInterrupted) return;  // InterruptParry() 已处理清理
 	if (ActionState != EActionState::EAS_Parrying) return;
 
+	if (IsExhaustionTimerActive())
+	{
+		ActionState = EActionState::EAS_Exhausted;
+		bIsParrying = false;
+		bParryActive = false;
+		StartParryCooldown();
+		return;
+	}
+
 	ActionState = EActionState::EAS_UnOccupied;
 	bIsParrying = false;
 	bParryActive = false;
@@ -426,7 +440,7 @@ bool AMyCharacter::CanDodge() const
 {
 	return ActionState == EActionState::EAS_UnOccupied
 		&& !GetCharacterMovement()->IsFalling()
-		&& Attributes && Attributes->GetCurrentStamina() > 0.f;
+		&& Attributes;
 }
 
 void AMyCharacter::Dodge()
@@ -506,6 +520,13 @@ void AMyCharacter::OnDodgeMontageEnded(UAnimMontage* Montage, bool bInterrupted)
 	RestoreRotationMode();
 
 	if (bInterrupted) return;
+
+	if (IsExhaustionTimerActive())
+	{
+		ActionState = EActionState::EAS_Exhausted;
+		Attributes->ResumeStaminaRegen();
+		return;
+	}
 
 	ActionState = EActionState::EAS_UnOccupied;
 	Attributes->ResumeStaminaRegen();
@@ -656,6 +677,13 @@ void AMyCharacter::OnAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted
 	RestoreRotationMode();
 
 	if (bInterrupted) return;  // 更高优先级逻辑（受击/死亡）已接管状态
+
+	if (IsExhaustionTimerActive())
+	{
+		ActionState = EActionState::EAS_Exhausted;
+		Attributes->ResumeStaminaRegen();
+		return;
+	}
 
 	ActionState = EActionState::EAS_UnOccupied;
 	Attributes->ResumeStaminaRegen();

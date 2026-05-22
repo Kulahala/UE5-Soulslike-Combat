@@ -134,6 +134,8 @@ flowchart LR
     M --> K
 ```
 
+* **透支与恢复守卫 (Overdraft & Recovery Guard)**: 系统允许体力透支，透支触发的“最后一击”会正常播放蒙太奇以提供视觉反馈。`EAS_Stunning` 等高优先级状态可打断 `EAS_Exhausted`。在任何动作或硬直蒙太奇结束时，系统会检查疲惫计时器 (`IsExhaustionTimerActive()`)，若仍在疲惫期内则恢复到 `EAS_Exhausted` 状态，并确保恢复体力自然增长，防止状态丢失或体力卡死。
+
 **武器装备状态 (`EWeaponState`)**
 
 ```mermaid
