@@ -209,6 +209,10 @@ UInterface → UBlockableInterface (weapon hit interception before final damage 
 - Free-run camera offset is driven by controller-yaw local movement input via `GetControlRotation().Yaw` + `UnrotateVector`, not Actor-local direction or velocity. Free-run rotates the body toward movement, so Actor-local space would lose left/right/back intent; velocity also drops to zero when the player pushes into walls.
 - Current code defaults are `LockOnSocketOffset = (0, 80, 80)`, `LockOnSocketOffsetInterpSpeed = 6.f`, `LockOnFreeRunCameraSideOffset = 60.f`, `LockOnFreeRunCameraBackHeightOffset = 40.f`, `LockOnFreeRunCameraBackArmLengthBonus = 0.f`, and `LockOnFreeRunCameraInterpSpeed = 10.f`, but these are tuning values rather than architectural truth; feel free to retune them in Blueprint / defaults without changing the control flow.
 - The current camera still computes `LookAt` from `PlayerLoc -> TargetLoc`. That is enough for the present "cheap fix" shoulder framing, but it does **not** mathematically guarantee that the enemy stays centered after socket offset. If future tuning still leaves the target drifting too far off the main viewing area, prefer compensating the aim from the offset camera position before adding arbitrary yaw-bias magic numbers.
+- **Camera Recenter**: Triggered via `AMyCharacter::StartCameraRecenter()` when `Input_LockOn()` finds no valid target. It captures a snapshot of the current actor rotation (`RecenterTargetRotation`) and limits the pitch to `RecenterTargetPitch` (default `-10.f`). `Tick()` then interpolates the controller rotation towards this fixed snapshot via `UpdateCameraRecenter()`.
+- Recentering uses `FMath::RInterpTo` and is resilient to `EAS_Stunning` / `EAS_Dead` (running before the early exit in `Tick()`).
+- The recenter process is aborted via `StopCameraRecenter()` if the player moves the mouse (`Input_Look()`), successfully locks onto a target, or dies.
+- There is intentionally no audio feedback during recenter, maintaining a 'Souls-like' minimalist feel.
 
 ### Shared Direction Helper
 

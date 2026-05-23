@@ -78,6 +78,12 @@ void AMyCharacter::Tick(float DeltaTime)
 	// UpdateLockOn 放在早退之前：内部已有死亡/硬直 guard，但有效性清理必须在所有状态下执行
 	UpdateLockOn(DeltaTime);
 
+	// 新增：相机归中（必须在早退之前，受击硬直时继续归中）
+	if (bRecenteringCamera)
+	{
+		UpdateCameraRecenter(DeltaTime);
+	}
+
 	if (ActionState == EActionState::EAS_Stunning || ActionState == EActionState::EAS_Dead) return;
 
 	if (bIsBlocking && ShouldInterruptBlock())
@@ -281,6 +287,7 @@ void AMyCharacter::Die()
 	InterruptBlock(true);
 	ClearParryState();
 	ClearLockOn();
+	bRecenteringCamera = false; // 新增：死亡时中断归中
 	ActionState = EActionState::EAS_Dead;
 
 	// 停止移动
@@ -582,14 +589,6 @@ void AMyCharacter::Dodge()
 	FVector DodgeDir = ComputeDodgeDirection();
 	FName Section = SelectDodgeSection(DodgeDir);
 
-	// 非锁定 或 锁定后滚：转身
-	if (!IsLockingOn() || Section == FName("Dodge_B"))
-	{
-		if (!DodgeDir.IsNearlyZero()) FaceDirection2D(DodgeDir);
-		// 后滚转身后改用前滚动画
-		if (Section == FName("Dodge_B")) Section = FName("Dodge_F");
-	}
-
 	SetMovementRotationMode(false, false);
 
 	Attributes->UseStamina(DodgeStaminaCost);
@@ -618,11 +617,19 @@ FVector AMyCharacter::ComputeDodgeDirection() const
 
 FName AMyCharacter::SelectDodgeSection(const FVector& WorldDirection) const
 {
+	// 无移动输入：直接后跳（不转身）
+	if (GetLastMovementInputVector().IsNearlyZero())
+	{
+		return FName("Dodge_B");
+	}
+
+	// 非锁定 + 有输入：前滚（会转身面向输入方向）
 	if (!IsLockingOn())
 	{
 		return FName("Dodge_F");
 	}
 
+	// 锁定 + 有输入：根据方向判断
 	FVector LocalDir = GetActorRotation().UnrotateVector(WorldDirection);
 	float X = LocalDir.X;
 	float Y = LocalDir.Y;
@@ -890,6 +897,10 @@ void AMyCharacter::FindLockOnTarget()
 	{
 		SetLockOnTarget(BestTarget);
 	}
+	else
+	{
+		StartCameraRecenter();
+	}
 }
 
 void AMyCharacter::UpdateLockOn(float DeltaTime)
@@ -1070,6 +1081,7 @@ void AMyCharacter::SetLockOnTarget(AEnemy* NewTarget)
 		return;
 	}
 
+	bRecenteringCamera = false; // 新增：锁定时中断归中
 	LockOnComponent->SetLockedTarget(NewTarget);
 	CacheLockOnRotationState();
 	EnterLockOnRotationMode();
@@ -1209,4 +1221,35 @@ void AMyCharacter::StopBlockMontage(float BlendOutTime)
 bool AMyCharacter::ShouldInterruptBlock() const
 {
 	return !EquippedShield || ActionState != EActionState::EAS_UnOccupied || GetCharacterMovement()->IsFalling();
+}
+
+void AMyCharacter::StartCameraRecenter()
+{
+	if (IsLockingOn()) return; // 锁定中不归中
+	
+	// 快照当前朝向作为目标
+	RecenterTargetRotation = GetActorRotation();
+	RecenterTargetRotation.Pitch = RecenterTargetPitch;
+	RecenterTargetRotation.Roll = 0.f;
+
+	bRecenteringCamera = true;
+}
+
+void AMyCharacter::UpdateCameraRecenter(float DeltaTime)
+{
+	APlayerController* PC = Cast<APlayerController>(GetController());
+	if (!PC) return;
+
+	FRotator Current = PC->GetControlRotation();
+
+	// 使用快照目标旋转，不再每帧读取 GetActorRotation()
+	FRotator NewRotation = FMath::RInterpTo(Current, RecenterTargetRotation, DeltaTime, RecenterInterpSpeed);
+	PC->SetControlRotation(NewRotation);
+
+	// 到达阈值
+	if (FMath::IsNearlyZero(FMath::FindDeltaAngleDegrees(NewRotation.Yaw, RecenterTargetRotation.Yaw), 1.f) &&
+		FMath::IsNearlyEqual(NewRotation.Pitch, RecenterTargetRotation.Pitch, 1.f))
+	{
+		bRecenteringCamera = false;
+	}
 }

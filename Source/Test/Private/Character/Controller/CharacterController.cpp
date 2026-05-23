@@ -95,7 +95,7 @@ void ACharacterController::Input_Look(const FInputActionValue& Value)
 {
 	if (AMyCharacter* MyCharacter = GetMyCharacter())
 	{
-		if (MyCharacter->IsLockingOn()) return;  // 锁定中忽略视角输入
+		if (MyCharacter->IsLockingOn()) return;
 	}
 
 	if (APawn* ControlledPawn = GetPawn())

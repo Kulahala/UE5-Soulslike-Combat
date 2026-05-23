@@ -17,6 +17,7 @@ class UPlayerHUDWidget;
 class UCameraShakeBase;
 class UPlayerLockOnComponent;
 class UComboDataAsset;
+class USoundBase;
 
 UCLASS()
 class TEST_API AMyCharacter : public ABaseCharacter, public IBlockableInterface
@@ -90,6 +91,10 @@ public:
 	void ToggleLockOn();
 	void ClearLockOn();
 	bool IsLockingOn() const;
+
+	/* 相机归中 */
+	FORCEINLINE bool IsRecenteringCamera() const { return bRecenteringCamera; }
+	void StopCameraRecenter() { bRecenteringCamera = false; }
 
 protected:
 	/* 蒙太奇 */
@@ -237,6 +242,20 @@ private:
 	bool bCachedSpringArmUsePawnControlRotation = false;
 	FVector CachedSocketOffset = FVector::ZeroVector;
 	float CachedTargetArmLength = 300.f;
+
+	/* 相机归中 */
+	bool bRecenteringCamera = false;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Camera", meta = (ToolTip = "归中插值速度"))
+	float RecenterInterpSpeed = 8.f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Camera", meta = (ToolTip = "归中目标俯仰角（负值=俯视）"))
+	float RecenterTargetPitch = -10.f;
+
+	FRotator RecenterTargetRotation = FRotator::ZeroRotator;
+
+	void StartCameraRecenter();
+	void UpdateCameraRecenter(float DeltaTime);
 
 	void FindLockOnTarget();
 	void UpdateLockOn(float DeltaTime);
