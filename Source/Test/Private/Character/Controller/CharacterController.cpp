@@ -139,7 +139,14 @@ void ACharacterController::Input_Attack()
 {
 	if (AMyCharacter* MyCharacter = GetMyCharacter())
 	{
-		MyCharacter->Attack();
+		if (MyCharacter->IsComboWindowOpen())
+		{
+			MyCharacter->SetComboInputReceived(true);
+		}
+		else
+		{
+			MyCharacter->Attack();
+		}
 	}
 	DebugAttackExpireTime = GetWorld()->GetTimeSeconds() + 0.15f;  // [调试]
 }

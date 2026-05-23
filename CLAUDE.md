@@ -55,24 +55,31 @@ UWidgetComponent → UHealthBarComponent
 UUserWidget → UBaseHealthBarWidget (PB_Health + PB_Buffer progress bars, buffer delay logic)
 UAnimInstance → USlashAnimInstance (exposes GroundSpeed, Direction, bIsBlocking, bIsStunning, state enums to anim graph)
 UAnimNotifyState → UAnimNotifyState_ParryActive (marks parry active window in animation)
+UAnimNotifyState → UAnimNotifyState_ComboWindow (marks combo input window in animation)
 UDataAsset → UTreasureData (static mesh, gold value, pickup sound, scale)
+UDataAsset → UComboDataAsset (combo chain: SectionName, DamageMultiplier, StaminaCost per segment)
 ```
 
 ### Combat Pipeline
 1. `ACharacterController::Input_Attack()` → calls `AMyCharacter::Attack()`
-2. `PlayAttackMontage()` plays attack animation with `UAnimNotifyState_WeaponCollision` baked in
-3. **NotifyBegin** → `AWeapon::StartWeaponTrace()` (records old box positions)
-4. **NotifyTick** → `AWeapon::ExecuteWeaponTrace()` (sweeps from old→new center to prevent ghost swings)
-5. On hit:
+2. **Combo System**: `Attack()` queries `UComboDataAsset` for current segment config (SectionName, DamageMultiplier, StaminaCost), increments `ComboCounter` on successful continuation
+3. `PlayAttackMontage(SectionName)` plays attack animation with `UAnimNotifyState_WeaponCollision` + `UAnimNotifyState_ComboWindow` baked in
+4. **NotifyBegin** → `AWeapon::StartWeaponTrace()` (records old box positions)
+5. **NotifyTick** → `AWeapon::ExecuteWeaponTrace()` (sweeps from old→new center to prevent ghost swings)
+6. On hit:
    - 同阵营命中：不 `ApplyDamage`，但仍走 `GetHit` 路径（击退、命中反馈、相机晃动）。同阵营判定通过 `FCombatTeamHelper::ShareTeamTag()`（Weapon + Enemy 共用）
    - 跨阵营命中：`IBlockableInterface::TryBlockHit()` 在 `ApplyDamage` 前拦截；格挡成功：减伤 + 跳过硬直；弹反成功：对攻击方调用 `ApplyParried()` 硬直
    - `ExecuteWeaponTrace()` 通过 `FPendingHitContext` 写入每命中的上下文（instigator、knockback scale、blocked flag、stun flag），然后调用 `GetHit()`
    - `ABaseCharacter::GetHit_Implementation()` 消费 context 驱动击退/受击反应，子类（`AMyCharacter`、`AEnemy`）在各自硬直逻辑后清空 context
    - `ExecuteWeaponTrace()` 分解为 `BuildIgnoreList()`、`ResolveHit()`、`DispatchHitFeedback()` 三步，不要膨胀为通用战斗管线
    - 弹反分支：`DispatchHitFeedback()` 在 `GetHit()` 之前先对攻击方调用 `ApplyParried()`，确保敌人先进入 `EES_Parried` 状态
-6. HitStop + CameraShake（所有命中都触发）
-7. **NotifyEnd** → clears `IgnoreActors` blacklist
-8. `OnAttackMontageEnded` delegate fires → `if (bInterrupted) return` guard → sets `EAS_UnOccupied` + resumes stamina regen
+   - **Damage Multiplier**: `ResolveHit()` 在格挡判定前应用 `BaseCharacter->GetAttackDamageMultiplier()`，确保格挡体力消耗基于实际打击伤害
+7. HitStop + CameraShake（所有命中都触发）
+8. **NotifyEnd** → clears `IgnoreActors` blacklist
+9. **Combo Window**: `AnimNotifyState_ComboWindow` marks combo input window, `Input_Attack()` sets `bComboInputReceived` during window
+10. `OnAttackMontageEnded` delegate fires → `if (bInterrupted) return` guard → checks `bComboInputReceived`:
+    - true + not exhausted → `ComboCounter++`, temp set `ActionState = EAS_UnOccupied`, call `Attack()` (continues combo)
+    - false or exhausted → `ResetCombo()`, restore `EAS_UnOccupied`, resume stamina regen
 
 ### Hit Knockback（受击后退）
 - `ABaseCharacter` 通过 `FPendingHitContext` + `BaseHitKnockbackDistance` + `HitKnockbackDuration` + `TickHitKnockback()` 共享短距离武器命中击退。
@@ -282,6 +289,21 @@ UDataAsset → UTreasureData (static mesh, gold value, pickup sound, scale)
   - 锁定后滚：转身 180° + 播放前滚（因无独立后滚 Section）
 - **⚠️ 执行顺序约束**：`SelectDodgeSection()` 必须在 `FaceDirection2D()` 之前调用，否则角色朝向已变，`UnrotateVector()` 参考系错误
 - **方向判定逻辑**：`UnrotateVector()` 转角色局部空间，优先侧滚（|Y| > |X| 且 |Y| > 0.3），阈值 0.3 防止 45° 斜向误判
+
+### 连招系统（Combo System）
+- **架构**：数据驱动 + AnimNotifyState 驱动窗口
+- **数据结构**：`UComboDataAsset` 存储连招链（`TArray<FComboSegment>`），每段配置 `SectionName`、`DamageMultiplier`、`StaminaCost`
+- **连招窗口**：`UAnimNotifyState_ComboWindow` 在蒙太奇中标记输入窗口（可视化调整，自动跟随 PlayRate）
+- **输入缓冲**：`Input_Attack()` 检查 `IsComboWindowOpen()`，窗口内设置 `bComboInputReceived = true`，窗口外直接调用 `Attack()`
+- **连招续接**：`OnAttackMontageEnded()` 检查 `bComboInputReceived`：
+  - true + 非疲惫 → `ComboCounter++`，临时设置 `ActionState = EAS_UnOccupied`（让 `CanAttack()` 通过），调用 `Attack()`
+  - false 或疲惫 → `ResetCombo()`，恢复 `EAS_UnOccupied`
+- **状态时序关键**：连招续接判断必须在状态恢复之前，临时 `UnOccupied` 只存在于函数调用链内部
+- **伤害倍率**：`ABaseCharacter::CurrentAttackDamageMultiplier` 存储当前段倍率，`AWeapon::ResolveHit()` 在格挡判定前应用（确保格挡体力消耗基于实际打击伤害）
+- **中断清理**：所有中断点（`GetHit`、`Die`、`HandleExhausted`、`Dodge`）必须调用 `ResetCombo()`
+- **累积式动画**：支持 Attack1:a, Attack2:a+b, Attack3:a+b+c 的动画结构，通过蒙太奇 section 跳转实现（第二段跳到"b开始"，第三段跳到"c开始"）
+- **AnimNotifyState vs Timer**：连招窗口必须用 AnimNotifyState，原因：(1) 自动跟随 PlayRate，(2) 可视化调整无需改代码，(3) 动画迭代零代码改动
+- **文件位置**：`Source/Test/Public/Combat/ComboDataAsset.h`、`Source/Test/Public/AnimNotify/AnimNotifyState_ComboWindow.h`
 
 ### 替换式状态更新：先清后判
 当函数需要"覆盖旧状态"时，先清空旧状态再做 early-return 守卫。

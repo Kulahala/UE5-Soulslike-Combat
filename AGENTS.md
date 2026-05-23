@@ -94,6 +94,10 @@ UUserWidget → UBaseHealthBarWidget (PB_Health + PB_Buffer progress bars, delay
            └── UPlayerHUDWidget (player HP/stamina HUD + NativePaint debug text overlay + damage vignette)
 UAnimInstance → USlashAnimInstance (GroundSpeed, Direction, state enums)
 UDataAsset → UTreasureData
+           └── UComboDataAsset (light attack combo chain configurations)
+UAnimNotifyState → UAnimNotifyState_WeaponCollision
+                 ├── UAnimNotifyState_DodgeInvulnerable
+                 └── UAnimNotifyState_ComboWindow (opens character combo buffer window)
 UInterface → UBlockableInterface (weapon hit interception before final damage application)
 ```
 
@@ -150,6 +154,16 @@ UInterface → UBlockableInterface (weapon hit interception before final damage 
 - `UAnimNotifyState_DodgeInvulnerable` toggles `bDodgeInvulnerable` during the roll; `GetHit_Implementation()` and `TakeDamage()` both early-return when the flag is set. `OnDodgeMontageEnded` provides a safety clear.
 - Dodge costs `DodgeStaminaCost` (default 15) and pauses stamina regen; regen resumes in `OnDodgeMontageEnded` (non-interrupted path).
 - `ApplyLockOnRotationMode()` skips `EAS_Dodging` to prevent Tick-time rotation from overwriting dodge facing.
+
+### Combo System
+
+- **Data-Driven Configuration**: A light attack combo chain is defined via `UComboDataAsset` (set on `AMyCharacter::LightAttackCombo`). Each segment configures a custom Montage Section, a damage multiplier (scales base weapon damage), and a stamina cost.
+- **Input Buffering**: Checked during `ACharacterController::Input_Attack()`. If `AMyCharacter::IsComboWindowOpen()` is true, the input is buffered by setting `bComboInputReceived = true`. Otherwise, a normal attack is initiated.
+- **Combo Window State**: Controlled by `UAnimNotifyState_ComboWindow` placed in the attack montage. It calls `OpenComboWindow()` and `CloseComboWindow()` to toggle the input window.
+- **Combo Progression**: In `AMyCharacter::OnAttackMontageEnded()`, if `bComboInputReceived` is true and a next combo segment exists, the character increases the combo counter, temporarily marks the action state as `EActionState::EAS_UnOccupied` (to pass the `CanAttack()` gate), and immediately triggers `Attack()`.
+- **Reset Guards & Interruption**: On attack finish (without buffered inputs), normal interruption (getting hit, death, dodge roll, or exhaustion), `ResetCombo()` is called to reset the combo counter, input flag, and restore the damage multiplier to `1.0f`.
+- **Damage Multiplier Application**: Applied in `AWeapon::ResolveHit()`. The weapon queries the attacker's `GetAttackDamageMultiplier()` to scale the raw damage *before* passing it to `IBlockableInterface::TryBlockHit()`, ensuring block stamina costs and damage mitigation calculations scale accordingly.
+- **Debug Visibility**: Rendered via `FDebugDrawHelper` in `DrawDebugInfo` when master debug rendering is active, printing combo index, input/window status, and current damage multiplier.
 
 ### Lock-On System
 

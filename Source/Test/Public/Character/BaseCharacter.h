@@ -42,6 +42,9 @@ public:
 	virtual void Attack();
 	virtual void Equip();
 
+	FORCEINLINE float GetAttackDamageMultiplier() const { return CurrentAttackDamageMultiplier; }
+	FORCEINLINE void SetAttackDamageMultiplier(float Multiplier) { CurrentAttackDamageMultiplier = Multiplier; }
+
 	/* 命中上下文 + 后退 */
 	void CachePendingHitContext(AActor* HitInstigator, float KnockbackScale, bool bWasBlocked, bool bApplyStun);
 	void ResetPendingHitContext();
@@ -119,6 +122,9 @@ protected:
 	void ConsumePendingHitKnockback();
 	void StartHitKnockback(AActor* HitInstigator, float Scale);
 	void TickHitKnockback(float DeltaTime);
+
+	// 当前攻击伤害倍率（连招系统使用）
+	float CurrentAttackDamageMultiplier = 1.0f;
 
 public:
 	FORCEINLINE AWeapon* GetWeapon() const { return EquippedWeapon; }

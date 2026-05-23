@@ -16,6 +16,7 @@ class UCameraComponent;
 class UPlayerHUDWidget;
 class UCameraShakeBase;
 class UPlayerLockOnComponent;
+class UComboDataAsset;
 
 UCLASS()
 class TEST_API AMyCharacter : public ABaseCharacter, public IBlockableInterface
@@ -39,6 +40,15 @@ public:
 	void HandleExhausted(); // 体力耗尽回调
 	void RecoverFromExhaustion(); // ExhaustedTime 后恢复
 	bool IsExhaustionTimerActive() const;
+
+	/* 连招系统 */
+	void OpenComboWindow();
+	void CloseComboWindow();
+	void ResetCombo();
+	FORCEINLINE bool IsComboWindowOpen() const { return bComboWindowOpen; }
+	FORCEINLINE void SetComboInputReceived(bool bReceived) { bComboInputReceived = bReceived; }
+	UFUNCTION(BlueprintCallable, Category = "Combat")
+	FORCEINLINE int32 GetComboCounter() const { return ComboCounter; }
 
 	/* 翻滚 */
 	void Dodge();
@@ -82,6 +92,7 @@ public:
 protected:
 	/* 蒙太奇 */
 	void PlayBlockMontage(const FName& SectionName); // 播放防御蒙太奇
+	virtual void PlayAttackMontage(const FName& SectionName) override;
 	virtual bool CanAttack() const override;
 	virtual void OnAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted) override;
 
@@ -198,6 +209,14 @@ private:
 
 	// 受击染红缩放系数（TryBlockHit 设置，TakeDamage 推送给 HUD 后归位）
 	float LastDamageFlashScale = 1.f;
+
+	/* 连招系统 */
+	UPROPERTY(EditDefaultsOnly, Category = "Combat|Combo", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UComboDataAsset> LightAttackCombo;
+
+	int32 ComboCounter = 0;
+	bool bComboWindowOpen = false;
+	bool bComboInputReceived = false;
 
 	/* 锁定 */
 	// 锁定开启前缓存的状态（ClearLockOn 时恢复）

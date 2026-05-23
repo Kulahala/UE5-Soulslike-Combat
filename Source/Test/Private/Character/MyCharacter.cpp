@@ -1,6 +1,7 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
 #include "Character/MyCharacter.h"
+#include "Combat/ComboDataAsset.h"
 #include "Character/Components/PlayerLockOnComponent.h"
 #include "Character/Controller/CharacterController.h"
 
@@ -93,26 +94,91 @@ void AMyCharacter::Tick(float DeltaTime)
 
 void AMyCharacter::Attack()
 {
-	if (bIsBlocking) return;
-	Super::Attack();
-	if (CanAttack())
-	{
-		// 锁定 free-run 接攻击：面向奔跑方向，锁定旋转让位给根运动
-		if (ShouldUseLockOnFreeRun())
-		{
-			FVector Dir = GetLockOnFreeRunDirection();
-			if (!Dir.IsNearlyZero())
-			{
-				FaceDirection2D(Dir);
-			}
-			SetMovementRotationMode(false, false);
-		}
+	if (bIsBlocking) return;  // 保留现有守卫
+	Super::Attack();  // 保留
 
-		Attributes->UseStamina(15.f);
-		Attributes->PauseStaminaRegen();
-		ActionState = EActionState::EAS_Attacking;
-		PlayAttackMontage(FName("Attack2"));
+	if (!CanAttack()) return;
+
+	// 连招系统检查
+	if (!LightAttackCombo || !LightAttackCombo->ComboMontage)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("LightAttackCombo not configured"));
+		return;
 	}
+
+	// 获取当前段配置
+	const FComboSegment* Segment = LightAttackCombo->GetSegment(ComboCounter);
+	if (!Segment)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Invalid combo segment: %d"), ComboCounter);
+		ResetCombo();
+		return;
+	}
+
+	// 锁定 free-run 攻击朝向处理（仅第一段）
+	if (ComboCounter == 0 && ShouldUseLockOnFreeRun())
+	{
+		FVector Dir = GetLockOnFreeRunDirection();
+		if (!Dir.IsNearlyZero())
+		{
+			FaceDirection2D(Dir);
+		}
+		SetMovementRotationMode(false, false);
+	}
+
+	// 体力检查（支持透支）
+	Attributes->UseStamina(Segment->StaminaCost);
+
+	// 设置伤害倍率
+	SetAttackDamageMultiplier(Segment->DamageMultiplier);
+
+	// 暂停体力恢复 + 设置状态（保持原有顺序）
+	Attributes->PauseStaminaRegen();
+	ActionState = EActionState::EAS_Attacking;
+
+	// 播放对应段的蒙太奇
+	PlayAttackMontage(Segment->SectionName);
+
+	// 清除旧的输入标记
+	bComboInputReceived = false;
+
+	UE_LOG(LogTemp, Log, TEXT("Attack Segment %d: %s (Damage x%.1f)"), 
+	       ComboCounter, *Segment->SectionName.ToString(), Segment->DamageMultiplier);
+}
+
+void AMyCharacter::PlayAttackMontage(const FName& SectionName)
+{
+	UAnimMontage* MontageToPlay = (LightAttackCombo && LightAttackCombo->ComboMontage) ? LightAttackCombo->ComboMontage.Get() : AttackMontage;
+	PlayMontageSection(MontageToPlay, SectionName);
+
+	if (UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance(); AnimInstance && MontageToPlay)
+	{
+		FOnMontageEnded EndDelegate;
+		EndDelegate.BindUObject(this, &AMyCharacter::OnAttackMontageEnded);
+		AnimInstance->Montage_SetEndDelegate(EndDelegate, MontageToPlay);
+	}
+}
+
+void AMyCharacter::OpenComboWindow()
+{
+	bComboWindowOpen = true;
+	UE_LOG(LogTemp, Log, TEXT("Combo window opened for segment %d"), ComboCounter);
+}
+
+void AMyCharacter::CloseComboWindow()
+{
+	bComboWindowOpen = false;
+	UE_LOG(LogTemp, Log, TEXT("Combo window closed"));
+}
+
+void AMyCharacter::ResetCombo()
+{
+	ComboCounter = 0;
+	bComboWindowOpen = false;
+	bComboInputReceived = false;
+	SetAttackDamageMultiplier(1.0f);
+
+	UE_LOG(LogTemp, Log, TEXT("Combo reset"));
 }
 
 void AMyCharacter::Jump()
@@ -142,6 +208,7 @@ void AMyCharacter::GetHit_Implementation(const FVector& ImpactPoint, AActor* Hit
 
 	if (Attributes->IsAlive() && PendingHitContext.bApplyStun)
 	{
+		ResetCombo();
 		InterruptBlock(false);
 		if (bIsParrying) InterruptParry();
 		ActionState = EActionState::EAS_Stunning;
@@ -153,6 +220,7 @@ void AMyCharacter::GetHit_Implementation(const FVector& ImpactPoint, AActor* Hit
 
 void AMyCharacter::Die()
 {
+	ResetCombo();
 	InterruptBlock(true);
 	ClearParryState();
 	ClearLockOn();
@@ -176,6 +244,7 @@ void AMyCharacter::Die()
 
 void AMyCharacter::HandleExhausted()
 {
+	ResetCombo();
 	InterruptBlock(true);
 	ActionState = EActionState::EAS_Exhausted;
 	GetWorldTimerManager().SetTimer(ExhaustionTimerHandle, this,
@@ -448,6 +517,8 @@ void AMyCharacter::Dodge()
 	if (!CanDodge()) return;
 	if (!DodgeMontage || !GetMesh() || !GetMesh()->GetAnimInstance()) return;
 
+	ResetCombo();
+
 	if (bIsBlocking) InterruptBlock(true);
 	if (bIsParrying) InterruptParry();
 
@@ -676,17 +747,47 @@ void AMyCharacter::OnAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted
 	// 旋转恢复必须在 interrupted guard 之前：free-run 攻击设了双 false，打断后必须还原
 	RestoreRotationMode();
 
-	if (bInterrupted) return;  // 更高优先级逻辑（受击/死亡）已接管状态
-
-	if (IsExhaustionTimerActive())
+	if (bInterrupted)
 	{
-		ActionState = EActionState::EAS_Exhausted;
-		Attributes->ResumeStaminaRegen();
+		ResetCombo();
 		return;
 	}
 
-	ActionState = EActionState::EAS_UnOccupied;
-	Attributes->ResumeStaminaRegen();
+	// 连招续接判断（在状态恢复之前）
+	const bool bShouldContinueCombo = bComboInputReceived && 
+	                                   LightAttackCombo && 
+	                                   (ComboCounter + 1) < LightAttackCombo->GetComboCount();
+
+	const bool bWillExhaust = IsExhaustionTimerActive();
+
+	if (bShouldContinueCombo && !bWillExhaust)
+	{
+		// 连招续接：临时恢复 UnOccupied 让 CanAttack() 通过
+		ComboCounter++;
+		bComboInputReceived = false;
+		ActionState = EActionState::EAS_UnOccupied;  // 临时设置，Attack() 会立刻改回 EAS_Attacking
+		Attack();
+		return;  // 不执行后续状态恢复
+	}
+
+	// 连招结束，恢复状态
+	ResetCombo();
+
+	if (ActionState == EActionState::EAS_Attacking)
+	{
+		ActionState = EActionState::EAS_UnOccupied;
+	}
+
+	// 体力恢复处理（保持原有逻辑）
+	if (bWillExhaust)
+	{
+		ActionState = EActionState::EAS_Exhausted;
+		Attributes->ResumeStaminaRegen();
+	}
+	else
+	{
+		Attributes->ResumeStaminaRegen();
+	}
 }
 
 // ==================== 锁定 ====================
@@ -1022,6 +1123,20 @@ void AMyCharacter::DrawDebugInfo() const
 			*BlockMontage->GetName(),
 			BlockSection.IsNone() ? TEXT("?") : *BlockSection.ToString()),
 			FColor::Green);
+	}
+
+	// [调试] 连招信息 — 仅配置了连招且在连招过程中或连招窗口打开时显示
+	if (LightAttackCombo)
+	{
+		FString ComboInfo = FString::Printf(
+			TEXT("Combo: %d/%d %s%s (x%.1f)"),
+			ComboCounter + 1,
+			LightAttackCombo->GetComboCount(),
+			bComboWindowOpen ? TEXT("[WINDOW]") : TEXT(""),
+			bComboInputReceived ? TEXT("[INPUT]") : TEXT(""),
+			GetAttackDamageMultiplier()
+		);
+		FDebugDrawHelper::Add(ComboInfo, FColor::Orange);
 	}
 }
 

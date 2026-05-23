@@ -18,6 +18,8 @@ ABaseCharacter::ABaseCharacter()
 
 	// 属性组件
 	Attributes = CreateDefaultSubobject<UAttributeComponent>(TEXT("Attributes"));
+
+	CurrentAttackDamageMultiplier = 1.f;
 }
 
 void ABaseCharacter::BeginPlay()

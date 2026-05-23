@@ -140,7 +140,13 @@ void AWeapon::BuildIgnoreList(TArray<AActor*>& OutActors)
 AWeapon::FWeaponHitResult AWeapon::ResolveHit(AActor* HitActor, const FHitResult& HitPoint)
 {
 	FWeaponHitResult Result;
-	Result.FinalDamage = Damage;
+	float BaseDamage = Damage;
+
+	if (ABaseCharacter* Attacker = Cast<ABaseCharacter>(GetOwner()))
+	{
+		BaseDamage *= Attacker->GetAttackDamageMultiplier();
+	}
+	Result.FinalDamage = BaseDamage;
 
 	// 同类豁免：武器持有者和命中目标共享标签
 	if (FCombatTeamHelper::ShareTeamTag(GetOwner(), HitActor))
@@ -153,12 +159,12 @@ AWeapon::FWeaponHitResult AWeapon::ResolveHit(AActor* HitActor, const FHitResult
 	if (IBlockableInterface* Blockable = Cast<IBlockableInterface>(HitActor))
 	{
 		FBlockResult BlockResult = Blockable->TryBlockHit(
-			HitPoint.ImpactPoint, Damage, GetOwner(), this);
+			HitPoint.ImpactPoint, BaseDamage, GetOwner(), this);
 		if (BlockResult.bBlocked)
 		{
 			Result.FinalDamage = BlockResult.DamageAfterBlock;
 			Result.bPlayNormalHitReact = BlockResult.bPlayNormalHitReact;
-			Result.KnockbackScale = Damage > 0.f ? BlockResult.DamageAfterBlock / Damage : 0.f;
+			Result.KnockbackScale = BaseDamage > 0.f ? BlockResult.DamageAfterBlock / BaseDamage : 0.f;
 			Result.bApplyStun = BlockResult.bPlayNormalHitReact;
 		}
 		if (BlockResult.bParried)
