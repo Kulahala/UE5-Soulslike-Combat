@@ -62,11 +62,13 @@ UDataAsset → UComboDataAsset (combo chain: SectionName, DamageMultiplier, Stam
 
 ### Combat Pipeline
 1. `ACharacterController::Input_Attack()` → calls `AMyCharacter::Attack()`
-2. **Combo System**: `Attack()` queries `UComboDataAsset` for current segment config (SectionName, DamageMultiplier, StaminaCost), increments `ComboCounter` on successful continuation
-3. `PlayAttackMontage(SectionName)` plays attack animation with `UAnimNotifyState_WeaponCollision` + `UAnimNotifyState_ComboWindow` baked in
-4. **NotifyBegin** → `AWeapon::StartWeaponTrace()` (records old box positions)
-5. **NotifyTick** → `AWeapon::ExecuteWeaponTrace()` (sweeps from old→new center to prevent ghost swings)
-6. On hit:
+2. **Attack Priority**: `bIsBlocking` guard → **Sprint Attack** (if sprinting + moving + weapon equipped) → `CanAttack()` → Combo/Normal Attack
+3. **Sprint Attack**: Independent system, triggers when sprinting + moving + weapon equipped + grounded. Uses `SprintAttackMontage` (1.8x damage, 25 stamina),朝移动方向攻击，攻击后停止冲刺。不接入连招系统（无 ComboWindow）。复用 `OnAttackMontageEnded` 回调。
+4. **Combo System**: `Attack()` queries `UComboDataAsset` for current segment config (SectionName, DamageMultiplier, StaminaCost), increments `ComboCounter` on successful continuation
+5. `PlayAttackMontage(SectionName)` plays attack animation with `UAnimNotifyState_WeaponCollision` + `UAnimNotifyState_ComboWindow` baked in
+6. **NotifyBegin** → `AWeapon::StartWeaponTrace()` (records old box positions)
+7. **NotifyTick** → `AWeapon::ExecuteWeaponTrace()` (sweeps from old→new center to prevent ghost swings)
+8. On hit:
    - 同阵营命中：不 `ApplyDamage`，但仍走 `GetHit` 路径（击退、命中反馈、相机晃动）。同阵营判定通过 `FCombatTeamHelper::ShareTeamTag()`（Weapon + Enemy 共用）
    - 跨阵营命中：`IBlockableInterface::TryBlockHit()` 在 `ApplyDamage` 前拦截；格挡成功：减伤 + 跳过硬直；弹反成功：对攻击方调用 `ApplyParried()` 硬直
    - `ExecuteWeaponTrace()` 通过 `FPendingHitContext` 写入每命中的上下文（instigator、knockback scale、blocked flag、stun flag），然后调用 `GetHit()`
@@ -74,10 +76,10 @@ UDataAsset → UComboDataAsset (combo chain: SectionName, DamageMultiplier, Stam
    - `ExecuteWeaponTrace()` 分解为 `BuildIgnoreList()`、`ResolveHit()`、`DispatchHitFeedback()` 三步，不要膨胀为通用战斗管线
    - 弹反分支：`DispatchHitFeedback()` 在 `GetHit()` 之前先对攻击方调用 `ApplyParried()`，确保敌人先进入 `EES_Parried` 状态
    - **Damage Multiplier**: `ResolveHit()` 在格挡判定前应用 `BaseCharacter->GetAttackDamageMultiplier()`，确保格挡体力消耗基于实际打击伤害
-7. HitStop + CameraShake（所有命中都触发）
-8. **NotifyEnd** → clears `IgnoreActors` blacklist
-9. **Combo Window**: `AnimNotifyState_ComboWindow` marks combo input window, `Input_Attack()` sets `bComboInputReceived` during window
-10. `OnAttackMontageEnded` delegate fires → `if (bInterrupted) return` guard → checks `bComboInputReceived`:
+9. HitStop + CameraShake（所有命中都触发）
+10. **NotifyEnd** → clears `IgnoreActors` blacklist
+11. **Combo Window**: `AnimNotifyState_ComboWindow` marks combo input window, `Input_Attack()` sets `bComboInputReceived` during window
+12. `OnAttackMontageEnded` delegate fires → `if (bInterrupted) return` guard → checks `bComboInputReceived`:
     - true + not exhausted → `ComboCounter++`, temp set `ActionState = EAS_UnOccupied`, call `Attack()` (continues combo)
     - false or exhausted → `ResetCombo()`, restore `EAS_UnOccupied`, resume stamina regen
 

@@ -31,6 +31,8 @@ public:
 
 	/* 战斗 */
 	virtual void Attack() override;
+	bool ShouldUseSprintAttack() const;
+	void PerformSprintAttack();
 	virtual void Jump() override;
 	virtual void GetHit_Implementation(const FVector& ImpactPoint, AActor* HitInstigator) override;
 	virtual float TakeDamage(float DamageAmount, const struct FDamageEvent& DamageEvent,
@@ -209,6 +211,16 @@ private:
 
 	// 受击染红缩放系数（TryBlockHit 设置，TakeDamage 推送给 HUD 后归位）
 	float LastDamageFlashScale = 1.f;
+
+	/* 冲刺攻击 */
+	UPROPERTY(EditDefaultsOnly, Category = "Combat|Sprint Attack", meta = (AllowPrivateAccess = "true", ToolTip = "冲刺攻击蒙太奇。"))
+	UAnimMontage* SprintAttackMontage;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Combat|Sprint Attack", meta = (AllowPrivateAccess = "true", ToolTip = "冲刺攻击伤害倍率。"))
+	float SprintAttackDamageMultiplier = 1.8f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Combat|Sprint Attack", meta = (AllowPrivateAccess = "true", ToolTip = "冲刺攻击体力消耗。"))
+	float SprintAttackStaminaCost = 25.f;
 
 	/* 连招系统 */
 	UPROPERTY(EditDefaultsOnly, Category = "Combat|Combo", meta = (AllowPrivateAccess = "true"))

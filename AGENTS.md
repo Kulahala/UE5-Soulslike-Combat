@@ -103,7 +103,7 @@ UInterface → UBlockableInterface (weapon hit interception before final damage 
 
 ### Combat Pipeline
 
-1. `ACharacterController::Input_Attack()` → `AMyCharacter::Attack()`
+1. `ACharacterController::Input_Attack()` → `AMyCharacter::Attack()` (guard order: `bIsBlocking` → `ShouldUseSprintAttack()` → `CanAttack()` → combo)
 2. `PlayAttackMontage()` with `UAnimNotifyState_WeaponCollision`
 3. **NotifyBegin** → `AWeapon::StartWeaponTrace()` (records old box positions)
 4. **NotifyTick** → `AWeapon::ExecuteWeaponTrace()` (sweep old→new center)
@@ -165,6 +165,26 @@ UInterface → UBlockableInterface (weapon hit interception before final damage 
 - **Damage Multiplier Application**: Applied in `AWeapon::ResolveHit()`. The weapon queries the attacker's `GetAttackDamageMultiplier()` to scale the raw damage *before* passing it to `IBlockableInterface::TryBlockHit()`, ensuring block stamina costs and damage mitigation calculations scale accordingly.
 - **Debug Visibility**: Rendered via `FDebugDrawHelper` in `DrawDebugInfo` when master debug rendering is active, printing combo index, input/window status, and current damage multiplier.
 
+### Sprint Attack System
+
+- Triggered via `ACharacterController::Input_Attack()` → `AMyCharacter::Attack()` → `ShouldUseSprintAttack()` → `PerformSprintAttack()`.
+- **Priority**: sprint attack is checked **before** `CanAttack()` and the normal combo flow. Guard order: `bIsBlocking` → `ShouldUseSprintAttack()` → `CanAttack()` → combo logic.
+- **Conditions** (`ShouldUseSprintAttack()`): `bIsSprinting`, movement input (`GetLastMovementInputVector().SizeSquared2D() > KINDA_SMALL_NUMBER`), weapon equipped (`WeaponState != EWS_Unequipped`), `EAS_UnOccupied`, grounded. No lock-on restriction — works in both lock-on and non-lock states.
+- **Reuses `EAS_Attacking`**: no new `EActionState` enum value. No `bIsSprintAttack` flag — `OnAttackMontageEnded()` handles cleanup correctly without one: sprint attacks never open a combo window, so `bShouldContinueCombo` is always false, and `ResetCombo()` + `RestoreRotationMode()` + exhaustion check all work as-is.
+- **Independent montage** (`SprintAttackMontage`): separate from the combo montage to avoid pollution. Requires `AnimNotifyState_WeaponCollision` for weapon trace windows. End delegate reuses `OnAttackMontageEnded()`.
+- **Replaces lock-on free-run attack**: the old `ShouldUseLockOnFreeRun()` + `FaceDirection2D()` + `SetMovementRotationMode()` branch in `Attack()` is removed. `ShouldUseLockOnFreeRun()` itself is preserved — it's still needed for lock-on sprint **movement** behavior (speed, rotation mode, camera in `UpdateMovementSpeed()`, `ApplyLockOnRotationMode()`, `GetLockOnCameraTargets()`).
+- **Allows stamina overspend**: uses `Attributes->UseStamina()` directly with no `CheckStamina()` gate, consistent with the "last action overspend" design shared by dodge, parry, and normal attacks.
+- **Clears combo state**: calls `ResetCombo()` at the start of `PerformSprintAttack()` before setting `SprintAttackDamageMultiplier`, so stale combo state from a prior attack cannot contaminate the sprint hit.
+- **Direction with fallback**: faces `GetLastMovementInputVector().GetSafeNormal2D()` direction, falling back to `GetActorForwardVector()` if input is nearly zero (defensive pattern borrowed from `ComputeDodgeDirection()`).
+- **Rotation lock**: sets `bOrientRotationToMovement = false` and `bUseControllerRotationYaw = false` during the attack; `OnAttackMontageEnded()` calls `RestoreRotationMode()` to recover.
+- **Stops sprinting**: calls `StopSprinting()` after rotation lock and before montage play, so the character returns to normal run speed when the attack montage ends.
+- **Not in combo system**: sprint attack does not use `AnimNotifyState_ComboWindow` and does not advance `ComboCounter`. It is a single-hit attack that ends with `EAS_UnOccupied`.
+- **Config** (all `EditDefaultsOnly` on `AMyCharacter` under `"Combat|Sprint Attack"`):
+  - `SprintAttackMontage` — independent montage asset
+  - `SprintAttackDamageMultiplier` — default `1.8f`
+  - `SprintAttackStaminaCost` — default `25.f`
+- **Implementation files**: `Source/Test/Public/Character/MyCharacter.h:34-35` (declaration), `Source/Test/Private/Character/MyCharacter.cpp:95-153` (implementation).
+
 ### Lock-On System
 
 - `ACharacterController` owns the lock-on input binding through `LockOnAction` → `Input_LockOn()`; the current input assets are `Content/_GAME/BP/input/IA_LockOn.uasset`, `Content/_GAME/BP/input/IMC_CharacterInput.uasset`, and `Content/_GAME/BP/input/BP_CharacterController.uasset`.
@@ -176,7 +196,7 @@ UInterface → UBlockableInterface (weapon hit interception before final damage 
 - Lock-on camera framing currently stays on **yaw-only** control rotation. If future work wants target-height framing to matter, that requires changing the camera-aim math; adding a height offset alone is a no-op while `LookAt.Pitch` is cleared back to zero.
 - Lock-on Sprint free-run is a derived movement mode, **not** a separate `EActionState`. `ShouldUseLockOnFreeRun()` is based on lock-on, sprint intent, `EAS_UnOccupied`, grounded state, and live movement input.
 - During lock-on free-run, the target remains locked and the controller / camera still yaw toward the enemy, but the character body temporarily uses `bOrientRotationToMovement=true` and `bUseControllerRotationYaw=false` so movement direction drives facing.
-- Lock-on free-run attacks face the current movement input direction at attack start via `FaceDirection2D()`, then hold that attack-facing mode until the attack montage ends or is interrupted. Use `RestoreRotationMode()` for post-attack cleanup; do not let Tick-time lock-on rotation overwrite attack facing.
+- **Sprint Attack replaces free-run attack**: the old free-run attack branch in `Attack()` (which played a normal combo segment at movement direction) has been removed. Sprinting + attack now triggers `PerformSprintAttack()` regardless of lock-on state, with a dedicated `SprintAttackMontage` and configurable damage multiplier. `ShouldUseLockOnFreeRun()` is still used for lock-on sprint **movement** (speed, rotation mode, camera offset).
 - Lock-on Sprint free-run camera framing now adds a small movement-direction offset under `LockOnCamera`: strafe input shifts the shoulder laterally, while backward input adds extra camera height plus an optional `TargetArmLength` bonus. Keep the target locked; do not turn this into a free-look mode.
 
 ### Lock-On Camera

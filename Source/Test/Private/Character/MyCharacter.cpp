@@ -92,9 +92,77 @@ void AMyCharacter::Tick(float DeltaTime)
 
 // ==================== 战斗 ====================
 
+bool AMyCharacter::ShouldUseSprintAttack() const
+{
+	return bIsSprinting &&
+	       GetLastMovementInputVector().SizeSquared2D() > KINDA_SMALL_NUMBER &&
+	       WeaponState != EWeaponState::EWS_Unequipped &&
+	       ActionState == EActionState::EAS_UnOccupied &&
+	       !GetCharacterMovement()->IsFalling();
+}
+
+void AMyCharacter::PerformSprintAttack()
+{
+	// 0. 蒙太奇检查
+	if (!SprintAttackMontage)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("SprintAttackMontage not configured"));
+		return;
+	}
+
+	// 1. 清理旧连招状态
+	ResetCombo();
+
+	// 2. 扣除体力并暂停恢复（支持透支）
+	if (Attributes)
+	{
+		Attributes->UseStamina(SprintAttackStaminaCost);
+		Attributes->PauseStaminaRegen();
+	}
+
+	// 3. 设置伤害倍率
+	SetAttackDamageMultiplier(SprintAttackDamageMultiplier);
+
+	// 4. 对齐攻击方向
+	FVector AttackDir = GetLastMovementInputVector().GetSafeNormal2D();
+	if (AttackDir.IsNearlyZero())
+	{
+		AttackDir = GetActorForwardVector();
+	}
+	FaceDirection2D(AttackDir);
+
+	// 5. 锁住旋转模式（防止 Tick 覆盖）
+	GetCharacterMovement()->bOrientRotationToMovement = false;
+	bUseControllerRotationYaw = false;
+
+	// 6. 停止冲刺
+	StopSprinting();
+
+	// 7. 播放攻击蒙太奇
+	ActionState = EActionState::EAS_Attacking;
+	UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
+	if (AnimInstance)
+	{
+		AnimInstance->Montage_Play(SprintAttackMontage);
+
+		// 绑定结束回调（复用 OnAttackMontageEnded）
+		FOnMontageEnded MontageEndedDelegate;
+		MontageEndedDelegate.BindUObject(this, &AMyCharacter::OnAttackMontageEnded);
+		AnimInstance->Montage_SetEndDelegate(MontageEndedDelegate, SprintAttackMontage);
+	}
+}
+
 void AMyCharacter::Attack()
 {
 	if (bIsBlocking) return;  // 保留现有守卫
+
+	// 冲刺攻击优先级最高，放在 CanAttack() 之前
+	if (ShouldUseSprintAttack())
+	{
+		PerformSprintAttack();
+		return;
+	}
+
 	Super::Attack();  // 保留
 
 	if (!CanAttack()) return;
@@ -113,17 +181,6 @@ void AMyCharacter::Attack()
 		UE_LOG(LogTemp, Warning, TEXT("Invalid combo segment: %d"), ComboCounter);
 		ResetCombo();
 		return;
-	}
-
-	// 锁定 free-run 攻击朝向处理（仅第一段）
-	if (ComboCounter == 0 && ShouldUseLockOnFreeRun())
-	{
-		FVector Dir = GetLockOnFreeRunDirection();
-		if (!Dir.IsNearlyZero())
-		{
-			FaceDirection2D(Dir);
-		}
-		SetMovementRotationMode(false, false);
 	}
 
 	// 体力检查（支持透支）
