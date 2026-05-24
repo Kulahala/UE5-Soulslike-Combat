@@ -232,6 +232,19 @@ UDataAsset → UComboDataAsset (combo chain: SectionName, DamageMultiplier, Stam
 - **连续弹反覆盖**：`ApplyParried()` 开头先清旧计时器 + 恢复旧蒙太奇速率，防止状态泄漏。
 - **蓝图待办**：创建 `IA_Parry` 输入资产绑定弹反键；在弹反蒙太奇中添加 `UAnimNotifyState_ParryActive` 标记激活窗口。
 
+### Pause Menu System (`ACharacterController` + `UPauseMenuWidget`)
+- **架构**：Controller 级别管理，暂停状态（`bIsPaused`/`bCanPause`）、Widget 缓存、输入模式切换全部归 `ACharacterController`，`AMyCharacter` 无感知。
+- **输入**：`ACharacterController::Input_Pause()` 绑定 P 键（`IA_Pause`），调用 `TogglePause()`。守卫：`bCanPause && PauseMenuWidget`（防止非 local player 错误翻转状态）。
+- **Widget 蓝图支持**：`TSubclassOf<UPauseMenuWidget> PauseMenuClass`（EditDefaultsOnly），`CreateWidget` 用 `PauseMenuClass` 而非硬编码 `StaticClass()`，确保蓝图子类 UI 布局生效。
+- **Widget 焦点管理**：`NativeConstruct()` 中 `SetIsFocusable(true)` + `SetKeyboardFocus()`，确保 `FInputModeUIOnly` 下 `NativeOnKeyDown` 能收到 P 键事件。
+- **Delegate 解耦**：`UPauseMenuWidget::OnResumeDelegate` 回调 Controller，Widget 不需要知道 Pawn 的存在。
+- **智能锁定处理**：暂停时检查锁定旋转完成度（角度差 < 1°保持锁定，≥ 1°清除锁定）。必须先 `IsValid(LockedTarget)` 检查防止 `pendingKill` 目标崩溃。
+- **死亡时序**：`Die()` 最前面调用 `ClearPauseIfActive()` + `SetCanPause(false)`，先恢复游戏状态再处理死亡演出。
+- **Tick 守卫**：`MyCharacter::Tick()` 顶部检查 `CC->IsPaused()` 早退，跳过所有 gameplay 逻辑。缓存 Cast 结果避免重复 RTTI。
+- **恢复路径统一**：`ClearPauseIfActive()` 直接调用 `TogglePause()`，避免重复恢复逻辑（`SetGamePaused(false)` + `SetInputMode` + `RemoveFromParent`）。
+- **输入屏蔽**：`FInputModeUIOnly` 自动屏蔽 gameplay 输入，无需逐函数守卫。
+- **文件**：`Source/Test/Public/HUD/PauseMenuWidget.h/cpp`、`Content/_GAME/BP/input/IA_Pause.uasset`、`Content/_GAME/UI/WBP_PauseMenu.uasset`。
+
 ### Content Organization
 - C++ source under `Source/Test/` (Public/Private mirrors UE module structure).
 - Game assets under `Content/_GAME/` — this is the only Content directory that should be modified.

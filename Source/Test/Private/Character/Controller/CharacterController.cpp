@@ -4,7 +4,11 @@
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "Character/MyCharacter.h"
-#include "GameFramework/CharacterMovementComponent.h" 
+#include "GameFramework/CharacterMovementComponent.h"
+#include "HUD/PauseMenuWidget.h"
+#include "Blueprint/UserWidget.h"
+#include "Kismet/GameplayStatics.h"
+#include "Enemy/Enemy.h" 
 
 void ACharacterController::BeginPlay()
 {
@@ -15,6 +19,16 @@ void ACharacterController::BeginPlay()
 		if (DefaultMappingContext)
 		{
 			Subsystem->AddMappingContext(DefaultMappingContext, 0);
+		}
+	}
+
+	// 创建并缓存暂停菜单Widget
+	if (IsLocalPlayerController() && PauseMenuClass)
+	{
+		PauseMenuWidget = CreateWidget<UPauseMenuWidget>(this, PauseMenuClass);
+		if (PauseMenuWidget)
+		{
+			PauseMenuWidget->OnResumeDelegate.AddDynamic(this, &ACharacterController::OnResumeRequested);
 		}
 	}
 }
@@ -58,6 +72,11 @@ void ACharacterController::SetupInputComponent()
 		if (DodgeAction)
 		{
 			EnhancedInputComponent->BindAction(DodgeAction, ETriggerEvent::Started, this, &ACharacterController::Input_Dodge);
+		}
+
+		if (PauseAction)
+		{
+			EnhancedInputComponent->BindAction(PauseAction, ETriggerEvent::Started, this, &ACharacterController::Input_Pause);
 		}
 	}
 }
@@ -229,6 +248,98 @@ void ACharacterController::Input_Dodge()
 	if (AMyCharacter* MyCharacter = GetMyCharacter())
 	{
 		MyCharacter->Dodge();
+	}
+}
+
+void ACharacterController::Input_Pause()
+{
+	if (bCanPause && PauseMenuWidget)
+	{
+		TogglePause();
+	}
+}
+
+void ACharacterController::TogglePause()
+{
+	bIsPaused = !bIsPaused;
+
+	if (bIsPaused)
+	{
+		// 暂停时：智能锁定处理
+		AMyCharacter* MyCharacter = GetMyCharacter();
+		if (MyCharacter && MyCharacter->IsLockingOn())
+		{
+			AEnemy* LockedTarget = MyCharacter->GetLockedTarget();
+
+			// 有效性检查：防止pendingKill目标崩溃
+			if (!IsValid(LockedTarget))
+			{
+				MyCharacter->ClearLockOn();
+			}
+			else
+			{
+				// 检查旋转完成度
+				FRotator CurrentRot = GetControlRotation();
+				FVector ToTarget = LockedTarget->GetActorLocation() - MyCharacter->GetActorLocation();
+				FRotator TargetRot = FRotationMatrix::MakeFromX(ToTarget).Rotator();
+				TargetRot.Pitch = 0.f;
+
+				float YawDelta = FMath::Abs(FMath::FindDeltaAngleDegrees(CurrentRot.Yaw, TargetRot.Yaw));
+
+				if (YawDelta >= 1.f)  // 旋转中，清除锁定
+				{
+					MyCharacter->ClearLockOn();
+				}
+				// 否则保持锁定
+			}
+		}
+
+		// 暂停游戏
+		UGameplayStatics::SetGamePaused(GetWorld(), true);
+
+		// 切换到UI输入模式
+		FInputModeUIOnly InputMode;
+		InputMode.SetWidgetToFocus(PauseMenuWidget->TakeWidget());
+		SetInputMode(InputMode);
+		bShowMouseCursor = true;
+
+		// 显示暂停菜单
+		if (PauseMenuWidget)
+		{
+			PauseMenuWidget->AddToViewport(1);  // Z-Order高于HUD
+		}
+	}
+	else
+	{
+		// 恢复游戏
+		UGameplayStatics::SetGamePaused(GetWorld(), false);
+
+		// 切换回游戏输入模式
+		FInputModeGameOnly InputMode;
+		SetInputMode(InputMode);
+		bShowMouseCursor = false;
+
+		// 隐藏暂停菜单
+		if (PauseMenuWidget)
+		{
+			PauseMenuWidget->RemoveFromParent();
+		}
+	}
+}
+
+void ACharacterController::OnResumeRequested()
+{
+	if (bIsPaused)
+	{
+		TogglePause();
+	}
+}
+
+void ACharacterController::ClearPauseIfActive()
+{
+	if (bIsPaused)
+	{
+		TogglePause();  // 统一走恢复路径
 	}
 }
 

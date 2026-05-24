@@ -9,6 +9,7 @@
 
 class UInputMappingContext;
 class UInputAction;
+class UPauseMenuWidget;
 
 /**
  * 
@@ -41,6 +42,7 @@ protected:
 	void Input_LockOn();
 	void Input_Parry();
 	void Input_Dodge();
+	void Input_Pause();
 
 	/* ================= 增强输入资产声明 ================= */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input", meta = (ToolTip = "默认输入映射上下文。"))
@@ -79,6 +81,9 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input", meta = (ToolTip = "翻滚输入动作。"))
 	UInputAction* DodgeAction;
 
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input", meta = (ToolTip = "暂停输入动作。"))
+	UInputAction* PauseAction;
+
 private:
 	// 输入调试状态
 	FVector2D DebugMoveInput = FVector2D::ZeroVector;
@@ -92,7 +97,26 @@ private:
 	float DebugParryExpireTime = 0.f;
 	float DebugDodgeExpireTime = 0.f;
 
+	/* 暂停系统 */
+	bool bIsPaused = false;
+	bool bCanPause = true;
+
+	UPROPERTY(EditDefaultsOnly, Category = "UI", meta = (ToolTip = "暂停菜单Widget类（蓝图子类）"))
+	TSubclassOf<UPauseMenuWidget> PauseMenuClass;
+
+	UPROPERTY()
+	UPauseMenuWidget* PauseMenuWidget = nullptr;
+
+	void TogglePause();
+
+	UFUNCTION()
+	void OnResumeRequested();
+
 public:
 	FString GetDebugInputText() const;
 	class AMyCharacter* GetMyCharacter() const;
+
+	bool IsPaused() const { return bIsPaused; }
+	void SetCanPause(bool bCanPauseNew) { bCanPause = bCanPauseNew; }
+	void ClearPauseIfActive();
 };

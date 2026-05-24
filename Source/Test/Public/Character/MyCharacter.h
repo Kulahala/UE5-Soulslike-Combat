@@ -96,6 +96,9 @@ public:
 	FORCEINLINE bool IsRecenteringCamera() const { return bRecenteringCamera; }
 	void StopCameraRecenter() { bRecenteringCamera = false; }
 
+	/* 锁定目标访问 */
+	AEnemy* GetLockedTarget() const;
+
 protected:
 	/* 蒙太奇 */
 	void PlayBlockMontage(const FName& SectionName); // 播放防御蒙太奇
@@ -139,7 +142,6 @@ private:
 	float CalcBaseSpeed(float DotProduct) const;
 	void UpdateLockOnCamera(float DeltaTime);
 	void GetLockOnCameraTargets(FVector& OutSocketTarget, float& OutArmLengthTarget, float& OutInterpSpeed) const;
-	AEnemy* GetLockedTarget() const;
 	void CacheLockOnRotationState();
 	void EnterLockOnRotationMode();
 	void RestoreCachedRotationState();

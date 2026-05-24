@@ -86,12 +86,13 @@ ACharacter
 ├── AMyCharacter + IBlockableInterface (UAttributeComponent, spring arm + camera, weapon/shield equipping, hold-to-block)
 └── AEnemy + IHitInterface (AI patrol/search/chase/combat FSM, directional hit react)
 
-APlayerController → ACharacterController (Enhanced Input, move/look/jump/equip/attack/sprint/walk/block/lock-on/dodge/parry bindings, input debug snapshot owner)
+APlayerController → ACharacterController (Enhanced Input, move/look/jump/equip/attack/sprint/walk/block/lock-on/dodge/parry/pause bindings, pause state management, input debug snapshot owner)
 UActorComponent → UAttributeComponent (health, gold, OnHealthChanged delegate)
                └── UPlayerLockOnComponent (lock-on state, target selection, camera tunables)
 UWidgetComponent → UHealthBarComponent
 UUserWidget → UBaseHealthBarWidget (PB_Health + PB_Buffer progress bars, delayed buffer logic)
-           └── UPlayerHUDWidget (player HP/stamina HUD + NativePaint debug text overlay + damage vignette)
+           ├── UPlayerHUDWidget (player HP/stamina HUD + NativePaint debug text overlay + damage vignette)
+           └── UPauseMenuWidget (Btn_Resume + Overlay_Background, delegate-driven, keyboard resume via NativeOnKeyDown)
 UAnimInstance → USlashAnimInstance (GroundSpeed, Direction, state enums)
 UDataAsset → UTreasureData
            └── UComboDataAsset (light attack combo chain configurations)
@@ -310,6 +311,21 @@ UInterface → UBlockableInterface (weapon hit interception before final damage 
 - Player debug currently includes input snapshot text, HP, stamina, action state, montage name, and movement speed.
 - Player debug currently includes the short-lived `LockOn` marker from `Input_LockOn()` in addition to the existing input snapshot text.
 - Enemy debug currently includes enemy state / ground speed text, distance text, optional chase/combat/attack radius spheres, and `CombatMove: Ready/Retreat/BackDiag/Strafe/Press/AlreadyAtGoal/MoveFail` while in `EES_Combating`.
+
+### Pause Menu System
+
+- `ACharacterController` owns pause state: `bIsPaused`, `bCanPause`, `TogglePause()`, `ClearPauseIfActive()`.
+- `PauseAction` input action (`Content/_GAME/BP/input/IA_Pause.uasset`) bound to P key in `IMC_CharacterInput`.
+- `Input_Pause()` → `TogglePause()`: pauses game via `SetGamePaused(true)`, switches to `FInputModeUIOnly`, shows `UPauseMenuWidget`.
+- `UPauseMenuWidget` (`Source/Test/Public/HUD/PauseMenuWidget.h:19`) communicates via delegate: `FOnResumeRequested OnResumeDelegate` bound by Controller in `BeginPlay()`.
+- Controller creates Widget via `TSubclassOf<UPauseMenuWidget> PauseMenuClass` (EditDefaultsOnly) so Blueprint subclass (`WBP_PauseMenu`) takes effect.
+- Keyboard resume: Widget's `NativeOnKeyDown` listens for P/Escape keys and broadcasts `OnResumeDelegate`.
+- Smart lock-on handling on pause: if `IsValid(LockedTarget)` fails → `ClearLockOn()`; if target valid but rotation incomplete (yaw delta ≥ 1°) → `ClearLockOn()`; otherwise keep lock.
+- `AMyCharacter::Die()` clears pause first: `ClearPauseIfActive()` + `SetCanPause(false)` before death montage.
+- `AMyCharacter::Tick()` early-returns when `Controller->IsPaused()` to skip gameplay logic during pause.
+- `ClearPauseIfActive()` delegates to `TogglePause()` for unified unpause path — do not duplicate unpause logic.
+- Widget uses `SetIsFocusable(true)` in `NativeConstruct()`; `FInputModeUIOnly::SetWidgetToFocus()` ensures keyboard input reaches the widget.
+- **Implementation files**: `Source/Test/Public/Character/Controller/CharacterController.h:100-121`, `Source/Test/Private/Character/Controller/CharacterController.cpp:253-343`, `Source/Test/Public/HUD/PauseMenuWidget.h:19-46`, `Source/Test/Private/HUD/PauseMenuWidget.cpp:7-47`, `Source/Test/Private/Character/MyCharacter.cpp:67-73,293-300`.
 
 ### UE 5.7 Pitfalls
 

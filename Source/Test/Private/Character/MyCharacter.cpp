@@ -63,8 +63,16 @@ void AMyCharacter::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 
+	ACharacterController* CC = Cast<ACharacterController>(GetController());
+
+	// 暂停时跳过所有gameplay逻辑
+	if (CC && CC->IsPaused())
+	{
+		return;
+	}
+
 	// [调试] 输入状态，不受 Stunning/Dead 限制
-	if (ACharacterController* CC = Cast<ACharacterController>(GetController()))
+	if (CC)
 	{
 		const FString InputText = CC->GetDebugInputText();
 		if (!InputText.IsEmpty())
@@ -283,6 +291,13 @@ void AMyCharacter::GetHit_Implementation(const FVector& ImpactPoint, AActor* Hit
 
 void AMyCharacter::Die()
 {
+	// 先清理暂停状态（如果死亡时正在暂停）
+	if (ACharacterController* CC = Cast<ACharacterController>(GetController()))
+	{
+		CC->ClearPauseIfActive();
+		CC->SetCanPause(false);
+	}
+
 	ResetCombo();
 	InterruptBlock(true);
 	ClearParryState();
