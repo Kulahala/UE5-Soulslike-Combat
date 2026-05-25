@@ -106,7 +106,7 @@ UInterface → UBlockableInterface (weapon hit interception before final damage 
 
 1. `ACharacterController::Input_Attack()` → `AMyCharacter::Attack()` (guard order: `bIsBlocking` → `ShouldUseSprintAttack()` → `CanAttack()` → combo)
 2. `PlayAttackMontage()` with `UAnimNotifyState_WeaponCollision`
-3. **NotifyBegin** → `AWeapon::StartWeaponTrace()` (records old box positions)
+3. **NotifyBegin** → `AWeapon::StartWeaponTrace()` (records old box positions) + `SetAttackHyperArmor(true)` (player only)
 4. **NotifyTick** → `AWeapon::ExecuteWeaponTrace()` (sweep old→new center)
 5. On hit:
    - shared tags between attacker and target mean **no `ApplyDamage`**, but the target still enters the shared hit-feedback path (`GetHit`, knockback, hit-stop, camera shake)
@@ -114,8 +114,8 @@ UInterface → UBlockableInterface (weapon hit interception before final damage 
    - for `ABaseCharacter` targets, `AWeapon::ExecuteWeaponTrace()` writes a per-hit `FPendingHitContext` (instigator, knockback scale, blocked flag, stun flag) before calling `IHitInterface::GetHit()`
    - `ABaseCharacter::GetHit_Implementation()` consumes that context for knockback / normal hit-react routing, and leaf classes (`AMyCharacter`, `AEnemy`) clear it after their own stun logic runs
    - `AWeapon::ExecuteWeaponTrace()` is intentionally decomposed into `BuildIgnoreList()`, `ResolveHit()`, and `DispatchHitFeedback()`. Keep `ResolveHit()` focused on same-team/block/damage math, and keep `DispatchHitFeedback()` focused on context write / `GetHit()` / camera shake / hit stop / ignore list; do not inflate it into a generic combat pipeline without a real new use case
-6. **NotifyEnd** → clears `IgnoreActors`
-7. `OnAttackMontageEnded` delegate (with `bInterrupted` guard) → restores `EAS_UnOccupied` and resumes stamina regen
+6. **NotifyEnd** → clears `IgnoreActors` + `SetAttackHyperArmor(false)` (player only)
+7. `OnAttackMontageEnded` delegate (with `bInterrupted` guard that restores `ActionState`) → restores `EAS_UnOccupied` and resumes stamina regen
 
 ### Hit Knockback
 
@@ -126,6 +126,17 @@ UInterface → UBlockableInterface (weapon hit interception before final damage 
 - A new hit always overrides the previous knockback state. A zero-scale hit (for example full block) clears any in-flight knockback instead of letting the old motion continue.
 - Successful blocks scale knockback by final post-block damage ratio (`DamageAfterBlock / Damage`), so a 95% reduction produces a very short pushback.
 - Friendly weapon hits are intentionally allowed to trigger knockback and hit feedback even though they do not deal damage.
+
+### Attack Hyper Armor System
+
+- **Player-only feature**: During the weapon collision window (`AnimNotifyState_WeaponCollision`), `AMyCharacter` gains hyper armor.
+- **Lifecycle**: `NotifyBegin` calls `SetAttackHyperArmor(true)`, `NotifyEnd` calls `SetAttackHyperArmor(false)`, synchronized with weapon trace window.
+- **Hyper armor effect**: Incoming hits still deal damage, apply knockback, trigger camera shake, and play hit effects, but do **not** play hit-react montage or force `EAS_Stunning` state. Attack animation continues uninterrupted.
+- **Implementation**: `AMyCharacter::GetHit_Implementation()` checks `bAttackHyperArmor` before calling `Super`. Hyper armor branch manually replicates necessary logic (`IHitInterface::GetHit`, `ConsumePendingHitKnockback()`, `PlayHitEffects()`, camera shake) while skipping `Super::GetHit_Implementation()` to avoid triggering `DirectionalHitReact()` → `PlayHitReactMontage()`.
+- **Interrupt recovery**: `OnAttackMontageEnded(bInterrupted=true)` ensures `ActionState` is restored to prevent being stuck in `EAS_Attacking`.
+- **Priority**: Dodge invulnerability (`bDodgeInvulnerable`) has higher priority than hyper armor (complete immunity vs partial immunity).
+- **Extensibility**: Currently player-only. Future expansion: move `bAttackHyperArmor` to `ABaseCharacter` + add `virtual bool ShouldUseHyperArmor()` hook for Boss-type enemies.
+- **Files**: `MyCharacter.h:219` (member), `MyCharacter.cpp:272-329` (GetHit logic), `AnimNotifyState_WeaponCollision.cpp:27-30, 65-68` (lifecycle).
 
 ### Block System
 

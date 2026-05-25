@@ -74,6 +74,7 @@ public:
 	bool CanStartParry() const;
 	void SetParryActive(bool bActive);
 	void SetDodgeInvulnerable(bool bInvulnerable);
+	void SetAttackHyperArmor(bool bHyperArmor);
 	void StartParryCooldown();
 	void ResetParryCooldown();
 	void InterruptParry();
@@ -213,6 +214,9 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category = "Combat|Dodge", meta = (ToolTip = "翻滚体力消耗。"))
 	float DodgeStaminaCost = 15.f;
 	bool bDodgeInvulnerable = false;
+
+	/* 攻击霸体 */
+	bool bAttackHyperArmor = false;
 
 	FTimerHandle ExhaustionTimerHandle;
 

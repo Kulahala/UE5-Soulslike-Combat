@@ -66,7 +66,7 @@ UDataAsset → UComboDataAsset (combo chain: SectionName, DamageMultiplier, Stam
 3. **Sprint Attack**: Independent system, triggers when sprinting + moving + weapon equipped + grounded. Uses `SprintAttackMontage` (1.8x damage, 25 stamina),朝移动方向攻击，攻击后停止冲刺。不接入连招系统（无 ComboWindow）。复用 `OnAttackMontageEnded` 回调。
 4. **Combo System**: `Attack()` queries `UComboDataAsset` for current segment config (SectionName, DamageMultiplier, StaminaCost), increments `ComboCounter` on successful continuation
 5. `PlayAttackMontage(SectionName)` plays attack animation with `UAnimNotifyState_WeaponCollision` + `UAnimNotifyState_ComboWindow` baked in
-6. **NotifyBegin** → `AWeapon::StartWeaponTrace()` (records old box positions)
+6. **NotifyBegin** → `AWeapon::StartWeaponTrace()` (records old box positions) + `SetAttackHyperArmor(true)` (player only)
 7. **NotifyTick** → `AWeapon::ExecuteWeaponTrace()` (sweeps from old→new center to prevent ghost swings)
 8. On hit:
    - 同阵营命中：不 `ApplyDamage`，但仍走 `GetHit` 路径（击退、命中反馈、相机晃动）。同阵营判定通过 `FCombatTeamHelper::ShareTeamTag()`（Weapon + Enemy 共用）
@@ -77,9 +77,9 @@ UDataAsset → UComboDataAsset (combo chain: SectionName, DamageMultiplier, Stam
    - 弹反分支：`DispatchHitFeedback()` 在 `GetHit()` 之前先对攻击方调用 `ApplyParried()`，确保敌人先进入 `EES_Parried` 状态
    - **Damage Multiplier**: `ResolveHit()` 在格挡判定前应用 `BaseCharacter->GetAttackDamageMultiplier()`，确保格挡体力消耗基于实际打击伤害
 9. HitStop + CameraShake（所有命中都触发）
-10. **NotifyEnd** → clears `IgnoreActors` blacklist
+10. **NotifyEnd** → clears `IgnoreActors` blacklist + `SetAttackHyperArmor(false)` (player only)
 11. **Combo Window**: `AnimNotifyState_ComboWindow` marks combo input window, `Input_Attack()` sets `bComboInputReceived` during window
-12. `OnAttackMontageEnded` delegate fires → `if (bInterrupted) return` guard → checks `bComboInputReceived`:
+12. `OnAttackMontageEnded` delegate fires → `if (bInterrupted)` restores `ActionState` → checks `bComboInputReceived`:
     - true + not exhausted → `ComboCounter++`, temp set `ActionState = EAS_UnOccupied`, call `Attack()` (continues combo)
     - false or exhausted → `ResetCombo()`, restore `EAS_UnOccupied`, resume stamina regen
 
@@ -98,6 +98,20 @@ UDataAsset → UComboDataAsset (combo chain: SectionName, DamageMultiplier, Stam
 - `TryBlockHit()` 写入 `LastDamageFlashScale`；`TakeDamage()` 在零伤害/满格挡时归位，防止状态泄漏。
 - `SetHealthPercent()` 仅在血量实际下降时消费 `LastDamageFlashScale`，红晕强度跟踪最终减伤后伤害。
 - 红晕蒙版：程序化生成边缘距离渐变（非径向中心衰减），`VignetteFadeWidth = 0.2` = 外围 20% 红晕。
+
+### Attack Hyper Armor System（攻击霸体系统）
+- **架构**：玩家专属，武器碰撞窗口期间（`AnimNotifyState_WeaponCollision`）获得霸体效果。
+- **生命周期**：`NotifyBegin` 调用 `SetAttackHyperArmor(true)`，`NotifyEnd` 调用 `SetAttackHyperArmor(false)`，与武器碰撞检测窗口完全同步。
+- **霸体效果**：受击时仍然扣血、击退、相机晃动、播放音效粒子，但不播放受击蒙太奇、不进入硬直状态（`EAS_Stunning`），攻击动画继续播放。
+- **实现细节**：
+  - `GetHit_Implementation()` 在调用 `Super` 之前检查 `bAttackHyperArmor`
+  - 霸体分支手动复制必要逻辑：`IHitInterface::GetHit` + `ConsumePendingHitKnockback()` + `PlayHitEffects()` + 相机晃动
+  - 跳过 `Super::GetHit_Implementation()` 避免触发 `DirectionalHitReact()` → `PlayHitReactMontage()`
+  - 正常受击分支调用 `Super`（含 `DirectionalHitReact`），进入 `EAS_Stunning` 硬直
+- **中断恢复**：`OnAttackMontageEnded(bInterrupted=true)` 确保恢复 `ActionState`，防止卡在 `EAS_Attacking` 状态。
+- **优先级**：翻滚无敌帧（`bDodgeInvulnerable`）优先级高于霸体，完全免疫 vs 部分免疫。
+- **扩展性**：当前只有玩家实现，未来可上移 `bAttackHyperArmor` 到 `ABaseCharacter` + 添加 `virtual bool ShouldUseHyperArmor()` 钩子，让 Boss 类敌人可配置霸体。
+- **文件位置**：`MyCharacter.h:219` (成员变量)，`MyCharacter.cpp:272-329` (GetHit 逻辑)，`AnimNotifyState_WeaponCollision.cpp:27-30, 65-68` (生命周期管理)。
 
 ### Enemy AI (`AEnemy`)
 - Controlled by `AAIController` via `EEnemyState` FSM.
@@ -120,6 +134,7 @@ UDataAsset → UComboDataAsset (combo chain: SectionName, DamageMultiplier, Stam
 - `PatrolTimer` and `LookTimer` are cleared via `ClearPatrolTimers()` on state transitions and death.
 - `EES_Attacking`, `EES_Stunned`, and `EES_Dead` are hard-stop states for Tick-driven AI reactions.
 - Directional hit react: `GetHitDirection()` returns `DotProduct`-based angle, used to pick `HitReactMontage` section name (Front/Back/Left/Right).
+- **Attack Coordination**: Prevents multiple enemies from attacking simultaneously. Before attacking, enemies check if nearby allies (within `AttackCoordinationRange`, default 800cm) are in `EES_Attacking` state. If allies are attacking, the enemy extends its own attack cooldown to "max ally remaining time + buffer time" (clamped to `MaxAttackCoordinationWait`, default 3s). Uses traversal-based detection (`GetAllActorsOfClass`) suitable for small-scale demos (< 50 enemies). Coordination checks occur at two entry points: `OnCombating()` Tick (when `!bAttackOnCooldown`) and `OnAttackCooldownEnd()` callback (prevents small-window simultaneous attacks). Returns the **maximum remaining time** from all attacking allies to ensure 3+ enemy scenarios don't attack simultaneously. Coordinated waiting reuses the CD path, automatically triggering `HandleCooldownPositioning` spacing behavior. `ShouldTriggerAttack()` remains `const` predicate; coordination logic lives in callers. Debug visualization shows yellow "WaitAlly" text. Parameters: `AttackCoordinationRange` (800cm), `AttackCoordinationBuffer` (0.5s, 0.3=tight/0.5=natural/0.8=loose), `MaxAttackCoordinationWait` (3s, semantically distinct from `MaxAttackInterval`). Performance: O(N) traversal, < 0.1ms per check. TODO: check `ChasingTarget` equality to avoid cross-group coordination.
 
 ### Hearing Perception System (`AMyCharacter` + `AEnemy`)
 - **架构**：Controller 管理 timer 生命周期，Character 执行噪音逻辑。`ACharacterController` 在 `Input_Move()` 启动 timer，`Input_MoveEnd()` 停止；`AMyCharacter` 持有 `MovementNoiseTimerHandle` 和噪音参数，通过 `EmitMovementNoise()` 定时发声。
@@ -140,30 +155,6 @@ UDataAsset → UComboDataAsset (combo chain: SectionName, DamageMultiplier, Stam
 - **噪音 API**：`UAISense_Hearing::ReportNoiseEvent(World, Location, Loudness, Instigator, MaxRange, Tag)`，Tag 固定为 `"PlayerNoise"`。
 - **参数调优**：所有噪音参数（Range/Loudness）标记 `EditAnywhere, Category = "Combat|Hearing"`，支持蓝图覆盖。`MovementNoiseInterval` 固定 0.5s（非 EditAnywhere）。
 
-### Enemy Attack Coordination System (`AEnemy`)
-- **目标**：避免多个敌人同时攻击造成"车轮战"体验，实现轮流攻击的策略感。
-- **核心机制**：敌人在攻击前检查附近队友是否正在攻击（`EES_Attacking` 状态），如果有则延长自己的攻击冷却到"队友剩余时间 + 缓冲时间"。
-- **感知方式**：遍历检测 `UGameplayStatics::GetAllActorsOfClass<AEnemy>()`，过滤距离（`AttackCoordinationRange`）和状态（`EES_Attacking`），返回**所有攻击中队友的最大剩余时间**（确保 3+ 敌人场景不会同时攻击）。
-- **延长策略**：读取队友 `AttackCooldownTimer` 剩余时间，自己的 CD 延长到 `FMath::Clamp(MaxRemainingTime + Buffer, 0.1f, MaxAttackCoordinationWait)`。
-- **双入口检查**：
-  - `OnCombating()` Tick：`ShouldTriggerAttack()` 返回 false 且 `!bAttackOnCooldown` 时检查协调
-  - `OnAttackCooldownEnd()` 回调：CD 结束后再次检查，避免小窗口同时攻击
-- **参数设计**（`AEnemy` private，`EditAnywhere, Category = "Combat|Attack Coordination"`）：
-  - `AttackCoordinationRange` (800cm) — 检测范围，多远算"附近队友"
-  - `AttackCoordinationBuffer` (0.5s) — 队友攻击结束后的缓冲时间（0.3=紧凑，0.5=自然，0.8=宽松）
-  - `MaxAttackCoordinationWait` (3s) — 协调等待的最大时间，防止永久等待（与 `MaxAttackInterval` 语义不同）
-- **边界情况处理**：
-  - 多个队友同时攻击 → 取最大剩余时间，确保不会"等待时间不够"
-  - 队友被打断/死亡 → 状态检查（`EES_Attacking`）自动过滤，下次检查时可立即攻击
-  - 距离拉开 → CD 已延长会继续等待，CD 结束后各自独立战斗
-  - 最大等待保护 → `FMath::Clamp` 截断到 3 秒，防止异常长蒙太奇导致永久等待
-- **调试可视化**：协调等待时显示黄色 "WaitAlly" 文字（`FDebugDrawHelper`），通过 `test.Debug.Enemy` CVar 控制。
-- **设计亮点**：
-  - 协调等待复用 CD 路径，自动触发 `HandleCooldownPositioning` 拉扯移动
-  - `ShouldTriggerAttack()` 保持 `const` 纯谓词，协调逻辑在调用方
-  - 遍历方式简单直接，适合小场景 demo（敌人 < 50 个）
-  - TODO 注释标记后续扩展：检查 `ChasingTarget` 是否相同，避免不同战斗组误协调
-- **性能考虑**：只在攻击判定时调用（不是每帧），复杂度 O(N)，单次调用 < 0.1ms。如果场景中敌人 > 50 个，考虑改用 AI Perception Team 感知。
 
 ### Health Bar Buffer System
 - `UBaseHealthBarWidget` has two `UProgressBar`: `PB_Health` (immediate) and `PB_Buffer` (delayed).

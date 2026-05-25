@@ -273,6 +273,35 @@ void AMyCharacter::GetHit_Implementation(const FVector& ImpactPoint, AActor* Hit
 {
 	if (bDodgeInvulnerable) return;  // 翻滚无敌帧
 
+	// 攻击霸体：扣血+击退+相机晃动+音效粒子，但不播放受击蒙太奇
+	if (bAttackHyperArmor)
+	{
+		// 手动复制 Super 中需要的逻辑，跳过 DirectionalHitReact()
+		IHitInterface::GetHit_Implementation(ImpactPoint, HitInstigator);
+
+		if (Attributes->IsAlive())
+		{
+			ConsumePendingHitKnockback();  // 击退
+		}
+
+		if (!PendingHitContext.bWasBlocked)
+		{
+			PlayHitEffects(ImpactPoint);  // 音效+粒子
+		}
+
+		// 受击相机晃动
+		if (HitReceivedCameraShake)
+		{
+			if (APlayerController* PC = Cast<APlayerController>(GetController()))
+			{
+				PC->ClientStartCameraShake(HitReceivedCameraShake);
+			}
+		}
+
+		ResetPendingHitContext();
+		return;
+	}
+
 	Super::GetHit_Implementation(ImpactPoint, HitInstigator);
 
 	// 受击相机晃动
@@ -543,6 +572,11 @@ void AMyCharacter::SetParryActive(bool bActive)
 void AMyCharacter::SetDodgeInvulnerable(bool bInvulnerable)
 {
 	bDodgeInvulnerable = bInvulnerable;
+}
+
+void AMyCharacter::SetAttackHyperArmor(bool bHyperArmor)
+{
+	bAttackHyperArmor = bHyperArmor;
 }
 
 void AMyCharacter::StartParryCooldown()
@@ -864,12 +898,17 @@ void AMyCharacter::OnAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted
 	if (bInterrupted)
 	{
 		ResetCombo();
+		// 打断时必须恢复状态，否则会永远卡在 EAS_Attacking
+		if (ActionState == EActionState::EAS_Attacking)
+		{
+			ActionState = EActionState::EAS_UnOccupied;
+		}
 		return;
 	}
 
 	// 连招续接判断（在状态恢复之前）
-	const bool bShouldContinueCombo = bComboInputReceived && 
-	                                   LightAttackCombo && 
+	const bool bShouldContinueCombo = bComboInputReceived &&
+	                                   LightAttackCombo &&
 	                                   (ComboCounter + 1) < LightAttackCombo->GetComboCount();
 
 	const bool bWillExhaust = IsExhaustionTimerActive();
