@@ -60,6 +60,9 @@ public:
 	/* 锁定联动 */
 	void SetTargetedByPlayer(bool bTargeted);
 
+	/* Getters */
+	FORCEINLINE EEnemyState GetEnemyState() const { return EnemyState; }
+
 protected:
 	/* 攻击 */
 	virtual bool CanAttack() const override;
@@ -195,6 +198,16 @@ private:
 	UPROPERTY(EditAnywhere, Category = "Combat", meta = (ToolTip = "攻击冷却最长间隔（秒），从攻击开始计算。实际间隔在 Min~Max 之间随机。"))
 	float MaxAttackInterval = 5.f;
 
+	/* 攻击协调 */
+	UPROPERTY(EditAnywhere, Category = "Combat|Attack Coordination", meta = (ClampMin = "100.0", ToolTip = "攻击协调检测范围（cm）"))
+	float AttackCoordinationRange = 800.f;
+
+	UPROPERTY(EditAnywhere, Category = "Combat|Attack Coordination", meta = (ClampMin = "0.1", ToolTip = "攻击衔接缓冲时间（秒），队友攻击结束后等待多久再攻击"))
+	float AttackCoordinationBuffer = 0.5f;
+
+	UPROPERTY(EditAnywhere, Category = "Combat|Attack Coordination", meta = (ClampMin = "1.0", ToolTip = "因队友攻击而被迫等待的最大秒数"))
+	float MaxAttackCoordinationWait = 3.f;
+
 	// 选择武器类，BeginPlay自动生成
 	UPROPERTY(EditAnywhere, Category = "Combat", meta = (ToolTip = "敌人使用的武器类，BeginPlay 时自动生成并装备。"))
 	TSubclassOf<AWeapon> WeaponClass;
@@ -278,6 +291,10 @@ private:
 	bool MoveToCombatLocation(const FVector& Location);
 	bool MoveToCombatTarget(); // 攻击 ready 时动态追踪目标 Actor
 	void ResetCombatReposition();
+
+	// 攻击协调：检查附近是否有队友正在攻击，返回最大剩余时间
+	bool IsAllyAttackingNearby(float& OutMaxRemainingTime);
+
 	void StartCombatRetreatSpeedEase(const FVector& GoalLocation);
 	void UpdateCombatRetreatSpeedEase();
 	void ClearCombatRetreatSpeedEase();

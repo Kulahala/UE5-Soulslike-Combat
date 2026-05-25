@@ -306,6 +306,26 @@ Enemies use `UAISenseConfig_Hearing` alongside the existing `UAISenseConfig_Sigh
 
 **V1 behavior**: Hearing writes `ChasingTarget` directly (enemy chases player position, not noise position). The "后续扩展" section in plan.md covers future work: Stimulus-type distinction to route hearing to `EES_Searching` with `LastKnownLocation`, AnimNotify-driven precise attack sounds, and `ABaseCharacter` extraction of `EmitNoise`.
 
+### Attack Coordination System
+
+Prevents multiple enemies from attacking simultaneously for better gameplay feel. Uses `UGameplayStatics::GetAllActorsOfClass` traversal with distance + state filtering.
+
+- **Detection**: `AEnemy::IsAllyAttackingNearby(float& OutMaxRemainingTime)` — traverses all `AEnemy` actors, checks if any ally within `AttackCoordinationRange` (800cm default) is in `EES_Attacking` state, returns the **maximum** remaining CD time across all attacking allies (not the first found).
+- **Extension strategy**: Extends own CD to `max_ally_remaining_time + AttackCoordinationBuffer` (0.5s default), capped by `MaxAttackCoordinationWait` (3s default). The coordination-extended CD follows the same cooldown path — next tick enters `HandleCooldownPositioning()` for normal combat spacing.
+- **Dual entry points**:
+  - `OnCombating()` Tick (Enemy.cpp:687-714): checks when `ShouldTriggerAttack()` returns false and `!bAttackOnCooldown` — only applies to enemies that are combat-eligible but not yet attacking.
+  - `OnAttackCooldownEnd()` (Enemy.cpp:339-359): re-checks before the original CD expiry logic runs, preventing a same-frame window where two enemies' cooldowns could expire simultaneously and both attack.
+- **Interruption recovery**: If the attacking ally is stunned/parried and exits `EES_Attacking`, the waiting enemy's next `IsAllyAttackingNearby()` call finds no attacking ally and proceeds to attack immediately. Blocked/damage flags apply normally — the waiting enemy is still in `EES_Combating` and can be hit.
+- **Forced attack cap**: `MaxAttackCoordinationWait` (3s) prevents infinite waiting if an ally gets stuck in `EES_Attacking` state (e.g., unusually long montage).
+- **`ShouldTriggerAttack()` remains `const`**: The coordination logic lives in the callers (`OnCombating()` and `OnAttackCooldownEnd()`), not inside the predicate, preserving the existing extension seam for derived enemy classes.
+- **Debug**: Yellow `"WaitAlly"` text via `FDebugDrawHelper` when coordination is active, visible when `test.Debug.Enemy` is enabled.
+- **Config** (all `EditAnywhere` on `AEnemy` under `"Combat|Attack Coordination"`):
+  - `AttackCoordinationRange` — default `800.f` (cm)
+  - `AttackCoordinationBuffer` — default `0.5f` (seconds)
+  - `MaxAttackCoordinationWait` — default `3.f` (seconds)
+- **Implementation files**: `Source/Test/Public/Enemy/Enemy.h:198-206` (parameters), `Source/Test/Public/Enemy/Enemy.h:292-293` (declaration), `Source/Test/Private/Enemy/Enemy.cpp:1185-1218` (`IsAllyAttackingNearby`), `Source/Test/Private/Enemy/Enemy.cpp:683-718` (`OnCombating` modification), `Source/Test/Private/Enemy/Enemy.cpp:328-374` (`OnAttackCooldownEnd` modification)
+- **Future work**: Same-target check via `OtherEnemy->ChasingTarget == this->ChasingTarget` (currently coordinates across different combat targets — marked as TODO comment), AI Perception Team-based sensing for large scenes, priority system for elite enemies, attack slot system allowing 2+ simultaneous attackers, attack mode toggle (coordinated / free).
+
 ### Health Bar Buffer System
 
 - `UBaseHealthBarWidget` owns two `UProgressBar`: `PB_Health` for the immediate value and `PB_Buffer` for delayed catch-up.

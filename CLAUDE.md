@@ -140,6 +140,31 @@ UDataAsset → UComboDataAsset (combo chain: SectionName, DamageMultiplier, Stam
 - **噪音 API**：`UAISense_Hearing::ReportNoiseEvent(World, Location, Loudness, Instigator, MaxRange, Tag)`，Tag 固定为 `"PlayerNoise"`。
 - **参数调优**：所有噪音参数（Range/Loudness）标记 `EditAnywhere, Category = "Combat|Hearing"`，支持蓝图覆盖。`MovementNoiseInterval` 固定 0.5s（非 EditAnywhere）。
 
+### Enemy Attack Coordination System (`AEnemy`)
+- **目标**：避免多个敌人同时攻击造成"车轮战"体验，实现轮流攻击的策略感。
+- **核心机制**：敌人在攻击前检查附近队友是否正在攻击（`EES_Attacking` 状态），如果有则延长自己的攻击冷却到"队友剩余时间 + 缓冲时间"。
+- **感知方式**：遍历检测 `UGameplayStatics::GetAllActorsOfClass<AEnemy>()`，过滤距离（`AttackCoordinationRange`）和状态（`EES_Attacking`），返回**所有攻击中队友的最大剩余时间**（确保 3+ 敌人场景不会同时攻击）。
+- **延长策略**：读取队友 `AttackCooldownTimer` 剩余时间，自己的 CD 延长到 `FMath::Clamp(MaxRemainingTime + Buffer, 0.1f, MaxAttackCoordinationWait)`。
+- **双入口检查**：
+  - `OnCombating()` Tick：`ShouldTriggerAttack()` 返回 false 且 `!bAttackOnCooldown` 时检查协调
+  - `OnAttackCooldownEnd()` 回调：CD 结束后再次检查，避免小窗口同时攻击
+- **参数设计**（`AEnemy` private，`EditAnywhere, Category = "Combat|Attack Coordination"`）：
+  - `AttackCoordinationRange` (800cm) — 检测范围，多远算"附近队友"
+  - `AttackCoordinationBuffer` (0.5s) — 队友攻击结束后的缓冲时间（0.3=紧凑，0.5=自然，0.8=宽松）
+  - `MaxAttackCoordinationWait` (3s) — 协调等待的最大时间，防止永久等待（与 `MaxAttackInterval` 语义不同）
+- **边界情况处理**：
+  - 多个队友同时攻击 → 取最大剩余时间，确保不会"等待时间不够"
+  - 队友被打断/死亡 → 状态检查（`EES_Attacking`）自动过滤，下次检查时可立即攻击
+  - 距离拉开 → CD 已延长会继续等待，CD 结束后各自独立战斗
+  - 最大等待保护 → `FMath::Clamp` 截断到 3 秒，防止异常长蒙太奇导致永久等待
+- **调试可视化**：协调等待时显示黄色 "WaitAlly" 文字（`FDebugDrawHelper`），通过 `test.Debug.Enemy` CVar 控制。
+- **设计亮点**：
+  - 协调等待复用 CD 路径，自动触发 `HandleCooldownPositioning` 拉扯移动
+  - `ShouldTriggerAttack()` 保持 `const` 纯谓词，协调逻辑在调用方
+  - 遍历方式简单直接，适合小场景 demo（敌人 < 50 个）
+  - TODO 注释标记后续扩展：检查 `ChasingTarget` 是否相同，避免不同战斗组误协调
+- **性能考虑**：只在攻击判定时调用（不是每帧），复杂度 O(N)，单次调用 < 0.1ms。如果场景中敌人 > 50 个，考虑改用 AI Perception Team 感知。
+
 ### Health Bar Buffer System
 - `UBaseHealthBarWidget` has two `UProgressBar`: `PB_Health` (immediate) and `PB_Buffer` (delayed).
 - `SetHealthPercent()` updates PB_Health instantly; when health drops it resets `CurrentBufferDelay` using `BufferDelayTime` before PB_Buffer starts moving; healing snaps buffer bar upward immediately.
