@@ -17,6 +17,7 @@
 #include "Enemy/Enemy.h"
 #include "Kismet/GameplayStatics.h"
 #include "Kismet/KismetMathLibrary.h"
+#include "Perception/AISense_Hearing.h"
 #include "Utils/DebugDrawHelper.h"
 
 // ==================== 生命周期 ====================
@@ -159,6 +160,9 @@ void AMyCharacter::PerformSprintAttack()
 	{
 		AnimInstance->Montage_Play(SprintAttackMontage);
 
+		// 冲刺攻击发出噪音
+		EmitNoise(AttackNoiseLoudness, AttackNoiseRange);
+
 		// 绑定结束回调（复用 OnAttackMontageEnded）
 		FOnMontageEnded MontageEndedDelegate;
 		MontageEndedDelegate.BindUObject(this, &AMyCharacter::OnAttackMontageEnded);
@@ -209,6 +213,9 @@ void AMyCharacter::Attack()
 
 	// 播放对应段的蒙太奇
 	PlayAttackMontage(Segment->SectionName);
+
+	// 普通攻击发出噪音
+	EmitNoise(AttackNoiseLoudness, AttackNoiseRange);
 
 	// 清除旧的输入标记
 	bComboInputReceived = false;
@@ -284,6 +291,9 @@ void AMyCharacter::GetHit_Implementation(const FVector& ImpactPoint, AActor* Hit
 		if (bIsParrying) InterruptParry();
 		ActionState = EActionState::EAS_Stunning;
 		Attributes->ResumeStaminaRegen();  // 硬直接管，恢复体力暂停
+
+		// 硬直时停止移动噪音
+		StopMovementNoiseTimer();
 	}
 
 	ResetPendingHitContext();  // 最末层清理
@@ -304,6 +314,9 @@ void AMyCharacter::Die()
 	ClearLockOn();
 	bRecenteringCamera = false; // 新增：死亡时中断归中
 	ActionState = EActionState::EAS_Dead;
+
+	// 停止移动噪音定时器
+	StopMovementNoiseTimer();
 
 	// 停止移动
 	GetCharacterMovement()->StopMovementImmediately();
@@ -326,6 +339,9 @@ void AMyCharacter::HandleExhausted()
 	ResetCombo();
 	InterruptBlock(true);
 	ActionState = EActionState::EAS_Exhausted;
+
+	bIsSprinting = false;
+
 	GetWorldTimerManager().SetTimer(ExhaustionTimerHandle, this,
 		&AMyCharacter::RecoverFromExhaustion, ExhaustedTime, false);
 }
@@ -612,6 +628,13 @@ void AMyCharacter::Dodge()
 	ActionState = EActionState::EAS_Dodging;
 
 	PlayMontageSection(DodgeMontage, Section);
+
+	// 翻滚发出单次噪音
+	EmitNoise(DodgeNoiseLoudness, DodgeNoiseRange);
+
+	// 停止移动噪音定时器（翻滚期间不持续发声）
+	StopMovementNoiseTimer();
+
 	UAnimInstance* Anim = GetMesh()->GetAnimInstance();
 	FOnMontageEnded EndDelegate;
 	EndDelegate.BindUObject(this, &AMyCharacter::OnDodgeMontageEnded);
@@ -680,6 +703,12 @@ void AMyCharacter::OnDodgeMontageEnded(UAnimMontage* Montage, bool bInterrupted)
 
 	ActionState = EActionState::EAS_UnOccupied;
 	Attributes->ResumeStaminaRegen();
+
+	// 翻滚结束后，如果仍在移动则重启定时器
+	if (GetLastMovementInputVector().SizeSquared2D() > KINDA_SMALL_NUMBER)
+	{
+		StartMovementNoiseTimer();
+	}
 }
 
 // ==================== 装备 ====================
@@ -720,6 +749,12 @@ void AMyCharacter::Sprint()
 {
 	if (bIsBlocking) return;
 	bIsSprinting = true;
+
+	// 冲刺开始时立即发出噪音（不等定时器）
+	if (GetVelocity().Size2D() > 10.f && !bIsWalking)
+	{
+		EmitMovementNoise();
+	}
 }
 
 void AMyCharacter::StopSprinting()
@@ -1058,6 +1093,78 @@ void AMyCharacter::GetLockOnCameraTargets(FVector& OutSocketTarget, float& OutAr
 	}
 
 	OutInterpSpeed = bFreeRun ? LockOnComponent->GetFreeRunCameraInterpSpeed() : LockOnComponent->GetSocketOffsetInterpSpeed();
+}
+
+// ==================== 听觉感知 ====================
+
+void AMyCharacter::EmitNoise(float Loudness, float MaxRange)
+{
+	if (GetWorld())
+	{
+		UAISense_Hearing::ReportNoiseEvent(
+			GetWorld(),
+			GetActorLocation(),
+			Loudness,
+			this,
+			MaxRange,
+			FName("PlayerNoise")
+		);
+
+		// 调试可视化
+		FDebugDrawHelper::AddNoiseRange(GetWorld(), GetActorLocation(), MaxRange);
+	}
+}
+
+void AMyCharacter::EmitMovementNoise()
+{
+	// 空中不发声
+	if (GetCharacterMovement()->IsFalling())
+	{
+		return;
+	}
+
+	// 步行静音（潜行）
+	if (bIsWalking)
+	{
+		return;
+	}
+
+	// 静止不发声
+	float Speed2D = GetVelocity().Size2D();
+	if (Speed2D < 10.f)
+	{
+		return;
+	}
+
+	// 根据移动状态发出不同噪音
+	if (bIsSprinting)
+	{
+		EmitNoise(SprintNoiseLoudness, SprintNoiseRange);
+	}
+	else
+	{
+		EmitNoise(RunNoiseLoudness, RunNoiseRange);
+	}
+}
+
+void AMyCharacter::StartMovementNoiseTimer()
+{
+	if (!GetWorldTimerManager().IsTimerActive(MovementNoiseTimerHandle))
+	{
+		GetWorldTimerManager().SetTimer(
+			MovementNoiseTimerHandle,
+			this,
+			&AMyCharacter::EmitMovementNoise,
+			MovementNoiseInterval,
+			true
+		);
+		EmitMovementNoise();
+	}
+}
+
+void AMyCharacter::StopMovementNoiseTimer()
+{
+	GetWorldTimerManager().ClearTimer(MovementNoiseTimerHandle);
 }
 
 void AMyCharacter::CacheLockOnRotationState()

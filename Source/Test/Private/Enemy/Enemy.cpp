@@ -18,6 +18,7 @@
 #include "NiagaraFunctionLibrary.h"
 #include "Perception/AIPerceptionComponent.h"
 #include "Perception/AISenseConfig_Sight.h"
+#include "Perception/AISenseConfig_Hearing.h"
 #include "Utils/DebugDrawHelper.h"
 
 // ==================== 生命周期 ====================
@@ -43,6 +44,8 @@ AEnemy::AEnemy()
 
 	// AI感知
 	AIPerceptionComp = CreateDefaultSubobject<UAIPerceptionComponent>(TEXT("AIPerceptionComp"));
+
+	// 视觉配置
 	UAISenseConfig_Sight* SightConfig = CreateDefaultSubobject<UAISenseConfig_Sight>(TEXT("SightConfig"));
 	SightConfig->SightRadius = ChasingRadius;
 	SightConfig->LoseSightRadius = ChasingRadius + 200.f;
@@ -52,6 +55,14 @@ AEnemy::AEnemy()
 	SightConfig->DetectionByAffiliation.bDetectFriendlies = true;
 	AIPerceptionComp->ConfigureSense(*SightConfig);
 	AIPerceptionComp->SetDominantSense(SightConfig->GetSenseImplementation());
+
+	// 听觉配置
+	UAISenseConfig_Hearing* HearingConfig = CreateDefaultSubobject<UAISenseConfig_Hearing>(TEXT("HearingConfig"));
+	HearingConfig->HearingRange = HearingRange;
+	HearingConfig->DetectionByAffiliation.bDetectEnemies = true;
+	HearingConfig->DetectionByAffiliation.bDetectNeutrals = false;
+	HearingConfig->DetectionByAffiliation.bDetectFriendlies = false;
+	AIPerceptionComp->ConfigureSense(*HearingConfig);
 }
 
 void AEnemy::SpawnPointInit()

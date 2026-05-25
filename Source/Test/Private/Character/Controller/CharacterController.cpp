@@ -89,6 +89,12 @@ void ACharacterController::Input_Move(const FInputActionValue& Value)
 	AMyCharacter* MyCharacter = GetMyCharacter();
 	if (!MyCharacter) return;
 
+	// 有移动输入时启动噪音定时器
+	if (MovementVector.Length() > 0.1f)
+	{
+		MyCharacter->StartMovementNoiseTimer();
+	}
+
 	EActionState State = MyCharacter->GetActionState();
 	if (State != EActionState::EAS_UnOccupied && State != EActionState::EAS_Exhausted) return;
 	if (MyCharacter->GetCharacterMovement()->IsFalling()) return;
@@ -101,13 +107,19 @@ void ACharacterController::Input_Move(const FInputActionValue& Value)
 	const FVector RightDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
 
 	// Y 轴对应前后 (W/S/摇杆上下)，X 轴对应左右 (A/D/摇杆左右)
-	MyCharacter->AddMovementInput(ForwardDirection, MovementVector.Y); 
+	MyCharacter->AddMovementInput(ForwardDirection, MovementVector.Y);
 	MyCharacter->AddMovementInput(RightDirection, MovementVector.X);
 }
 
 void ACharacterController::Input_MoveEnd()
 {
 	DebugMoveInput = FVector2D::ZeroVector;
+
+	// 松开移动键时停止噪音定时器
+	if (AMyCharacter* MyCharacter = GetMyCharacter())
+	{
+		MyCharacter->StopMovementNoiseTimer();
+	}
 }
 
 void ACharacterController::Input_Look(const FInputActionValue& Value)

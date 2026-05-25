@@ -99,6 +99,10 @@ public:
 	/* 锁定目标访问 */
 	AEnemy* GetLockedTarget() const;
 
+	/* 听觉感知 */
+	void StartMovementNoiseTimer();
+	void StopMovementNoiseTimer();
+
 protected:
 	/* 蒙太奇 */
 	void PlayBlockMontage(const FName& SectionName); // 播放防御蒙太奇
@@ -228,6 +232,38 @@ private:
 
 	UPROPERTY(EditDefaultsOnly, Category = "Combat|Sprint Attack", meta = (AllowPrivateAccess = "true", ToolTip = "冲刺攻击体力消耗。"))
 	float SprintAttackStaminaCost = 25.f;
+
+	/* 听觉感知 */
+	FTimerHandle MovementNoiseTimerHandle;
+	void EmitMovementNoise();
+	void EmitNoise(float Loudness, float MaxRange);
+
+	UPROPERTY(EditAnywhere, Category = "Combat|Hearing", meta = (ToolTip = "移动噪音发射间隔（秒）"))
+	float MovementNoiseInterval = 0.5f;
+
+	UPROPERTY(EditAnywhere, Category = "Combat|Hearing", meta = (ToolTip = "跑步噪音音量（0.0-1.0）"))
+	float RunNoiseLoudness = 0.4f;
+
+	UPROPERTY(EditAnywhere, Category = "Combat|Hearing", meta = (ToolTip = "跑步噪音范围（cm）"))
+	float RunNoiseRange = 500.f;
+
+	UPROPERTY(EditAnywhere, Category = "Combat|Hearing", meta = (ToolTip = "冲刺噪音音量（0.0-1.0）"))
+	float SprintNoiseLoudness = 0.6f;
+
+	UPROPERTY(EditAnywhere, Category = "Combat|Hearing", meta = (ToolTip = "冲刺噪音范围（cm）"))
+	float SprintNoiseRange = 600.f;
+
+	UPROPERTY(EditAnywhere, Category = "Combat|Hearing", meta = (ToolTip = "攻击噪音音量（0.0-1.0）"))
+	float AttackNoiseLoudness = 1.0f;
+
+	UPROPERTY(EditAnywhere, Category = "Combat|Hearing", meta = (ToolTip = "攻击噪音范围（cm）"))
+	float AttackNoiseRange = 800.f;
+
+	UPROPERTY(EditAnywhere, Category = "Combat|Hearing", meta = (ToolTip = "翻滚噪音音量（0.0-1.0）"))
+	float DodgeNoiseLoudness = 0.4f;
+
+	UPROPERTY(EditAnywhere, Category = "Combat|Hearing", meta = (ToolTip = "翻滚噪音范围（cm）"))
+	float DodgeNoiseRange = 400.f;
 
 	/* 连招系统 */
 	UPROPERTY(EditDefaultsOnly, Category = "Combat|Combo", meta = (AllowPrivateAccess = "true"))

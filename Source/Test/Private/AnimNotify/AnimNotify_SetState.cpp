@@ -55,6 +55,12 @@ void UAnimNotify_CharacterHitReactEnd::Notify(USkeletalMeshComponent* MeshComp, 
 				else
 				{
 					MyCharacter->SetActionState(EActionState::EAS_UnOccupied);
+
+					// 硬直结束后，如果仍在移动则重启定时器
+					if (MyCharacter->GetLastMovementInputVector().SizeSquared2D() > KINDA_SMALL_NUMBER)
+					{
+						MyCharacter->StartMovementNoiseTimer();
+					}
 				}
 			}
 		}

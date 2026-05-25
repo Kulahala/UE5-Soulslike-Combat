@@ -121,6 +121,25 @@ UDataAsset → UComboDataAsset (combo chain: SectionName, DamageMultiplier, Stam
 - `EES_Attacking`, `EES_Stunned`, and `EES_Dead` are hard-stop states for Tick-driven AI reactions.
 - Directional hit react: `GetHitDirection()` returns `DotProduct`-based angle, used to pick `HitReactMontage` section name (Front/Back/Left/Right).
 
+### Hearing Perception System (`AMyCharacter` + `AEnemy`)
+- **架构**：Controller 管理 timer 生命周期，Character 执行噪音逻辑。`ACharacterController` 在 `Input_Move()` 启动 timer，`Input_MoveEnd()` 停止；`AMyCharacter` 持有 `MovementNoiseTimerHandle` 和噪音参数，通过 `EmitMovementNoise()` 定时发声。
+- **三层移动噪音**：
+  - Walk（步行）：静音，不触发 `MakeNoise`（潜行）
+  - Run（跑步）：`RunNoiseRange=500cm`，`RunNoiseLoudness=0.4`
+  - Sprint（冲刺）：`SprintNoiseRange=600cm`，`SprintNoiseLoudness=0.6`
+- **动作噪音**（单次触发）：
+  - Attack（攻击）：`AttackNoiseRange=800cm`，`AttackNoiseLoudness=1.0`（在 `Attack()` 和冲刺攻击入口调用）
+  - Dodge（翻滚）：`DodgeNoiseRange=400cm`，`DodgeNoiseLoudness=0.4`（在 `Dodge()` 入口调用）
+- **Timer 管理**：
+  - 启动：`Input_Move()` 检测移动输入 > 0.1 → `StartMovementNoiseTimer()`（0.5s 循环 timer + 立即首次发声）
+  - 停止：`Input_MoveEnd()` / `GetHit_Implementation()` / `Dodge()` / `Die()` → `StopMovementNoiseTimer()`
+  - 恢复：`OnDodgeMontageEnded()` 检查有移动输入 → `StartMovementNoiseTimer()`（翻滚后自动恢复）
+- **发声守卫**：`EmitMovementNoise()` 检查空中（`IsFalling`）、步行（`bIsWalking`）、静止（`Speed2D < 10`）时不发声。
+- **Enemy 配置**：`AEnemy::BeginPlay()` 创建 `UAISenseConfig_Hearing`，设置 `HearingRange`（默认 800cm，EditAnywhere 可调），绑定 `TargetPerceptionUpdated()` 回调。
+- **调试可视化**：`EmitNoise()` 调用 `FDebugDrawHelper::AddNoiseRange(World, Location, Range)` 绘制橙色球体（0.1s 持续时间），通过 `test.Debug.Shapes` CVar 控制。
+- **噪音 API**：`UAISense_Hearing::ReportNoiseEvent(World, Location, Loudness, Instigator, MaxRange, Tag)`，Tag 固定为 `"PlayerNoise"`。
+- **参数调优**：所有噪音参数（Range/Loudness）标记 `EditAnywhere, Category = "Combat|Hearing"`，支持蓝图覆盖。`MovementNoiseInterval` 固定 0.5s（非 EditAnywhere）。
+
 ### Health Bar Buffer System
 - `UBaseHealthBarWidget` has two `UProgressBar`: `PB_Health` (immediate) and `PB_Buffer` (delayed).
 - `SetHealthPercent()` updates PB_Health instantly; when health drops it resets `CurrentBufferDelay` using `BufferDelayTime` before PB_Buffer starts moving; healing snaps buffer bar upward immediately.

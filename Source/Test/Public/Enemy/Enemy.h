@@ -127,6 +127,10 @@ private:
 	UPROPERTY(EditAnywhere, Category = "Combat", meta = (ClampMin = "10", ClampMax = "180", ToolTip = "视野锥半角。总FOV = 此值 × 2。"))
 	float VisionAngleDegrees = 75.f;
 
+	// 听觉感知范围
+	UPROPERTY(EditAnywhere, Category = "Combat", meta = (ClampMin = "0.0", ToolTip = "听觉感知范围（cm）。"))
+	float HearingRange = 800.f;
+
 	// 战斗范围：目标进入此距离 -> 停止追击，进入战斗拉扯
 	// 调参关系：必须大于 CombatPreferredMaxRadius，建议至少多 30cm 防止后撤/侧移后立刻切回 Chasing。
 	UPROPERTY(EditAnywhere, Category = "Combat", meta = (ClampMin = "0.0", ToolTip = "必须大于 CombatPreferredMaxRadius，建议至少多 30cm 防止拉扯后立刻切回追击，且小于 ChasingRadius。"))

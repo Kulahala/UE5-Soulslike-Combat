@@ -241,7 +241,7 @@ UInterface → UBlockableInterface (weapon hit interception before final damage 
 ### Movement Speed
 
 - Player movement speed is updated continuously in `AMyCharacter::UpdateMovementSpeed()`; keep this logic on the character, not the controller.
-- Current base speeds are walk `150`, run `300`, sprint `450`. Non-lock movement is treated as free movement and passes a forward dot into `CalcBaseSpeed()` so sprint intent can apply without fake side/back penalties.
+- Current base speeds are walk `200`, run `300`, sprint `360`. Non-lock movement is treated as free movement and passes a forward dot into `CalcBaseSpeed()` so sprint intent can apply without fake side/back penalties.
 - Ordinary lock-on movement uses directional speed interpolation from forward `1.0` through `LockOnStrafeSpeedMultiplier` to `LockOnBackSpeedMultiplier`; current defaults are strafe `0.95` and back `0.9`.
 - Lock-on Sprint free-run bypasses lock-on directional slowdown: any movement-input direction can reach sprint speed while the locked camera remains on the enemy.
 - The state multiplier is chosen before directional scaling: blocking uses `EquippedShield->BlockMoveSpeedMultiplier`, otherwise `1.0f`. Being armed / holding a weapon does not reduce normal movement speed by itself.
@@ -272,6 +272,39 @@ UInterface → UBlockableInterface (weapon hit interception before final damage 
 - `MoveToTarget()`, `MoveToLocation()`, `MoveToCombatLocation()`, and `MoveToCombatTarget()` are intentionally separate semantic wrappers. If you ever dedupe them, only extract the shared `FAIMoveRequest` boilerplate; do not collapse them into one flag-heavy helper.
 - When planning extensibility for new enemy archetypes, prefer splitting **combat decision** from **navigation execution**. Current `AEnemy` seam is: `OnChasing()` is virtual, and combat behavior is split into `ShouldTriggerAttack(...)`, `HandleAttackReadyPositioning(...)`, and `HandleCooldownPositioning(...)`. Extend new archetypes by overriding those hooks rather than `MoveTo*()` helpers or copying the whole combat loop. Keep `SetEnemyState()` / `CheckCombatTarget()` as base-owned boundaries unless a variant truly needs a different state machine.
 - `EES_Attacking`, `EES_Stunned`, and `EES_Dead` are hard-stop states for Tick-driven AI reactions.
+
+### Hearing Perception System
+
+Enemies use `UAISenseConfig_Hearing` alongside the existing `UAISenseConfig_Sight` to detect player noises. Hearing is **event-driven** (not continuous like sight), and all stimuli route through the same `TargetPerceptionUpdated` callback.
+
+**Enemy configuration** (`AEnemy::AEnemy()`, `Enemy.cpp:59-65`):
+- `UAISenseConfig_Hearing` with `HearingRange = 800.f` (`Enemy.h:131`)
+- `bDetectEnemies = true`, `bDetectNeutrals = false`, `bDetectFriendlies = false`
+- `SetDominantSense(SightConfig)` is preserved — hearing is auxiliary, not the primary sense
+- Hearing stimuli trigger the same `TargetPerceptionUpdated` path as sight, which writes `ChasingTarget` and lets `CheckCombatTarget()` drive the state transition
+
+**Noise emission** (`AMyCharacter`, `MyCharacter.cpp:1100-1168`):
+
+| Source | Loudness | Range (cm) | Trigger |
+|--------|----------|------------|---------|
+| Walk (Alt) | 0.0 | — | Silent (stealth mode) |
+| Run (default) | 0.4 | 500 | Continuous every `MovementNoiseInterval` (0.5s) |
+| Sprint (Shift) | 0.6 | 600 | Continuous every `MovementNoiseInterval` + immediate burst on sprint start |
+| Attack | 1.0 | 800 | Single event at montage play time (both combo and sprint attack) |
+| Dodge | 0.4 | 400 | Single event at montage play time |
+
+**Architecture**:
+- **Emission**: `EmitNoise(Loudness, MaxRange)` calls `UAISense_Hearing::ReportNoiseEvent()` + `FDebugDrawHelper::AddNoiseRange()`
+- **Movement timer**: Owned by `ACharacterController` via `AMyCharacter::StartMovementNoiseTimer()` / `StopMovementNoiseTimer()`. Timer starts in `Input_Move()` (before action-state guard, so stunned characters keep the timer pre-warmed), stops in `Input_MoveEnd()`.
+- **Instant bursts**: `Sprint()` emits immediately on start (with velocity guard); `Attack()` and `Dodge()` emit single events at montage play time
+- **Silent walk**: `EmitMovementNoise()` early-returns when `bIsWalking` is true
+- **Air silence**: `EmitMovementNoise()` early-returns on `IsFalling()`
+- **Velocity guard**: `EmitMovementNoise()` early-returns when `Speed2D < 10.f`
+- **Cleanup**: Timer stopped in `GetHit_Implementation()` (stun path), `Dodge()`, `Die()`. On exhaustion, `bIsSprinting` is cleared and immediate noise reflects the downgraded speed.
+
+**All noise parameters are `EditAnywhere` `UPROPERTY` on `AMyCharacter`** under `"Combat|Hearing"`, tunable in Blueprint. Debug visualization: orange sphere via `test.Debug.Shapes`, 0.5s lifetime.
+
+**V1 behavior**: Hearing writes `ChasingTarget` directly (enemy chases player position, not noise position). The "后续扩展" section in plan.md covers future work: Stimulus-type distinction to route hearing to `EES_Searching` with `LastKnownLocation`, AnimNotify-driven precise attack sounds, and `ABaseCharacter` extraction of `EmitNoise`.
 
 ### Health Bar Buffer System
 
