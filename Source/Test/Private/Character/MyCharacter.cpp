@@ -55,6 +55,7 @@ void AMyCharacter::BeginPlay()
 	{
 		Attributes->OnExhausted.AddDynamic(this, &AMyCharacter::HandleExhausted);
 		Attributes->EnableHealthRegen();
+		Attributes->SetPotionCount(3);  // 初始3个药瓶
 	}
 
 	InitializePlayerHUD();
@@ -262,6 +263,7 @@ void AMyCharacter::ResetCombo()
 void AMyCharacter::Jump()
 {
 	if (bIsBlocking) return;
+	if (ActionState == EActionState::EAS_UsingPotion) return;
 	if (CanJump() && ActionState != EActionState::EAS_Exhausted)
 	{
 		Attributes->UseStamina(10.f);
@@ -272,6 +274,11 @@ void AMyCharacter::Jump()
 void AMyCharacter::GetHit_Implementation(const FVector& ImpactPoint, AActor* HitInstigator)
 {
 	if (bDodgeInvulnerable) return;  // 翻滚无敌帧
+
+	if (ActionState == EActionState::EAS_UsingPotion)
+	{
+		InterruptPotion();
+	}
 
 	// 攻击霸体：扣血+击退+相机晃动+音效粒子，但不播放受击蒙太奇
 	if (bAttackHyperArmor)
@@ -340,6 +347,7 @@ void AMyCharacter::Die()
 	ResetCombo();
 	InterruptBlock(true);
 	ClearParryState();
+	InterruptPotion();  // 死亡时中断喝药
 	ClearLockOn();
 	bRecenteringCamera = false; // 新增：死亡时中断归中
 	ActionState = EActionState::EAS_Dead;
@@ -365,6 +373,8 @@ void AMyCharacter::Die()
 
 void AMyCharacter::HandleExhausted()
 {
+	if (ActionState == EActionState::EAS_UsingPotion) return;
+
 	ResetCombo();
 	InterruptBlock(true);
 	ActionState = EActionState::EAS_Exhausted;
@@ -777,6 +787,109 @@ void AMyCharacter::Equip()
 	}
 }
 
+// ==================== 药瓶 ====================
+
+bool AMyCharacter::CanUsePotion() const
+{
+	return (ActionState == EActionState::EAS_UnOccupied || ActionState == EActionState::EAS_Exhausted)
+		&& !GetCharacterMovement()->IsFalling()
+		&& Attributes && Attributes->HasPotion()
+		&& !bPotionOnCooldown
+		&& Attributes->GetHealthPercent() < 1.0f;
+}
+
+void AMyCharacter::UsePotion()
+{
+	if (!CanUsePotion()) return;
+
+	if (Attributes->UsePotion())
+	{
+		if (bIsSprinting) StopSprinting();
+
+		if (PotionMontage)
+		{
+			ActionState = EActionState::EAS_UsingPotion;
+			PlayPotionMontage();
+			EmitNoise(PotionNoiseLoudness, PotionNoiseRange);
+		}
+		else
+		{
+			HealFromPotion(0.5f);
+			StartPotionCooldown();
+		}
+	}
+}
+
+void AMyCharacter::PlayPotionMontage()
+{
+	UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
+	if (AnimInstance && PotionMontage)
+	{
+		AnimInstance->Montage_Play(PotionMontage);
+		FOnMontageEnded EndDelegate;
+		EndDelegate.BindUObject(this, &AMyCharacter::OnPotionMontageEnded);
+		AnimInstance->Montage_SetEndDelegate(EndDelegate, PotionMontage);
+	}
+}
+
+void AMyCharacter::OnPotionMontageEnded(UAnimMontage* Montage, bool bInterrupted)
+{
+	if (bInterrupted) return;  // InterruptPotion() 已处理
+	if (ActionState != EActionState::EAS_UsingPotion) return;
+
+	if (IsExhaustionTimerActive())
+	{
+		ActionState = EActionState::EAS_Exhausted;
+		StartPotionCooldown();
+		return;
+	}
+	ActionState = EActionState::EAS_UnOccupied;
+	StartPotionCooldown();
+}
+
+void AMyCharacter::HealFromPotion(float Percent)
+{
+	// 状态守卫：防止蒙太奇被打断后，残留的AnimNotify仍然触发恢复
+	// 例外：没有蒙太奇时（fallback路径），允许在任何状态下恢复
+	if (PotionMontage != nullptr && ActionState != EActionState::EAS_UsingPotion)
+	{
+		return;
+	}
+
+	if (Attributes)
+	{
+		Attributes->AddHealth(Attributes->GetMaxHealth() * Percent);
+	}
+}
+
+void AMyCharacter::InterruptPotion()
+{
+	if (UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
+		AnimInstance && PotionMontage && AnimInstance->Montage_IsPlaying(PotionMontage))
+	{
+		AnimInstance->Montage_Stop(0.1f, PotionMontage);
+	}
+	ActionState = EActionState::EAS_UnOccupied;
+	StartPotionCooldown();
+}
+
+void AMyCharacter::StartPotionCooldown()
+{
+	if (PotionCooldown <= 0.f)
+	{
+		bPotionOnCooldown = false;
+		return;
+	}
+	bPotionOnCooldown = true;
+	GetWorldTimerManager().SetTimer(
+		PotionCooldownTimer, this, &AMyCharacter::ResetPotionCooldown, PotionCooldown, false);
+}
+
+void AMyCharacter::ResetPotionCooldown()
+{
+	bPotionOnCooldown = false;
+}
+
 // ==================== 移动 ====================
 
 void AMyCharacter::Sprint()
@@ -808,6 +921,12 @@ void AMyCharacter::StopWalking()
 
 void AMyCharacter::UpdateMovementSpeed()
 {
+	if (ActionState == EActionState::EAS_UsingPotion)
+	{
+		GetCharacterMovement()->MaxWalkSpeed = WalkSpeed;
+		return;
+	}
+
 	TickSprintStamina();
 
 	FVector Velocity = GetVelocity();
@@ -1303,8 +1422,18 @@ void AMyCharacter::DrawDebugInfo() const
 	FDebugDrawHelper::Add(FString::Printf(TEXT("HP: %.1f / %.1f"), Attributes->GetCurrentHealth(), Attributes->GetMaxHealth()), FColor::Red);
 	FDebugDrawHelper::Add(FString::Printf(TEXT("SP: %.1f / %.1f"), Attributes->GetCurrentStamina(), Attributes->GetMaxStamina()), FColor::Green);
 
+	FString PotionInfo = FString::Printf(TEXT("Potion: %d/%d"), 
+		Attributes->GetPotionCount(), 
+		Attributes->GetMaxPotionCount());
+	if (bPotionOnCooldown)
+	{
+		float Remaining = GetWorldTimerManager().GetTimerRemaining(PotionCooldownTimer);
+		PotionInfo += FString::Printf(TEXT(" [CD: %.1fs]"), Remaining);
+	}
+	FDebugDrawHelper::Add(PotionInfo, FColor::Cyan);
+
 	static const TCHAR* ActionStateNames[] = {
-		TEXT("UnOccupied"), TEXT("Attacking"), TEXT("Stunning"), TEXT("Exhausted"), TEXT("Parrying"), TEXT("Dodging"), TEXT("Dead")
+		TEXT("UnOccupied"), TEXT("Attacking"), TEXT("Stunning"), TEXT("Exhausted"), TEXT("Parrying"), TEXT("Dodging"), TEXT("UsingPotion"), TEXT("Dead")
 	};
 	FDebugDrawHelper::Add(FString::Printf(TEXT("State: %s"), ActionStateNames[static_cast<uint8>(ActionState)]), FColor::Yellow);
 

@@ -6,20 +6,27 @@
 #include "Styling/CoreStyle.h"
 #include "Rendering/DrawElements.h"
 #include "Engine/Texture2D.h"
+#include "Components/TextBlock.h"
 
 void UPlayerHUDWidget::SetHealthPercent(float Percent)
 {
 	if (PB_Health)
 	{
-		if (Percent < PB_Health->GetPercent())
+		// 更新目标值
+		TargetHealthPercent = Percent;
+
+		// 掉血：立即更新 + 触发红晕
+		if (Percent < CurrentHealthPercent)
 		{
+			CurrentHealthPercent = Percent;
+			PB_Health->SetPercent(Percent);
 			CurrentBufferDelay = BufferDelayTime;
 			DamageFlashPeakAlphaScaled = DamageFlashPeakAlpha * PendingDamageFlashScale;
 			DamageFlashTimer = 0.f;
 			bDamageFlashAttacking = true;
 			PendingDamageFlashScale = 1.f;
 		}
-		PB_Health->SetPercent(Percent);
+		// 回血：启动插值（在 NativeTick 中处理）
 	}
 }
 
@@ -31,15 +38,34 @@ void UPlayerHUDWidget::SetStaminaPercent(float Percent)
 	}
 }
 
+void UPlayerHUDWidget::SetPotionCount(int32 CurrentCount, int32 MaxCount)
+{
+	if (Text_PotionCount)
+	{
+		Text_PotionCount->SetText(FText::Format(INVTEXT("{0}/{1}"), CurrentCount, MaxCount));
+	}
+}
+
 void UPlayerHUDWidget::BindToAttributes(UAttributeComponent* Attributes)
 {
 	if (Attributes)
 	{
 		Attributes->OnHealthChanged.AddDynamic(this, &UPlayerHUDWidget::SetHealthPercent);
-		SetHealthPercent(Attributes->GetHealthPercent());
+
+		// 初始化血量显示（同步当前值和目标值）
+		float InitialHealth = Attributes->GetHealthPercent();
+		TargetHealthPercent = InitialHealth;
+		CurrentHealthPercent = InitialHealth;
+		if (PB_Health)
+		{
+			PB_Health->SetPercent(InitialHealth);
+		}
 
 		Attributes->OnStaminaChanged.AddDynamic(this, &UPlayerHUDWidget::SetStaminaPercent);
 		SetStaminaPercent(Attributes->GetStaminaPercent());
+
+		Attributes->OnPotionCountChanged.AddDynamic(this, &UPlayerHUDWidget::SetPotionCount);
+		SetPotionCount(Attributes->GetPotionCount(), Attributes->GetMaxPotionCount());
 	}
 }
 
@@ -51,6 +77,20 @@ void UPlayerHUDWidget::SetPendingDamageFlashScale(float Scale)
 void UPlayerHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 {
 	Super::NativeTick(MyGeometry, InDeltaTime);
+
+	// 血条恢复插值（先快后慢）
+	if (PB_Health && CurrentHealthPercent < TargetHealthPercent)
+	{
+		CurrentHealthPercent = FMath::FInterpTo(CurrentHealthPercent, TargetHealthPercent, InDeltaTime, HealthRecoverInterpSpeed);
+		PB_Health->SetPercent(CurrentHealthPercent);
+
+		// 到达目标值时停止插值
+		if (FMath::IsNearlyEqual(CurrentHealthPercent, TargetHealthPercent, 0.001f))
+		{
+			CurrentHealthPercent = TargetHealthPercent;
+			PB_Health->SetPercent(TargetHealthPercent);
+		}
+	}
 
 	UBaseHealthBarWidget::TickBufferDelayImpl(PB_Buffer, PB_Health,
 		CurrentBufferDelay, BufferDelayTime, BufferInterpSpeed, InDeltaTime);

@@ -9,6 +9,7 @@
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnHealthChangedSignature, float, HealthPercent);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnStaminaChangedSignature, float, StaminaPercent);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnExhaustedSignature);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnPotionCountChanged, int32, CurrentCount, int32, MaxCount);
 
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
 class TEST_API UAttributeComponent : public UActorComponent
@@ -26,6 +27,9 @@ public:
 
 	UPROPERTY(BlueprintAssignable, Category = "Events")
 	FOnExhaustedSignature OnExhausted;
+
+	UPROPERTY(BlueprintAssignable, Category = "Events")
+	FOnPotionCountChanged OnPotionCountChanged;
 
 	void ReceiveDamage(float Damage);
 
@@ -73,6 +77,18 @@ private:
 
 	bool bHealthRegenActive = false;
 
+	// 当前药瓶数量
+	UPROPERTY(EditAnywhere, Category = "Actor Attributes|Potion", meta = (AllowPrivateAccess = "true", ToolTip = "当前药瓶数量"))
+	int32 CurrentPotionCount = 3;
+
+	// 最大药瓶数量
+	UPROPERTY(EditAnywhere, Category = "Actor Attributes|Potion", meta = (AllowPrivateAccess = "true", ToolTip = "最大药瓶数量"))
+	int32 MaxPotionCount = 3;
+
+	// 药瓶恢复百分比
+	UPROPERTY(EditAnywhere, Category = "Actor Attributes|Potion", meta = (AllowPrivateAccess = "true", ToolTip = "恢复百分比（默认0.5即50%）"))
+	float PotionHealPercent = 0.5f;
+
 public:
 	UFUNCTION(BlueprintCallable, Category = "Actor Attributes")
 	FORCEINLINE void AddGold(int32 Amount) { Gold += Amount; }
@@ -104,4 +120,11 @@ public:
 	void AddHealth(float Amount);
 	void EnableHealthRegen();
 	void DisableHealthRegen();
+
+	FORCEINLINE bool HasPotion() const { return CurrentPotionCount > 0; }
+	FORCEINLINE int32 GetPotionCount() const { return CurrentPotionCount; }
+	FORCEINLINE int32 GetMaxPotionCount() const { return MaxPotionCount; }
+	bool UsePotion();
+	void AddPotion(int32 Amount);
+	void SetPotionCount(int32 Count);
 };

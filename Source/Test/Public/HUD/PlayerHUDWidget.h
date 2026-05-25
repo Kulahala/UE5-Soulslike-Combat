@@ -7,6 +7,7 @@
 class UProgressBar;
 class UAttributeComponent;
 class UTexture2D;
+class UTextBlock;
 
 UCLASS()
 class TEST_API UPlayerHUDWidget : public UUserWidget
@@ -18,6 +19,8 @@ public:
 	void SetHealthPercent(float Percent);
 	UFUNCTION()
 	void SetStaminaPercent(float Percent);
+	UFUNCTION()
+	void SetPotionCount(int32 CurrentCount, int32 MaxCount);
 	void BindToAttributes(UAttributeComponent* Attributes);
 	void SetPendingDamageFlashScale(float Scale);
 
@@ -29,6 +32,9 @@ public:
 
 	UPROPERTY(meta = (BindWidget))
 	UProgressBar* PB_Stamina;
+
+	UPROPERTY(meta = (BindWidget))
+	UTextBlock* Text_PotionCount;
 
 protected:
 	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
@@ -46,6 +52,13 @@ private:
 	float BufferDelayTime = 2.0f;
 
 	float CurrentBufferDelay = 0.0f;
+
+	// 血条恢复插值
+	UPROPERTY(EditAnywhere, Category = "Health Bar", meta = (ToolTip = "血条恢复插值速度（先快后慢）。"))
+	float HealthRecoverInterpSpeed = 8.0f;
+
+	float TargetHealthPercent = 1.0f;  // 目标血量百分比
+	float CurrentHealthPercent = 1.0f; // 当前显示的血量百分比
 
 	// 本次掉血前由角色推送；SetHealthPercent 消费后归位到 1
 	float PendingDamageFlashScale = 1.0f;

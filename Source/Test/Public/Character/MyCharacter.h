@@ -60,6 +60,12 @@ public:
 	/* 装备 */
 	virtual void Equip() override;
 
+	/* 药瓶系统 */
+	void UsePotion();
+	bool CanUsePotion() const;
+	void HealFromPotion(float Percent);
+	void InterruptPotion();
+
 	/* 防御 */
 	void StartBlockInput();
 	void ReleaseBlockInput();
@@ -108,8 +114,10 @@ protected:
 	/* 蒙太奇 */
 	void PlayBlockMontage(const FName& SectionName); // 播放防御蒙太奇
 	virtual void PlayAttackMontage(const FName& SectionName) override;
+	void PlayPotionMontage();
 	virtual bool CanAttack() const override;
 	virtual void OnAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted) override;
+	void OnPotionMontageEnded(UAnimMontage* Montage, bool bInterrupted);
 
 	// 防御蒙太奇（Section: BlockRaise, BlockIdle）
 	UPROPERTY(EditDefaultsOnly, Category = "Montages", meta = (ToolTip = "防御蒙太奇，含 Section：BlockRaise, BlockIdle。"))
@@ -215,6 +223,18 @@ private:
 	float DodgeStaminaCost = 15.f;
 	bool bDodgeInvulnerable = false;
 
+	/* 药瓶 */
+	bool bPotionOnCooldown = false;
+	FTimerHandle PotionCooldownTimer;
+	UPROPERTY(EditDefaultsOnly, Category = "Combat|Potion")
+	float PotionCooldown = 2.f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Montages")
+	UAnimMontage* PotionMontage;
+
+	void StartPotionCooldown();
+	void ResetPotionCooldown();
+
 	/* 攻击霸体 */
 	bool bAttackHyperArmor = false;
 
@@ -268,6 +288,12 @@ private:
 
 	UPROPERTY(EditAnywhere, Category = "Combat|Hearing", meta = (ToolTip = "翻滚噪音范围（cm）"))
 	float DodgeNoiseRange = 400.f;
+
+	UPROPERTY(EditAnywhere, Category = "Combat|Hearing", meta = (ToolTip = "喝药噪音音量（0.0-1.0）"))
+	float PotionNoiseLoudness = 0.5f;
+
+	UPROPERTY(EditAnywhere, Category = "Combat|Hearing", meta = (ToolTip = "喝药噪音范围（cm）"))
+	float PotionNoiseRange = 500.f;
 
 	/* 连招系统 */
 	UPROPERTY(EditDefaultsOnly, Category = "Combat|Combo", meta = (AllowPrivateAccess = "true"))

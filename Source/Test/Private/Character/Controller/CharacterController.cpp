@@ -74,6 +74,11 @@ void ACharacterController::SetupInputComponent()
 			EnhancedInputComponent->BindAction(DodgeAction, ETriggerEvent::Started, this, &ACharacterController::Input_Dodge);
 		}
 
+		if (UsePotionAction)
+		{
+			EnhancedInputComponent->BindAction(UsePotionAction, ETriggerEvent::Started, this, &ACharacterController::Input_UsePotion);
+		}
+
 		if (PauseAction)
 		{
 			EnhancedInputComponent->BindAction(PauseAction, ETriggerEvent::Started, this, &ACharacterController::Input_Pause);
@@ -96,7 +101,9 @@ void ACharacterController::Input_Move(const FInputActionValue& Value)
 	}
 
 	EActionState State = MyCharacter->GetActionState();
-	if (State != EActionState::EAS_UnOccupied && State != EActionState::EAS_Exhausted) return;
+	if (State != EActionState::EAS_UnOccupied
+		&& State != EActionState::EAS_Exhausted
+		&& State != EActionState::EAS_UsingPotion) return;
 	if (MyCharacter->GetCharacterMovement()->IsFalling()) return;
 
 	const FRotator Rotation = GetControlRotation();
@@ -263,6 +270,15 @@ void ACharacterController::Input_Dodge()
 	}
 }
 
+void ACharacterController::Input_UsePotion()
+{
+	DebugPotionExpireTime = GetWorld()->GetTimeSeconds() + 0.15f;
+	if (AMyCharacter* MyCharacter = GetMyCharacter())
+	{
+		MyCharacter->UsePotion();
+	}
+}
+
 void ACharacterController::Input_Pause()
 {
 	if (bCanPause && PauseMenuWidget)
@@ -375,6 +391,7 @@ FString ACharacterController::GetDebugInputText() const
 	if (Now < DebugLockOnExpireTime) Result += TEXT("LockOn ");
 	if (Now < DebugParryExpireTime) Result += TEXT("Parry ");
 	if (Now < DebugDodgeExpireTime) Result += TEXT("Dodge ");
+	if (Now < DebugPotionExpireTime) Result += TEXT("Potion ");
 
 	if (!DebugMoveInput.IsNearlyZero())
 		Result += FString::Printf(TEXT("Move(%.1f, %.1f) "), DebugMoveInput.X, DebugMoveInput.Y);

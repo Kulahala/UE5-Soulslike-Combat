@@ -108,3 +108,26 @@ void UAttributeComponent::DisableHealthRegen()
 {
 	bHealthRegenActive = false;
 }
+
+bool UAttributeComponent::UsePotion()
+{
+	if (CurrentPotionCount > 0)
+	{
+		CurrentPotionCount--;
+		OnPotionCountChanged.Broadcast(CurrentPotionCount, MaxPotionCount);
+		return true;
+	}
+	return false;
+}
+
+void UAttributeComponent::AddPotion(int32 Amount)
+{
+	CurrentPotionCount = FMath::Clamp(CurrentPotionCount + Amount, 0, MaxPotionCount);
+	OnPotionCountChanged.Broadcast(CurrentPotionCount, MaxPotionCount);
+}
+
+void UAttributeComponent::SetPotionCount(int32 Count)
+{
+	CurrentPotionCount = FMath::Clamp(Count, 0, MaxPotionCount);
+	OnPotionCountChanged.Broadcast(CurrentPotionCount, MaxPotionCount);
+}

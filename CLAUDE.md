@@ -280,6 +280,23 @@ UDataAsset → UComboDataAsset (combo chain: SectionName, DamageMultiplier, Stam
 - **输入屏蔽**：`FInputModeUIOnly` 自动屏蔽 gameplay 输入，无需逐函数守卫。
 - **文件**：`Source/Test/Public/HUD/PauseMenuWidget.h/cpp`、`Content/_GAME/BP/input/IA_Pause.uasset`、`Content/_GAME/UI/WBP_PauseMenu.uasset`。
 
+### Potion System (药瓶系统)
+- **架构**：AnimNotify 驱动的两段式恢复，体力耗尽时可喝药，喝药期间可移动但速度降低。
+- **恢复机制**：`UAnimNotify_PotionHeal` 在蒙太奇中触发恢复（开头 25% + 中间 25%）。被打断只保留已触发部分。无蒙太奇时 fallback 到立即恢复 50%。
+- **状态管理**：新增 `EAS_UsingPotion` 状态。`CanUsePotion()` 允许 `EAS_UnOccupied || EAS_Exhausted`（体力耗尽时可喝药）。
+- **移动限制**：喝药时速度降低到 `WalkSpeed = 200`。`UpdateMovementSpeed()` 提前检查 `EAS_UsingPotion` 并 return，跳过后续逻辑（包括 `TickSprintStamina`）。
+- **移动输入守卫**：`CharacterController::Input_Move()` 必须允许 `EAS_UsingPotion`，否则喝药时无法移动。
+- **体力恢复**：喝药期间不暂停体力恢复（与攻击/翻滚/弹反区分）。魂类设计：喝药是防御动作，允许喝完后立即翻滚逃离。
+- **状态守卫**：`HealFromPotion()` 检查 `ActionState == EAS_UsingPotion`（防止蒙太奇被打断后残留 AnimNotify 触发恢复）。例外：无蒙太奇时允许任何状态。
+- **体力耗尽恢复**：`OnPotionMontageEnded()` 检查 `IsExhaustionTimerActive()`，如果仍处于耗尽态则恢复到 `EAS_Exhausted` 而非 `EAS_UnOccupied`。
+- **打断机制**：`GetHit_Implementation()` 在翻滚无敌帧后、攻击霸体前检查 `EAS_UsingPotion` 调用 `InterruptPotion()`。`HandleExhausted()` 不打断喝药（添加守卫）。`Die()` 调用 `InterruptPotion()`。
+- **听觉感知**：喝药发出噪音（`PotionNoiseLoudness=0.5`, `PotionNoiseRange=500cm`），在 `UsePotion()` 播放蒙太奇后调用 `EmitNoise()`。
+- **数据管理**：`UAttributeComponent` 管理药瓶数量（`CurrentPotionCount`/`MaxPotionCount`/`PotionHealPercent`），广播 `OnPotionCountChanged` delegate。
+- **HUD 显示**：`UPlayerHUDWidget::Text_PotionCount`（`meta = (BindWidget)`）显示 "3/3" 格式，绑定 `OnPotionCountChanged` 自动更新。
+- **初始化**：`BeginPlay()` 中 `Attributes->SetPotionCount(3)`。`BindToAttributes()` 中绑定 delegate 并初始化显示。
+- **调试支持**：`ActionStateNames[]` 数组添加 `"UsingPotion"`。`DrawDebugInfo()` 显示药瓶数量和冷却时间。`CharacterController` 添加 `DebugPotionExpireTime` 输入快照。
+- **文件**：`AnimNotify/AnimNotify_PotionHeal.h/cpp`、`AttributeComponent`（药瓶管理）、`MyCharacter`（喝药逻辑）、`CharacterController`（输入绑定）、`PlayerHUDWidget`（显示）。
+
 ### Content Organization
 - C++ source under `Source/Test/` (Public/Private mirrors UE module structure).
 - Game assets under `Content/_GAME/` — this is the only Content directory that should be modified.

@@ -59,7 +59,7 @@ All gameplay states are defined as `UENUM` enums in `CharacterTypes.h` — the s
 | Enum | C++ Values | Used By |
 |------|-----------|---------|
 | `EWeaponState` | `EWS_Unequipped`, `EWS_OneHandEquipped`, `EWS_TwoHandEquipped` | `ABaseCharacter`, `AMyCharacter`, `USlashAnimInstance` |
-| `EActionState` | `EAS_UnOccupied`, `EAS_Attacking`, `EAS_Stunning`, `EAS_Exhausted`, `EAS_Parrying`, `EAS_Dodging`, `EAS_Dead` | `AMyCharacter` |
+| `EActionState` | `EAS_UnOccupied`, `EAS_Attacking`, `EAS_Stunning`, `EAS_Exhausted`, `EAS_Parrying`, `EAS_Dodging`, `EAS_UsingPotion`, `EAS_Dead` | `AMyCharacter` |
 | `EEnemyState` | `EES_UnOccupied`, `EES_Patrolling`, `EES_Searching`, `EES_Chasing`, `EES_Combating`, `EES_Attacking`, `EES_Stunned`, `EES_Dead` | `AEnemy` |
 | `EItemState` | `EIS_Spawning`, `EIS_Dropped`, `EIS_Equipped` | `Aitem` (in `item.h`) |
 
@@ -86,7 +86,7 @@ ACharacter
 ├── AMyCharacter + IBlockableInterface (UAttributeComponent, spring arm + camera, weapon/shield equipping, hold-to-block)
 └── AEnemy + IHitInterface (AI patrol/search/chase/combat FSM, directional hit react)
 
-APlayerController → ACharacterController (Enhanced Input, move/look/jump/equip/attack/sprint/walk/block/lock-on/dodge/parry/pause bindings, pause state management, input debug snapshot owner)
+APlayerController → ACharacterController (Enhanced Input, move/look/jump/equip/attack/sprint/walk/block/lock-on/dodge/parry/potion/pause bindings, pause state management, input debug snapshot owner)
 UActorComponent → UAttributeComponent (health, gold, OnHealthChanged delegate)
                └── UPlayerLockOnComponent (lock-on state, target selection, camera tunables)
 UWidgetComponent → UHealthBarComponent
@@ -99,6 +99,7 @@ UDataAsset → UTreasureData
 UAnimNotifyState → UAnimNotifyState_WeaponCollision
                  ├── UAnimNotifyState_DodgeInvulnerable
                  └── UAnimNotifyState_ComboWindow (opens character combo buffer window)
+UAnimNotify → UAnimNotify_PotionHeal (configurable HealPercent, triggers during potion montage)
 UInterface → UBlockableInterface (weapon hit interception before final damage application)
 ```
 
@@ -166,6 +167,33 @@ UInterface → UBlockableInterface (weapon hit interception before final damage 
 - `UAnimNotifyState_DodgeInvulnerable` toggles `bDodgeInvulnerable` during the roll; `GetHit_Implementation()` and `TakeDamage()` both early-return when the flag is set. `OnDodgeMontageEnded` provides a safety clear.
 - Dodge costs `DodgeStaminaCost` (default 15) and pauses stamina regen; regen resumes in `OnDodgeMontageEnded` (non-interrupted path).
 - `ApplyLockOnRotationMode()` skips `EAS_Dodging` to prevent Tick-time rotation from overwriting dodge facing.
+
+### Potion System
+
+- `ACharacterController` binds `UsePotionAction` (R key) → `Input_UsePotion()` → `AMyCharacter::UsePotion()`.
+- **Entry guard** (`CanUsePotion()`): allows `EAS_UnOccupied` **or** `EAS_Exhausted`, grounded, has potion (`UAttributeComponent::HasPotion()`), not on cooldown, HP < 100%.
+- **Execution** (`UsePotion()`): consumes one potion via `Attributes->UsePotion()` → `StopSprinting()` → two paths:
+  - **Montage path** (if `PotionMontage != nullptr`): sets `EAS_UsingPotion` → `PlayPotionMontage()` → `EmitNoise()`. `UAnimNotify_PotionHeal` triggers `HealFromPotion(Percent)` at designer-placed keyframes (default 25% per notify, two notifies for 50% total).
+  - **Fallback path** (no montage): immediately calls `HealFromPotion(0.5f)` for 50% heal, then `StartPotionCooldown()`.
+- **Heal guard** (`HealFromPotion()`): if `PotionMontage != nullptr`, requires `ActionState == EAS_UsingPotion` to prevent stale AnimNotify healing after interrupt. Fallback path bypasses this guard.
+- **Interrupt** (`InterruptPotion()`): `Montage_Stop(0.1f)` → `ActionState = EAS_UnOccupied` → `StartPotionCooldown()`. Called from `GetHit_Implementation()` (before hyper armor check) and `Die()`.
+- **Cooldown**: `bPotionOnCooldown` + `FTimerHandle PotionCooldownTimer` with `PotionCooldown` (default `2.f`). Started in `OnPotionMontageEnded`, `InterruptPotion`, and fallback path.
+- **Montage end** (`OnPotionMontageEnded`): `bInterrupted` early-returns (delegated to `InterruptPotion`). State guard checks `EAS_UsingPotion`. Checks `IsExhaustionTimerActive()` — if exhaustion is active, reverts to `EAS_Exhausted` rather than `EAS_UnOccupied` (consistent with attack/dodge/parry recovery patterns). Then starts cooldown.
+- **Stamina**: Potion does **not** call `PauseStaminaRegen()` / `ResumeStaminaRegen()`. Stamina regenerates naturally during the drinking animation (Souls-like design where stamina recovers while drinking).
+- **`HandleExhausted()`**: early-returns if `ActionState == EAS_UsingPotion` — stamina depletion does not interrupt the potion animation.
+- **Movement**: `UpdateMovementSpeed()` early-returns with `WalkSpeed` when `ActionState == EAS_UsingPotion`, skipping `TickSprintStamina()` and directional speed calculation.
+- **`Input_Move()` gate**: `CharacterController.cpp` must allow `EAS_UsingPotion` alongside `EAS_UnOccupied` and `EAS_Exhausted` — otherwise the player cannot move while drinking.
+- **`Jump()`**: blocks during `EAS_UsingPotion` via early-return guard.
+- **Noise**: emits `PotionNoiseLoudness` (default `0.5`) with `PotionNoiseRange` (default `500.f` cm) at montage play time, notifying nearby enemies through the hearing perception system.
+- **HUD**: `UPlayerHUDWidget::Text_PotionCount` (`UTextBlock`, `BindWidget`) displays `"Current/Max"` format. Bound via `OnPotionCountChanged` delegate.
+- **Debug**: `DrawDebugInfo()` shows `"Potion: 3/3 [CD: 1.2s]"`; `GetDebugInputText()` shows `"Potion"` marker; `ActionStateNames[]` includes `"UsingPotion"`.
+- **Attribute storage** (`UAttributeComponent`): `CurrentPotionCount` / `MaxPotionCount` (both `EditAnywhere`, default `3`), `PotionHealPercent` (default `0.5`), `FOnPotionCountChanged` delegate. Methods: `HasPotion()`, `UsePotion()` (decrements + broadcasts), `AddPotion(Amount)`, `SetPotionCount(Count)`, `GetPotionCount()`, `GetMaxPotionCount()`.
+- **Config** (all `EditDefaultsOnly`/`EditAnywhere` on `AMyCharacter`):
+  - `PotionCooldown` — default `2.f` (seconds)
+  - `PotionMontage` — optional cooking animation montage asset
+  - `PotionNoiseLoudness` — default `0.5f`
+  - `PotionNoiseRange` — default `500.f` (cm)
+- **Implementation files**: `Source/Test/Public/Character/CharacterTypes.h:19` (enum), `Source/Test/Public/AttributeComponent/AttributeComponent.h:81-92,124-129` (storage), `Source/Test/Public/Character/MyCharacter.h:63-67,226-236,292-296` (declaration), `Source/Test/Private/Character/MyCharacter.cpp:790-891` (implementation), `Source/Test/Public/AnimNotify/AnimNotify_PotionHeal.h` (notify), `Source/Test/Public/HUD/PlayerHUDWidget.h:36-37` (HUD), `Source/Test/Private/Character/Controller/CharacterController.cpp:77-80,271-278` (input).
 
 ### Combo System
 
@@ -255,7 +283,7 @@ UInterface → UBlockableInterface (weapon hit interception before final damage 
 - Current base speeds are walk `200`, run `300`, sprint `360`. Non-lock movement is treated as free movement and passes a forward dot into `CalcBaseSpeed()` so sprint intent can apply without fake side/back penalties.
 - Ordinary lock-on movement uses directional speed interpolation from forward `1.0` through `LockOnStrafeSpeedMultiplier` to `LockOnBackSpeedMultiplier`; current defaults are strafe `0.95` and back `0.9`.
 - Lock-on Sprint free-run bypasses lock-on directional slowdown: any movement-input direction can reach sprint speed while the locked camera remains on the enemy.
-- The state multiplier is chosen before directional scaling: blocking uses `EquippedShield->BlockMoveSpeedMultiplier`, otherwise `1.0f`. Being armed / holding a weapon does not reduce normal movement speed by itself.
+- The state multiplier is chosen before directional scaling: blocking uses `EquippedShield->BlockMoveSpeedMultiplier`, otherwise `1.0f`. `EAS_UsingPotion` early-returns with `WalkSpeed` before `TickSprintStamina()` and directional scaling. Being armed / holding a weapon does not reduce normal movement speed by itself.
 - `TickSprintStamina()` drains stamina while grounded, unblocked, and moving. In ordinary lock-on combat step it still uses the forward-dot gate, while lock-on free-run bypasses that gate so side/back sprint consumes stamina.
 
 ### Enemy AI (`AEnemy`)
@@ -303,6 +331,7 @@ Enemies use `UAISenseConfig_Hearing` alongside the existing `UAISenseConfig_Sigh
 | Sprint (Shift) | 0.6 | 600 | Continuous every `MovementNoiseInterval` + immediate burst on sprint start |
 | Attack | 1.0 | 800 | Single event at montage play time (both combo and sprint attack) |
 | Dodge | 0.4 | 400 | Single event at montage play time |
+| Potion | 0.5 | 500 | Single event at montage play time |
 
 **Architecture**:
 - **Emission**: `EmitNoise(Loudness, MaxRange)` calls `UAISense_Hearing::ReportNoiseEvent()` + `FDebugDrawHelper::AddNoiseRange()`
@@ -351,7 +380,8 @@ Prevents multiple enemies from attacking simultaneously for better gameplay feel
 ### Player HUD
 
 - `AMyCharacter::InitializePlayerHUD()` creates `UPlayerHUDWidget`, adds it to the viewport, and binds it to the live `UAttributeComponent`; HUD setup is not owned by the controller.
-- `UPlayerHUDWidget::BindToAttributes()` immediately pushes current health/stamina values after binding, so UI initialization does not wait for the next attribute change event.
+- `UPlayerHUDWidget::BindToAttributes()` immediately pushes current health/stamina/potion values after binding, so UI initialization does not wait for the next attribute change event.
+- `Text_PotionCount` (`UTextBlock`) displays potion count in `"Current/Max"` format, bound via `Attributes->OnPotionCountChanged`.
 
 ### Player Hit Feedback
 
@@ -372,8 +402,8 @@ Prevents multiple enemies from attacking simultaneously for better gameplay feel
   - `test.Debug.Enable` → master text/shape toggle
   - `test.Debug.Enemy` → enemy text toggle
   - `test.Debug.Shapes` → world debug sphere toggle
-- Player debug currently includes input snapshot text, HP, stamina, action state, montage name, and movement speed.
-- Player debug currently includes the short-lived `LockOn` marker from `Input_LockOn()` in addition to the existing input snapshot text.
+- Player debug currently includes input snapshot text, HP, stamina, potion count/cooldown, action state, montage name, and movement speed.
+- Player debug currently includes the short-lived `LockOn`, `Potion`, and other action markers from controller input snapshots, in addition to the held-state text.
 - Enemy debug currently includes enemy state / ground speed text, distance text, optional chase/combat/attack radius spheres, and `CombatMove: Ready/Retreat/BackDiag/Strafe/Press/AlreadyAtGoal/MoveFail` while in `EES_Combating`.
 
 ### Pause Menu System

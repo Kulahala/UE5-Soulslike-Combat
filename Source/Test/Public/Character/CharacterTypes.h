@@ -16,6 +16,7 @@ enum class EActionState : uint8
 	EAS_Exhausted UMETA(DisplayName = "Exhausted"),
 	EAS_Parrying UMETA(DisplayName = "Parrying"),
 	EAS_Dodging UMETA(DisplayName = "Dodging"),
+	EAS_UsingPotion UMETA(DisplayName = "UsingPotion"),
 	EAS_Dead UMETA(DisplayName = "Dead")
 };
 

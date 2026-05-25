@@ -43,6 +43,7 @@ protected:
 	void Input_Parry();
 	void Input_Dodge();
 	void Input_Pause();
+	void Input_UsePotion();
 
 	/* ================= 增强输入资产声明 ================= */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input", meta = (ToolTip = "默认输入映射上下文。"))
@@ -84,6 +85,9 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input", meta = (ToolTip = "暂停输入动作。"))
 	UInputAction* PauseAction;
 
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input", meta = (ToolTip = "喝药输入动作。"))
+	UInputAction* UsePotionAction;
+
 private:
 	// 输入调试状态
 	FVector2D DebugMoveInput = FVector2D::ZeroVector;
@@ -96,6 +100,7 @@ private:
 	float DebugLockOnExpireTime = 0.f;
 	float DebugParryExpireTime = 0.f;
 	float DebugDodgeExpireTime = 0.f;
+	float DebugPotionExpireTime = 0.f;
 
 	/* 暂停系统 */
 	bool bIsPaused = false;
