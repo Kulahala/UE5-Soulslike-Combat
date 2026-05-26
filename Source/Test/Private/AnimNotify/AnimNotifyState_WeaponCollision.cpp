@@ -17,7 +17,7 @@ void UAnimNotifyState_WeaponCollision::NotifyBegin(USkeletalMeshComponent* MeshC
 		if (AWeapon* Weapon = Character->GetWeapon())
 		{
 			// 挥砍开始，清空上一刀留下的黑名单，准备重新砍人
-			Weapon->IgnoreActors.Empty();
+			Weapon->ClearIgnoreActors();
 
 			// 记录刀的起始位置
 			Weapon->StartWeaponTrace();
@@ -58,7 +58,7 @@ void UAnimNotifyState_WeaponCollision::NotifyEnd(USkeletalMeshComponent* MeshCom
 		if (AWeapon* Weapon = Character->GetWeapon())
 		{
 			// 挥砍结束，再次清空一下防万一
-			Weapon->IgnoreActors.Empty();
+			Weapon->ClearIgnoreActors();
 		}
 
 		// 玩家攻击出手阶段结束，关闭霸体

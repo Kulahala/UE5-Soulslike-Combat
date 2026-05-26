@@ -113,22 +113,25 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "Combat|Knockback", meta = (ToolTip = "后退完成时间（秒），quadratic ease-out 曲线。"))
 	float HitKnockbackDuration = 0.12f;
 
+	// 当前攻击伤害倍率（连招系统使用）
+	float CurrentAttackDamageMultiplier = 1.0f;
+
+	// 当前攻击韧性伤害（连招系统使用）
+	float CurrentPoiseDamage = 1.f;
+
 	FPendingHitContext PendingHitContext;
+
+	void ConsumePendingHitKnockback();
+
+private:
 	bool bKnockbackActive = false;
 	FVector KnockbackDirection = FVector::ZeroVector;
 	float KnockbackElapsed = 0.f;
 	float KnockbackAppliedDistance = 0.f;
 	float KnockbackTargetDistance = 0.f;
 
-	void ConsumePendingHitKnockback();
 	void StartHitKnockback(AActor* HitInstigator, float Scale);
 	void TickHitKnockback(float DeltaTime);
-
-	// 当前攻击伤害倍率（连招系统使用）
-	float CurrentAttackDamageMultiplier = 1.0f;
-
-	// 当前攻击韧性伤害（连招系统使用）
-	float CurrentPoiseDamage = 1.f;
 
 public:
 	FORCEINLINE AWeapon* GetWeapon() const { return EquippedWeapon; }

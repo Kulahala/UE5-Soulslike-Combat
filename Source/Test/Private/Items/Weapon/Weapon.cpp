@@ -219,7 +219,7 @@ void AWeapon::DispatchHitFeedback(AActor* HitActor, const FHitResult& HitPoint, 
 		{
 			if (AttackerEnemy->ShouldTriggerStanceBreak())
 			{
-				AttackerEnemy->ApplyStanceBreak(AttackerEnemy->StanceBreakDuration, AttackerEnemy->StanceBreakPlayRate);
+				AttackerEnemy->ApplyStanceBreak(AttackerEnemy->GetStanceBreakDuration(), AttackerEnemy->GetStanceBreakPlayRate());
 			}
 		}
 	}
@@ -228,7 +228,7 @@ void AWeapon::DispatchHitFeedback(AActor* HitActor, const FHitResult& HitPoint, 
 		// 普通韧性破防：对受击方敌人触发
 		if (Enemy->ShouldTriggerStanceBreak())
 		{
-			Enemy->ApplyStanceBreak(Enemy->StanceBreakDuration, Enemy->StanceBreakPlayRate);
+			Enemy->ApplyStanceBreak(Enemy->GetStanceBreakDuration(), Enemy->GetStanceBreakPlayRate());
 		}
 	}
 

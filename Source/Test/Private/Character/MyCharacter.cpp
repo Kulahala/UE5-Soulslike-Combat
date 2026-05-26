@@ -505,7 +505,7 @@ FBlockResult AMyCharacter::TryBlockHit(const FVector& ImpactPoint, float Incomin
 			{
 				FVector ToAttacker = (DirSrc->GetActorLocation() - GetActorLocation()).GetSafeNormal2D();
 				float Dot = CalcForwardDot2D(ToAttacker);
-				float CosHalf = FMath::Cos(FMath::DegreesToRadians(EquippedShield->BlockHalfAngleDegrees));
+				float CosHalf = FMath::Cos(FMath::DegreesToRadians(EquippedShield->GetBlockHalfAngleDegrees()));
 				if (Dot < CosHalf) return Result; // 角度不匹配，弹反失败
 			}
 
@@ -514,13 +514,13 @@ FBlockResult AMyCharacter::TryBlockHit(const FVector& ImpactPoint, float Incomin
 			Result.bParried = true;
 			Result.DamageAfterBlock = 0.f;
 			Result.bPlayNormalHitReact = false;
-			if (EquippedShield->ParrySound)
+			if (EquippedShield->GetParrySound())
 			{
-				UGameplayStatics::PlaySoundAtLocation(this, EquippedShield->ParrySound, ImpactPoint);
+				UGameplayStatics::PlaySoundAtLocation(this, EquippedShield->GetParrySound(), ImpactPoint);
 			}
-			if (EquippedShield->ParryParticle)
+			if (EquippedShield->GetParryParticle())
 			{
-				UNiagaraFunctionLibrary::SpawnSystemAtLocation(this, EquippedShield->ParryParticle, ImpactPoint);
+				UNiagaraFunctionLibrary::SpawnSystemAtLocation(this, EquippedShield->GetParryParticle(), ImpactPoint);
 			}
 			return Result;
 		}
@@ -536,26 +536,26 @@ FBlockResult AMyCharacter::TryBlockHit(const FVector& ImpactPoint, float Incomin
 
 	FVector ToAttacker = (DirSrc->GetActorLocation() - GetActorLocation()).GetSafeNormal2D();
 	float Dot = CalcForwardDot2D(ToAttacker);
-	float CosHalf = FMath::Cos(FMath::DegreesToRadians(EquippedShield->BlockHalfAngleDegrees));
+	float CosHalf = FMath::Cos(FMath::DegreesToRadians(EquippedShield->GetBlockHalfAngleDegrees()));
 	if (Dot < CosHalf) return Result;
 
-	float StaminaCost = IncomingDamage * EquippedShield->BlockStaminaCostPerDamage;
+	float StaminaCost = IncomingDamage * EquippedShield->GetBlockStaminaCostPerDamage();
 	if (Attributes->GetCurrentStamina() < StaminaCost) return Result;
 
 	Attributes->UseStamina(StaminaCost);
 	Result.bBlocked = true;
-	Result.DamageAfterBlock = IncomingDamage * EquippedShield->BlockedDamageMultiplier;
+	Result.DamageAfterBlock = IncomingDamage * EquippedShield->GetBlockedDamageMultiplier();
 	Result.bPlayNormalHitReact = false;
-	LastDamageFlashScale = EquippedShield->BlockedDamageMultiplier;  // 染红按减伤率缩放
+	LastDamageFlashScale = EquippedShield->GetBlockedDamageMultiplier();  // 染红按减伤率缩放
 
 	// 格挡反馈
-	if (EquippedShield->BlockSound)
+	if (EquippedShield->GetBlockSound())
 	{
-		UGameplayStatics::PlaySoundAtLocation(this, EquippedShield->BlockSound, ImpactPoint);
+		UGameplayStatics::PlaySoundAtLocation(this, EquippedShield->GetBlockSound(), ImpactPoint);
 	}
-	if (EquippedShield->BlockParticle)
+	if (EquippedShield->GetBlockParticle())
 	{
-		UNiagaraFunctionLibrary::SpawnSystemAtLocation(this, EquippedShield->BlockParticle, ImpactPoint);
+		UNiagaraFunctionLibrary::SpawnSystemAtLocation(this, EquippedShield->GetBlockParticle(), ImpactPoint);
 	}
 	return Result;
 }
@@ -579,7 +579,7 @@ void AMyCharacter::Input_Parry()
 	// 先确认蒙太奇可播放，再扣体力和进入状态（防止卡在 EAS_Parrying）
 	if (!ParryMontage || !GetMesh() || !GetMesh()->GetAnimInstance()) return;
 
-	Attributes->UseStamina(EquippedShield->ParryStaminaCost);
+	Attributes->UseStamina(EquippedShield->GetParryStaminaCost());
 	Attributes->ResetStaminaRegenCooldown();
 
 	bIsParrying = true;
@@ -610,7 +610,7 @@ void AMyCharacter::SetAttackHyperArmor(bool bHyperArmor)
 
 void AMyCharacter::StartParryCooldown()
 {
-	const float Cooldown = EquippedShield ? EquippedShield->ParryCooldown : 0.4f;
+	const float Cooldown = EquippedShield ? EquippedShield->GetParryCooldown() : 0.4f;
 	if (Cooldown <= 0.f)
 	{
 		bParryOnCooldown = false;
@@ -787,7 +787,7 @@ void AMyCharacter::Equip()
 		{
 			if (!EquippedShield)
 			{
-				Shield->EquipToOffhand(GetMesh(), Shield->OffhandSocketName, this);
+				Shield->EquipToOffhand(GetMesh(), Shield->GetOffhandSocketName(), this);
 				EquippedShield = Shield;
 			}
 			return;
@@ -951,7 +951,7 @@ void AMyCharacter::UpdateMovementSpeed()
 	FVector Velocity = GetVelocity();
 	Velocity.Z = 0.f;
 
-	float SpeedMultiplier = (bIsBlocking && EquippedShield) ? EquippedShield->BlockMoveSpeedMultiplier : 1.0f;
+	float SpeedMultiplier = (bIsBlocking && EquippedShield) ? EquippedShield->GetBlockMoveSpeedMultiplier() : 1.0f;
 
 	if (!Velocity.IsNearlyZero())
 	{

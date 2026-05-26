@@ -25,10 +25,7 @@ public:
 	// 武器碰撞检测
 	void StartWeaponTrace();  // 开始检测：重置旧位置
 	void ExecuteWeaponTrace(); // 执行检测：每帧调用
-
-	// 防重复受击黑名单
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat", meta = (ToolTip = "本次攻击已命中的 Actor 黑名单，防止重复受击。"))
-	TArray<AActor*> IgnoreActors;
+	void ClearIgnoreActors() { IgnoreActors.Empty(); }  // 清空黑名单（受控接口）
 
 	// 命中解析结果（内部用）
 	struct FWeaponHitResult
@@ -79,6 +76,10 @@ private:
 	/* 碰撞检测（在蓝图中调整：X轴=武器长度，Y轴=武器宽度，Z轴=武器厚度） */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Equip", meta = (AllowPrivateAccess = "true", ToolTip = "武器碰撞检测盒体，X=长度 Y=宽度 Z=厚度。"))
 	UBoxComponent* BoxTrace;
+
+	// 防重复受击黑名单
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat", meta = (AllowPrivateAccess = "true", ToolTip = "本次攻击已命中的 Actor 黑名单，防止重复受击。"))
+	TArray<AActor*> IgnoreActors;
 
 	// 用于保存上一帧的位置/旋转，防止极高速穿模（扫面检测所需）
 	FVector TraceCenterOld;

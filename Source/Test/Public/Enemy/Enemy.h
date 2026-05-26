@@ -58,25 +58,14 @@ public:
 	void ApplyStanceBreak(float Duration, float PlayRate);
 
 	/* 韧性系统 */
-	UPROPERTY(EditAnywhere, Category = "Combat|Poise", meta = (ToolTip = "最大韧性值。"))
-	float MaxPoise = 10.f;
-
-	UPROPERTY(VisibleInstanceOnly, Category = "Combat|Poise", meta = (ToolTip = "当前韧性值。"))
-	float CurrentPoise = 10.f;
-
-	UPROPERTY(EditAnywhere, Category = "Combat|Poise", meta = (ToolTip = "未受击多久后重置韧性（秒）。"))
-	float PoiseResetDelay = 5.f;
-
-	UPROPERTY(EditAnywhere, Category = "Combat|Poise", meta = (ToolTip = "破防硬直时长（秒）。"))
-	float StanceBreakDuration = 2.f;
-
-	UPROPERTY(EditAnywhere, Category = "Combat|Poise", meta = (ToolTip = "破防慢放速率（0.3 = 30%速度）。"))
-	float StanceBreakPlayRate = 0.3f;
-
 	void ApplyPoiseDamage(float Damage, AActor* DamageInstigator);
 	void ResetPoise();
 	bool ShouldTriggerStanceBreak() const { return bPendingStanceBreak; }
-	float GetCurrentPoise() const { return CurrentPoise; }
+
+	FORCEINLINE float GetMaxPoise() const { return MaxPoise; }
+	FORCEINLINE float GetCurrentPoise() const { return CurrentPoise; }
+	FORCEINLINE float GetStanceBreakDuration() const { return StanceBreakDuration; }
+	FORCEINLINE float GetStanceBreakPlayRate() const { return StanceBreakPlayRate; }
 
 	/* 锁定联动 */
 	void SetTargetedByPlayer(bool bTargeted);
@@ -339,6 +328,23 @@ private:
 	bool bIsTargetedByPlayer = false; // 被玩家锁定中
 	bool bPendingStanceBreak = false; // 韧性归零flag，等待GetHit后触发
 	AActor* LastPoiseDamageInstigator = nullptr; // 最后一次韧性伤害的攻击者
+
+	/* 韧性系统 */
+	UPROPERTY(EditAnywhere, Category = "Combat|Poise", meta = (AllowPrivateAccess = "true", ToolTip = "最大韧性值。"))
+	float MaxPoise = 10.f;
+
+	UPROPERTY(VisibleInstanceOnly, Category = "Combat|Poise", meta = (AllowPrivateAccess = "true", ToolTip = "当前韧性值。"))
+	float CurrentPoise = 10.f;
+
+	UPROPERTY(EditAnywhere, Category = "Combat|Poise", meta = (AllowPrivateAccess = "true", ToolTip = "未受击多久后重置韧性（秒）。"))
+	float PoiseResetDelay = 5.f;
+
+	UPROPERTY(EditAnywhere, Category = "Combat|Poise", meta = (AllowPrivateAccess = "true", ToolTip = "破防硬直时长（秒）。"))
+	float StanceBreakDuration = 2.f;
+
+	UPROPERTY(EditAnywhere, Category = "Combat|Poise", meta = (AllowPrivateAccess = "true", ToolTip = "破防慢放速率（0.3 = 30%速度）。"))
+	float StanceBreakPlayRate = 0.3f;
+
 	void RecoverFromStanceBreak(); // 破防硬直恢复回调
 	void ClearPatrolTimers(); // 清理巡逻相关定时器
 	void ClearAllTimers(); // 清理所有定时器（巡逻 + 冷却 + 血条 + 弹反）

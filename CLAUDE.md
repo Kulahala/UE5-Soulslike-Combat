@@ -455,6 +455,14 @@ UDataAsset → UComboDataAsset (combo chain: SectionName, DamageMultiplier, Stam
 - UMG 子控件用 `UPROPERTY(meta = (BindWidget))`；蓝图钩子用 `BlueprintImplementableEvent`。
 - 不做全局 `TObjectPtr` 迁移。跟随文件风格：本项目大多用裸指针，`TObjectPtr` 仅少数位置（如 `AArenaGenerator`）。
 
+### Encapsulation (封装性)
+- **配置参数**：`EditAnywhere` + `private` + `meta = (AllowPrivateAccess = "true")` + `FORCEINLINE` getter。编辑器可见可编辑，代码只读访问。
+- **运行时状态**：`VisibleInstanceOnly` + `private` + `meta = (AllowPrivateAccess = "true")` + getter。编辑器只读，代码通过 getter 访问。
+- **Protected vs Private**：子类需要访问的成员（如 `PendingHitContext`、`ConsumePendingHitKnockback()`）保持 `protected`；纯内部实现细节（如 `bKnockbackActive`、`KnockbackDirection`）用 `private`。
+- **受控接口**：容器类成员（`TArray`、`TMap`）用 `private` + 受控方法（如 `ClearIgnoreActors()`），防止外部直接 `Empty()`/`Add()` 绕过逻辑。
+- **零开销 Getter**：所有 getter 用 `FORCEINLINE`，编译器内联展开，性能等同于直接访问。
+- 实例：`AEnemy` 韧性系统、`AShield` 所有参数、`AWeapon::IgnoreActors`、`ABaseCharacter` 击退状态。
+
 ### Naming
 | Type | Convention | Example |
 |------|-----------|---------|

@@ -33,11 +33,11 @@ struct FSpecialAttackConfig
 
 	// 伤害倍率
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Damage", meta = (ClampMin = "0.1", ClampMax = "10.0", ToolTip = "伤害倍率（相对武器基础伤害）"))
-	float DamageMultiplier = 1.0f;
+	float DamageMultiplier = 1.8f;
 
 	// 韧性伤害倍率
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Poise", meta = (ClampMin = "0.1", ClampMax = "10.0", ToolTip = "韧性伤害倍率（相对武器基础韧性伤害）"))
-	float PoiseDamageMultiplier = 1.0f;
+	float PoiseDamageMultiplier = 2.0f;
 
 	// 体力消耗
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Stamina", meta = (ClampMin = "1.0", ToolTip = "体力消耗"))
