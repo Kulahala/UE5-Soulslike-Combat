@@ -25,8 +25,8 @@ All gameplay states are defined as `UENUM` enums in `CharacterTypes.h`. This is 
 | Enum | States | Used By |
 |------|--------|---------|
 | `EWeaponState` | Unequipped, OneHandEquipped, TwoHandEquipped | `AMyCharacter`, `USlashAnimInstance` |
-| `EActionState` | UnOccupied, Attacking, Stunning, Exhausted, Parrying, Dodging, Dead | `AMyCharacter` |
-| `EEnemyState` | UnOccupied, Patrolling, Searching, Chasing, Combating, Attacking, Stunned, Parried, Dead | `AEnemy` |
+| `EActionState` | UnOccupied, Attacking, Stunning, Exhausted, Parrying, Dodging, UsingPotion, Dead | `AMyCharacter` |
+| `EEnemyState` | UnOccupied, Patrolling, Searching, Chasing, Combating, Attacking, Stunned, StanceBreak, Dead | `AEnemy` |
 
 **State transition pattern**: Mixed C++ + AnimNotify driven. Entry states are set directly in C++ (`Attack()`, `GetHit_Implementation()`, `Die()`). Recovery transitions use `FOnMontageEnded` delegates with `bInterrupted` guards as primary path. `UAnimNotify_CharacterHitReactEnd` is the exception — used for player hit react recovery so designers can tune stun duration in the animation editor. Enemy recovery has double coverage (delegate + AnimNotify with state guards).
 
@@ -57,7 +57,7 @@ UAnimInstance → USlashAnimInstance (exposes GroundSpeed, Direction, bIsBlockin
 UAnimNotifyState → UAnimNotifyState_ParryActive (marks parry active window in animation)
 UAnimNotifyState → UAnimNotifyState_ComboWindow (marks combo input window in animation)
 UDataAsset → UTreasureData (static mesh, gold value, pickup sound, scale)
-UDataAsset → UComboDataAsset (combo chain: SectionName, DamageMultiplier, StaminaCost per segment)
+UDataAsset → UComboDataAsset (combo chain: SectionName, DamageMultiplier, StaminaCost, PoiseDamageMultiplier per segment)
 ```
 
 ### Combat Pipeline
@@ -70,12 +70,15 @@ UDataAsset → UComboDataAsset (combo chain: SectionName, DamageMultiplier, Stam
 7. **NotifyTick** → `AWeapon::ExecuteWeaponTrace()` (sweeps from old→new center to prevent ghost swings)
 8. On hit:
    - 同阵营命中：不 `ApplyDamage`，但仍走 `GetHit` 路径（击退、命中反馈、相机晃动）。同阵营判定通过 `FCombatTeamHelper::ShareTeamTag()`（Weapon + Enemy 共用）
-   - 跨阵营命中：`IBlockableInterface::TryBlockHit()` 在 `ApplyDamage` 前拦截；格挡成功：减伤 + 跳过硬直；弹反成功：对攻击方调用 `ApplyParried()` 硬直
+   - 跨阵营命中：`IBlockableInterface::TryBlockHit()` 在 `ApplyDamage` 前拦截；格挡成功：减伤 + 跳过硬直；弹反成功：瞬间清空攻击方韧性触发破防
    - `ExecuteWeaponTrace()` 通过 `FPendingHitContext` 写入每命中的上下文（instigator、knockback scale、blocked flag、stun flag），然后调用 `GetHit()`
    - `ABaseCharacter::GetHit_Implementation()` 消费 context 驱动击退/受击反应，子类（`AMyCharacter`、`AEnemy`）在各自硬直逻辑后清空 context
    - `ExecuteWeaponTrace()` 分解为 `BuildIgnoreList()`、`ResolveHit()`、`DispatchHitFeedback()` 三步，不要膨胀为通用战斗管线
-   - 弹反分支：`DispatchHitFeedback()` 在 `GetHit()` 之前先对攻击方调用 `ApplyParried()`，确保敌人先进入 `EES_Parried` 状态
+   - **韧性伤害应用**：`DispatchHitFeedback()` 在 `GetHit()` 之前对敌人应用韧性伤害（`Enemy->ApplyPoiseDamage(Attacker->GetCurrentPoiseDamage(), Attacker)`），韧性归零时设置 `bPendingStanceBreak` flag
+   - **弹反分支**：弹反成功时对攻击方敌人调用 `ApplyPoiseDamage(GetCurrentPoise())`（瞬间清空韧性），然后在 `GetHit()` 之后检查 `ShouldTriggerStanceBreak()` 触发破防
+   - **破防触发**：`GetHit()` 之后检查 `bPendingStanceBreak` flag，弹反路径对攻击方（`GetOwner()`）触发，普通命中对受击方（`HitActor`）触发
    - **Damage Multiplier**: `ResolveHit()` 在格挡判定前应用 `BaseCharacter->GetAttackDamageMultiplier()`，确保格挡体力消耗基于实际打击伤害
+   - **Poise Damage Multiplier**: 连招系统同时计算 `CurrentPoiseDamage = BasePoiseDamage × PoiseDamageMultiplier`，冲刺攻击使用独立倍率
 9. HitStop + CameraShake（所有命中都触发）
 10. **NotifyEnd** → clears `IgnoreActors` blacklist + `SetAttackHyperArmor(false)` (player only)
 11. **Combo Window**: `AnimNotifyState_ComboWindow` marks combo input window, `Input_Attack()` sets `bComboInputReceived` during window
@@ -228,8 +231,50 @@ UDataAsset → UComboDataAsset (combo chain: SectionName, DamageMultiplier, Stam
 - 调参时同步更新 C++ 默认值（`AShield::BlockedDamageMultiplier`）和蓝图覆盖值。
 - 防御移速：`UpdateMovementSpeed()` 中 `SpeedMultiplier` 优先判断 `bIsBlocking` → `Shield->BlockMoveSpeedMultiplier`(默认1.0)，覆盖方向缩放。
 
+### Poise & Stance Break System (韧性与破防系统)
+- **架构**：Dark Souls 风格的隐藏韧性条系统，统一弹反和韧性破防到 `EES_StanceBreak` 状态。
+- **韧性机制**：
+  - 敌人持有隐藏韧性条（`MaxPoise` 默认 10，`CurrentPoise` 运行时值）
+  - 每次受击扣除韧性伤害（`BasePoiseDamage × PoiseDamageMultiplier`）
+  - 韧性归零触发破防硬直（`EES_StanceBreak`）
+  - 未受击 `PoiseResetDelay` 秒后自动恢复满韧性（默认 5 秒）
+- **伤害计算**：
+  - 武器基础韧性伤害：`AWeapon::BasePoiseDamage`（默认 1.0，EditAnywhere 可调）
+  - 连招倍率：`UComboDataAsset::PoiseDamageMultiplier`（第 1 段 1.0x，第 2 段 1.5x，第 3 段 2.0x）
+  - 冲刺攻击倍率：`AMyCharacter::SprintAttackPoiseDamageMultiplier`（默认 2.0x）
+  - 最终韧性伤害：`CurrentPoiseDamage = BasePoiseDamage × Multiplier`
+- **破防触发**：
+  - **延迟触发机制**：`ApplyPoiseDamage()` 韧性归零时设置 `bPendingStanceBreak` flag，不立即触发破防
+  - **触发时机**：`DispatchHitFeedback()` 在 `GetHit()` 之后检查 flag，避免 `EES_StanceBreak` 被 `EES_Stunned` 覆盖
+  - **弹反路径**：弹反成功时调用 `ApplyPoiseDamage(GetCurrentPoise())`（瞬间清空韧性），对攻击方敌人（`GetOwner()`）触发破防
+  - **普通路径**：普通命中累积韧性伤害，对受击方敌人（`HitActor`）触发破防
+- **破防效果**：
+  - 停止当前蒙太奇（`Montage_Stop(0.05f)`）
+  - 设置 `EES_StanceBreak` 状态（硬停状态，Tick 早退）
+  - 播放方向性受击反应（`DirectionalHitReact`，方向来自 `LastPoiseDamageInstigator`）
+  - 慢放蒙太奇（`PlayRate`，使用敌人自己的参数，默认 0.3x）
+  - 启动恢复计时器（`Duration`，使用敌人自己的参数，默认 2.0s）
+  - 立即重置韧性到满值（`ResetPoise()`）
+- **参数来源**：
+  - **统一使用敌人参数**：弹反和普通韧性破防都使用 `Enemy->StanceBreakDuration/PlayRate`
+  - 不同敌人类型可以有不同的破防特性（如重甲敌人破防时间更短）
+  - 盾牌只负责弹反触发条件（体力消耗、冷却、音效粒子），不影响破防效果
+- **恢复逻辑**：`RecoverFromStanceBreak()` 带状态守卫（`if (EnemyState != EES_StanceBreak) return`），恢复蒙太奇速率到 1.0，委托 `CheckCombatTarget()` 统一判定下一状态
+- **连续破防覆盖**：`ApplyStanceBreak()` 开头先清旧计时器 + 恢复旧蒙太奇速率，防止状态泄漏
+- **方向追踪**：`ApplyPoiseDamage()` 记录 `LastPoiseDamageInstigator`，`ApplyStanceBreak()` 使用此值调用 `DirectionalHitReact()`
+- **AI 状态机集成**：`EES_StanceBreak` 是硬停状态，`CheckCombatTarget()` 和 `Tick()` 中早退。`SetEnemyState()` 进入 `EES_StanceBreak` 时清除 `bRepositionInProgress`
+- **调试显示**：敌人头顶显示 "BREAK" + 韧性值（`Poise: 7.5/10.0`）
+- **文件位置**：
+  - `CharacterTypes.h:28` — `EES_StanceBreak` 枚举
+  - `ComboDataAsset.h:15` — `PoiseDamageMultiplier` 字段
+  - `Enemy.h:62-79` — 韧性系统成员和方法
+  - `Enemy.cpp:223-311` — 韧性系统实现
+  - `Weapon.h:77-78` — `BasePoiseDamage` + getter
+  - `Weapon.cpp:183-235` — 韧性伤害应用和破防触发
+  - `BaseCharacter.h:89` — `CurrentPoiseDamage` + getter
+
 ### Parry System (弹反系统)
-- **架构**：基于盾牌的主动防御机制，独立于格挡系统。弹反成功时对攻击方施加硬直，而非减伤。
+- **架构**：基于盾牌的主动防御机制，独立于格挡系统。弹反成功时瞬间清空攻击方韧性触发破防，而非直接施加硬直。
 - **玩家输入**：`ACharacterController::Input_Parry()` 绑定独立按键（非格挡键），调用 `AMyCharacter::Input_Parry()`。
 - **前置条件**：`CanStartParry()` 检查：有盾 + `EAS_UnOccupied` + 地面 + 非冷却 + 体力足够（`Shield->ParryStaminaCost`）。
 - **状态管理**：
@@ -240,31 +285,22 @@ UDataAsset → UComboDataAsset (combo chain: SectionName, DamageMultiplier, Stam
 - **判定流程**：
   1. 敌人攻击命中玩家 → `Weapon::ResolveHit()` 调用 `TryBlockHit()`
   2. `AMyCharacter::TryBlockHit()` 检查 `bParryActive` + 方向（复用格挡角度 `BlockHalfAngleDegrees`）
-  3. 弹反成功：扣除 `ParryStaminaCost`，返回 `FBlockResult` 设置 `bParried=true` + `ParryStaggerDuration` + `ParryStaggerPlayRate`
-  4. `Weapon::DispatchHitFeedback()` 检测 `Result.bParried` → 对攻击方（`GetOwner()`）调用 `AEnemy::ApplyParried()`
-- **敌人硬直**：`AEnemy::ApplyParried(Duration, PlayRate, ParryInstigator)` 执行：
-  - 清除旧弹反计时器（支持连续弹反覆盖）
-  - 停止当前攻击蒙太奇（`Montage_Stop(0.05f)`，NotifyEnd 自动清 `IgnoreActors`）
-  - 设置 `EES_Parried` 状态
-  - 播放方向性受击反应（`DirectionalHitReact`）
-  - 设置蒙太奇播放速率为 `PlayRate`（默认 0.5 = 半速慢放）
-  - 启动恢复计时器 `ParryRecoveryTimer`（`Duration` 秒后调用 `RecoverFromParry()`）
-- **恢复逻辑**：`RecoverFromParry()` 带状态守卫（`if (EnemyState != EES_Parried) return`），恢复蒙太奇速率到 1.0，切换到 `EES_Combating`，重置攻击冷却。
+  3. 弹反成功：扣除 `ParryStaminaCost`，返回 `FBlockResult` 设置 `bParried=true`
+  4. `Weapon::DispatchHitFeedback()` 检测 `Result.bParried` → 对攻击方（`GetOwner()`）调用 `ApplyPoiseDamage(GetCurrentPoise())`（瞬间清空韧性）
+  5. `GetHit()` 之后检查 `ShouldTriggerStanceBreak()` → 对攻击方调用 `ApplyStanceBreak(Enemy->StanceBreakDuration, Enemy->StanceBreakPlayRate)`（使用敌人自己的参数）
+- **破防效果**：攻击方敌人进入 `EES_StanceBreak` 状态，播放方向性受击反应（朝向玩家），慢放蒙太奇（使用敌人参数，默认 0.3x），持续时间由敌人参数决定（默认 2.0s）
 - **玩家恢复**：`OnParryMontageEnded()` 带 `bInterrupted` 守卫，恢复 `EAS_UnOccupied`，清除 `bIsParrying` + `bParryActive`，启动冷却计时器。
 - **中断处理**：`InterruptParry()` 用于死亡/体力耗尽，停止蒙太奇，清除所有弹反状态（`ClearParryState()`）。
 - **冷却机制**：`StartParryCooldown()` 启动 `ParryCooldownTimer`（`Shield->ParryCooldown` 秒，默认 0.4s），到期调用 `ResetParryCooldown()` 清除 `bParryOnCooldown`。
 - **盾牌参数**（`AShield`）：
   - `ParryStaminaCost` (15.f) — 体力消耗，按下时即扣除，不论成功/失误
-  - `ParryStaggerDuration` (1.5f) — 被弹反方的硬直时长（秒）
-  - `ParryStaggerPlayRate` (0.5f) — 被弹反方硬直蒙太奇播放速率（0.5 = 半速）
   - `ParryCooldown` (0.4f) — 弹反后隐形冷却时间（秒），防止连续点按
   - `ParrySound` / `ParryParticle` — 弹反成功音效/粒子特效
 - **与格挡的区别**：
   - 格挡：按住，减伤，消耗体力按伤害比例，可自动恢复
-  - 弹反：单次按键，固定体力消耗，激活窗口判定，成功时对攻击方硬直而非减伤
-- **战斗管线集成**：`FBlockResult` 和 `FWeaponHitResult` 新增弹反字段（`bParried`、`ParryStaggerDuration`、`ParryStaggerPlayRate`），`ResolveHit()` 和 `DispatchHitFeedback()` 分离判定和执行。
-- **AI 状态机集成**：`EES_Parried` 是硬停状态，`CheckCombatTarget()` 和 `Tick()` 中早退。`SetEnemyState()` 进入 `EES_Parried` 时清除 `bRepositionInProgress`。
-- **连续弹反覆盖**：`ApplyParried()` 开头先清旧计时器 + 恢复旧蒙太奇速率，防止状态泄漏。
+  - 弹反：单次按键，固定体力消耗，激活窗口判定，成功时瞬间清空攻击方韧性触发破防
+- **战斗管线集成**：`FBlockResult` 只保留 `bParried` 标志，破防参数统一从敌人获取。`ResolveHit()` 和 `DispatchHitFeedback()` 分离判定和执行。
+- **AI 状态机集成**：弹反触发的破防与普通韧性破防使用相同的 `EES_StanceBreak` 状态和恢复逻辑。
 - **蓝图待办**：创建 `IA_Parry` 输入资产绑定弹反键；在弹反蒙太奇中添加 `UAnimNotifyState_ParryActive` 标记激活窗口。
 
 ### Pause Menu System (`ACharacterController` + `UPauseMenuWidget`)

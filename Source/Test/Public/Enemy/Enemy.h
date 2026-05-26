@@ -55,7 +55,28 @@ public:
 	virtual void OnHitReactMontageEnded(UAnimMontage* Montage, bool bInterrupted) override;
 
 	/* 弹反 */
-	void ApplyParried(float Duration, float PlayRate, AActor* ParryInstigator);
+	void ApplyStanceBreak(float Duration, float PlayRate);
+
+	/* 韧性系统 */
+	UPROPERTY(EditAnywhere, Category = "Combat|Poise", meta = (ToolTip = "最大韧性值。"))
+	float MaxPoise = 10.f;
+
+	UPROPERTY(VisibleInstanceOnly, Category = "Combat|Poise", meta = (ToolTip = "当前韧性值。"))
+	float CurrentPoise = 10.f;
+
+	UPROPERTY(EditAnywhere, Category = "Combat|Poise", meta = (ToolTip = "未受击多久后重置韧性（秒）。"))
+	float PoiseResetDelay = 5.f;
+
+	UPROPERTY(EditAnywhere, Category = "Combat|Poise", meta = (ToolTip = "破防硬直时长（秒）。"))
+	float StanceBreakDuration = 2.f;
+
+	UPROPERTY(EditAnywhere, Category = "Combat|Poise", meta = (ToolTip = "破防慢放速率（0.3 = 30%速度）。"))
+	float StanceBreakPlayRate = 0.3f;
+
+	void ApplyPoiseDamage(float Damage, AActor* DamageInstigator);
+	void ResetPoise();
+	bool ShouldTriggerStanceBreak() const { return bPendingStanceBreak; }
+	float GetCurrentPoise() const { return CurrentPoise; }
 
 	/* 锁定联动 */
 	void SetTargetedByPlayer(bool bTargeted);
@@ -312,10 +333,13 @@ private:
 	FTimerHandle LookTimer; // 张望定时器
 	FTimerHandle AttackCooldownTimer; // 攻击冷却定时器
 	FTimerHandle HealthBarHideTimer; // 血条延迟隐藏定时器
-	FTimerHandle ParryRecoveryTimer; // 弹反硬直恢复定时器
+	FTimerHandle PoiseResetTimer; // 韧性重置定时器
+	FTimerHandle StanceBreakRecoveryTimer; // 破防硬直恢复定时器
 	bool bAttackOnCooldown = false; // 攻击冷却中
 	bool bIsTargetedByPlayer = false; // 被玩家锁定中
-	void RecoverFromParry(); // 弹反硬直恢复回调
+	bool bPendingStanceBreak = false; // 韧性归零flag，等待GetHit后触发
+	AActor* LastPoiseDamageInstigator = nullptr; // 最后一次韧性伤害的攻击者
+	void RecoverFromStanceBreak(); // 破防硬直恢复回调
 	void ClearPatrolTimers(); // 清理巡逻相关定时器
 	void ClearAllTimers(); // 清理所有定时器（巡逻 + 冷却 + 血条 + 弹反）
 };

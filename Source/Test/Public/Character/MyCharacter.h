@@ -257,6 +257,9 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category = "Combat|Sprint Attack", meta = (AllowPrivateAccess = "true", ToolTip = "冲刺攻击体力消耗。"))
 	float SprintAttackStaminaCost = 25.f;
 
+	UPROPERTY(EditDefaultsOnly, Category = "Combat|Sprint Attack", meta = (AllowPrivateAccess = "true", ToolTip = "冲刺攻击韧性伤害倍率（相对武器基础韧性伤害）。"))
+	float SprintAttackPoiseDamageMultiplier = 2.f;
+
 	/* 听觉感知 */
 	FTimerHandle MovementNoiseTimerHandle;
 	void EmitMovementNoise();

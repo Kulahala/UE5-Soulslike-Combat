@@ -136,8 +136,12 @@ void AMyCharacter::PerformSprintAttack()
 		Attributes->PauseStaminaRegen();
 	}
 
-	// 3. 设置伤害倍率
+	// 3. 设置伤害倍率和韧性伤害
 	SetAttackDamageMultiplier(SprintAttackDamageMultiplier);
+	if (EquippedWeapon)
+	{
+		CurrentPoiseDamage = EquippedWeapon->GetBasePoiseDamage() * SprintAttackPoiseDamageMultiplier;
+	}
 
 	// 4. 对齐攻击方向
 	FVector AttackDir = GetLastMovementInputVector().GetSafeNormal2D();
@@ -205,8 +209,12 @@ void AMyCharacter::Attack()
 	// 体力检查（支持透支）
 	Attributes->UseStamina(Segment->StaminaCost);
 
-	// 设置伤害倍率
+	// 设置伤害倍率和韧性伤害
 	SetAttackDamageMultiplier(Segment->DamageMultiplier);
+	if (EquippedWeapon)
+	{
+		CurrentPoiseDamage = EquippedWeapon->GetBasePoiseDamage() * Segment->PoiseDamageMultiplier;
+	}
 
 	// 暂停体力恢复 + 设置状态（保持原有顺序）
 	Attributes->PauseStaminaRegen();
@@ -256,6 +264,7 @@ void AMyCharacter::ResetCombo()
 	bComboWindowOpen = false;
 	bComboInputReceived = false;
 	SetAttackDamageMultiplier(1.0f);
+	CurrentPoiseDamage = EquippedWeapon ? EquippedWeapon->GetBasePoiseDamage() : 1.f;
 
 	UE_LOG(LogTemp, Log, TEXT("Combo reset"));
 }
@@ -488,13 +497,11 @@ FBlockResult AMyCharacter::TryBlockHit(const FVector& ImpactPoint, float Incomin
 				if (Dot < CosHalf) return Result; // 角度不匹配，弹反失败
 			}
 
-			// 弹反成功！完全免伤 + 攻击方硬直
+			// 弹反成功！完全免伤 + 攻击方韧性清空
 			Result.bBlocked = true;
 			Result.bParried = true;
 			Result.DamageAfterBlock = 0.f;
 			Result.bPlayNormalHitReact = false;
-			Result.ParryStaggerDuration = EquippedShield->ParryStaggerDuration;
-			Result.ParryStaggerPlayRate = EquippedShield->ParryStaggerPlayRate;
 			if (EquippedShield->ParrySound)
 			{
 				UGameplayStatics::PlaySoundAtLocation(this, EquippedShield->ParrySound, ImpactPoint);

@@ -29,6 +29,6 @@ enum class EEnemyState : uint8 {
 	EES_Attacking UMETA(DisplayName = "Attacking"),   // 攻击硬直
 	EES_Combating UMETA(DisplayName = "Combating"),	  // 战斗中
 	EES_Stunned UMETA(DisplayName = "Stunned"),       // 受击硬直
-	EES_Parried UMETA(DisplayName = "Parried"),       // 被弹反硬直
+	EES_StanceBreak UMETA(DisplayName = "StanceBreak"), // 韧性破防硬直
 	EES_Dead UMETA(DisplayName = "Dead")              // 已死亡
 };

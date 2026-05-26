@@ -54,14 +54,6 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Parry", meta = (ClampMin = "0.0", ToolTip = "弹反的体力消耗。不论成功或失误都扣除。"))
 	float ParryStaminaCost = 15.f;
 
-	// 被弹反方的硬直时长（秒）
-	UPROPERTY(EditAnywhere, Category = "Parry", meta = (ClampMin = "0.1", ToolTip = "弹反成功时攻击方的硬直时长（秒）。"))
-	float ParryStaggerDuration = 1.5f;
-
-	// 被弹反方硬直蒙太奇的播放速率
-	UPROPERTY(EditAnywhere, Category = "Parry", meta = (ClampMin = "0.1", ToolTip = "被弹反方硬直播放速率。0.5=半速。"))
-	float ParryStaggerPlayRate = 0.5f;
-
 	// 弹反后隐形冷却时间（秒），防止连续点按
 	UPROPERTY(EditAnywhere, Category = "Parry", meta = (ClampMin = "0.0", ToolTip = "弹反后的隐形冷却时间（秒）。弹反动画结束到下一次可弹反的最短间隔。"))
 	float ParryCooldown = 0.4f;

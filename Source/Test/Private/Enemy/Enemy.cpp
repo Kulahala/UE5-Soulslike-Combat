@@ -101,6 +101,9 @@ void AEnemy::BeginPlay()
 	Super::BeginPlay();
 	Tags.Add(FName("Enemy"));
 
+	// 韧性初始化
+	CurrentPoise = MaxPoise;
+
 	// 血条
 	if (HealthBarWidgetComp)
 	{
@@ -182,6 +185,8 @@ float AEnemy::TakeDamage(float DamageAmount, const struct FDamageEvent& DamageEv
 void AEnemy::Die()
 {
 	ClearAllTimers();
+	bPendingStanceBreak = false;
+	LastPoiseDamageInstigator = nullptr;
 
 	StopEnemyMovementIfPossible();
 
@@ -215,12 +220,31 @@ void AEnemy::Die()
 	SetLifeSpan(CorpseLifespan);
 }
 
-// ==================== 弹反 ====================
+// ==================== 韧性系统 ====================
 
-void AEnemy::ApplyParried(float Duration, float PlayRate, AActor* ParryInstigator)
+void AEnemy::ApplyPoiseDamage(float Damage, AActor* DamageInstigator)
 {
-	// 连续弹反覆盖：先清旧 timer 和恢复速率
-	GetWorldTimerManager().ClearTimer(ParryRecoveryTimer);
+	if (EnemyState == EEnemyState::EES_Dead || EnemyState == EEnemyState::EES_StanceBreak) return;
+
+	CurrentPoise = FMath::Max(0.f, CurrentPoise - Damage);
+	LastPoiseDamageInstigator = DamageInstigator;
+
+	GetWorldTimerManager().ClearTimer(PoiseResetTimer);
+
+	if (CurrentPoise <= 0.f)
+	{
+		bPendingStanceBreak = true;
+	}
+	else
+	{
+		GetWorldTimerManager().SetTimer(PoiseResetTimer, this, &AEnemy::ResetPoise, PoiseResetDelay, false);
+	}
+}
+
+void AEnemy::ApplyStanceBreak(float Duration, float PlayRate)
+{
+	// 连续破防覆盖：先清旧 timer 和恢复速率
+	GetWorldTimerManager().ClearTimer(StanceBreakRecoveryTimer);
 	if (UAnimInstance* Anim = GetMesh()->GetAnimInstance())
 	{
 		if (UAnimMontage* ActiveMontage = Anim->GetCurrentActiveMontage())
@@ -229,14 +253,21 @@ void AEnemy::ApplyParried(float Duration, float PlayRate, AActor* ParryInstigato
 		}
 	}
 
-	// 停止攻击蒙太奇（NotifyEnd 自动清 IgnoreActors 黑名单）
+	// 停止当前蒙太奇（NotifyEnd 自动清 IgnoreActors 黑名单）
 	if (UAnimInstance* AnimForStop = GetMesh()->GetAnimInstance())
 	{
 		AnimForStop->Montage_Stop(0.05f);
 	}
 
-	SetEnemyState(EEnemyState::EES_Parried);
-	DirectionalHitReact(GetActorLocation(), ParryInstigator);
+	SetEnemyState(EEnemyState::EES_StanceBreak);
+
+	// 从 LastPoiseDamageInstigator 获取方向
+	if (LastPoiseDamageInstigator)
+	{
+		DirectionalHitReact(GetActorLocation(), LastPoiseDamageInstigator);
+	}
+
+	// 设置慢放
 	if (UAnimInstance* Anim = GetMesh()->GetAnimInstance())
 	{
 		if (UAnimMontage* ActiveMontage = Anim->GetCurrentActiveMontage())
@@ -244,13 +275,21 @@ void AEnemy::ApplyParried(float Duration, float PlayRate, AActor* ParryInstigato
 			Anim->Montage_SetPlayRate(ActiveMontage, PlayRate);
 		}
 	}
+
+	// 清除破防flag
+	bPendingStanceBreak = false;
+
+	// 立即重置韧性
+	ResetPoise();
+
+	// 启动恢复计时器
 	GetWorldTimerManager().SetTimer(
-		ParryRecoveryTimer, this, &AEnemy::RecoverFromParry, Duration, false);
+		StanceBreakRecoveryTimer, this, &AEnemy::RecoverFromStanceBreak, Duration, false);
 }
 
-void AEnemy::RecoverFromParry()
+void AEnemy::RecoverFromStanceBreak()
 {
-	if (EnemyState != EEnemyState::EES_Parried) return;
+	if (EnemyState != EEnemyState::EES_StanceBreak) return;
 
 	// 恢复蒙太奇速率
 	if (UAnimInstance* Anim = GetMesh()->GetAnimInstance())
@@ -260,9 +299,18 @@ void AEnemy::RecoverFromParry()
 			Anim->Montage_SetPlayRate(ActiveMontage, 1.f);
 		}
 	}
-	// 委托 CheckCombatTarget 统一判定：有效目标→按距离切 Combating/Chasing，无效→Patrolling
+
+	// 委托 CheckCombatTarget 统一判定
 	CheckCombatTarget();
 }
+
+void AEnemy::ResetPoise()
+{
+	CurrentPoise = MaxPoise;
+	GetWorldTimerManager().ClearTimer(PoiseResetTimer);
+}
+
+// ==================== 弹反（已废弃，保留用于重构） ====================
 
 // ==================== 攻击 ====================
 
@@ -391,7 +439,7 @@ void AEnemy::CheckCombatTarget()
 	const bool bInCombatFamily = EnemyState == EEnemyState::EES_Combating
 		|| EnemyState == EEnemyState::EES_Attacking
 		|| EnemyState == EEnemyState::EES_Stunned
-		|| EnemyState == EEnemyState::EES_Parried;
+		|| EnemyState == EEnemyState::EES_StanceBreak;
 	const float CombatCheckRadius = bInCombatFamily
 		? (CombatingRadius + CombatExitBuffer)
 		: CombatingRadius;
@@ -464,7 +512,7 @@ void AEnemy::SetEnemyState(EEnemyState NewState)
 	}
 	case EEnemyState::EES_Attacking:
 	case EEnemyState::EES_Stunned:
-	case EEnemyState::EES_Parried:
+	case EEnemyState::EES_StanceBreak:
 		StopEnemyMovementIfPossible();
 		bRepositionInProgress = false;
 		break;
@@ -517,23 +565,26 @@ void AEnemy::Tick(float DeltaTime)
 	Super::Tick(DeltaTime);
 
 	if (EnemyState == EEnemyState::EES_Dead || EnemyState == EEnemyState::EES_Stunned || EnemyState ==
-		EEnemyState::EES_Attacking || EnemyState == EEnemyState::EES_Parried)
+		EEnemyState::EES_Attacking || EnemyState == EEnemyState::EES_StanceBreak)
 	{
-		// [调试] 弹反硬直标识（硬停早退前，确保可见）
-		if (FDebugDrawHelper::IsEnemyEnabled() && EnemyState == EEnemyState::EES_Parried)
+		// [调试] 破防硬直标识（硬停早退前，确保可见）
+		if (FDebugDrawHelper::IsEnemyEnabled() && EnemyState == EEnemyState::EES_StanceBreak)
 		{
-			FDebugDrawHelper::Add(TEXT("PAR"), FColor::Red);
+			FDebugDrawHelper::Add(TEXT("BREAK"), FColor::Red);
 		}
 		return;
 	}
 
-	// [调试] 敌人状态 + 距离 + 范围球体
+	// [调试] 敌人状态 + 距离 + 韧性 + 范围球体
 	// TODO: 多敌人时调试文字会混在一起，加 GetName() 或编号区分
 	if (FDebugDrawHelper::IsEnemyEnabled())
 	{
 		FDebugDrawHelper::Add(FString::Printf(TEXT("EnemyState: %s | Speed: %.0f"),
 			*UEnum::GetValueAsString(EnemyState), GroundSpeed),
 			EnemyState == EEnemyState::EES_Dead ? FColor::Red : FColor::White);
+
+		// 韧性显示
+		FDebugDrawHelper::Add(FString::Printf(TEXT("Poise: %.1f/%.1f"), CurrentPoise, MaxPoise), FColor::Cyan);
 
 		if (ChasingTarget)
 		{
@@ -1179,7 +1230,8 @@ void AEnemy::ClearAllTimers()
 	ClearPatrolTimers();
 	GetWorldTimerManager().ClearTimer(HealthBarHideTimer);
 	GetWorldTimerManager().ClearTimer(AttackCooldownTimer);
-	GetWorldTimerManager().ClearTimer(ParryRecoveryTimer);
+	GetWorldTimerManager().ClearTimer(PoiseResetTimer);
+	GetWorldTimerManager().ClearTimer(StanceBreakRecoveryTimer);
 }
 
 bool AEnemy::IsAllyAttackingNearby(float& OutMaxRemainingTime)

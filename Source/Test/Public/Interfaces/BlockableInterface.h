@@ -13,8 +13,6 @@ struct FBlockResult
 	float DamageAfterBlock = 0.f;
 	bool bPlayNormalHitReact = true;
 	bool bParried = false;
-	float ParryStaggerDuration = 0.f;
-	float ParryStaggerPlayRate = 0.f;
 };
 
 UINTERFACE(MinimalAPI)

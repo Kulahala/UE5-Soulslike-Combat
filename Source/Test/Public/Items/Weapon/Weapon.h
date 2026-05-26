@@ -39,8 +39,6 @@ public:
 		bool bApplyStun = true;
 		bool bSameTeam = false;
 		bool bParried = false;
-		float ParryStaggerDuration = 0.f;
-		float ParryStaggerPlayRate = 0.f;
 	};
 
 protected:
@@ -73,6 +71,10 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "Combat", meta = (EditCondition = "bEnableHitStop", ToolTip = "卡肉时的时间流速。0=完全静止，1=无效果。"))
 	float HitStopTimeDilation = 0.05f;
 
+	// 武器基础韧性伤害
+	UPROPERTY(EditAnywhere, Category = "Combat|Poise", meta = (ToolTip = "武器基础韧性伤害。最终韧性伤害 = 此值 × 连招倍率。"))
+	float BasePoiseDamage = 1.f;
+
 private:
 	/* 碰撞检测（在蓝图中调整：X轴=武器长度，Y轴=武器宽度，Z轴=武器厚度） */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Equip", meta = (AllowPrivateAccess = "true", ToolTip = "武器碰撞检测盒体，X=长度 Y=宽度 Z=厚度。"))
@@ -96,4 +98,5 @@ private:
 
 public:
 	FORCEINLINE void SetEnableHitStop(bool bEnable) { bEnableHitStop = bEnable; }
+	FORCEINLINE float GetBasePoiseDamage() const { return BasePoiseDamage; }
 };

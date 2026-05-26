@@ -170,8 +170,6 @@ AWeapon::FWeaponHitResult AWeapon::ResolveHit(AActor* HitActor, const FHitResult
 		if (BlockResult.bParried)
 		{
 			Result.bParried = true;
-			Result.ParryStaggerDuration = BlockResult.ParryStaggerDuration;
-			Result.ParryStaggerPlayRate = BlockResult.ParryStaggerPlayRate;
 		}
 	}
 
@@ -180,12 +178,24 @@ AWeapon::FWeaponHitResult AWeapon::ResolveHit(AActor* HitActor, const FHitResult
 
 void AWeapon::DispatchHitFeedback(AActor* HitActor, const FHitResult& HitPoint, const FWeaponHitResult& Result)
 {
-	// 弹反分支：对攻击方调弹反硬直（在 GetHit 之前，确保敌人先进入 EES_Parried）
+	// 应用韧性伤害（仅跨阵营 + 非破防状态）
+	if (!Result.bSameTeam)
+	{
+		if (AEnemy* Enemy = Cast<AEnemy>(HitActor))
+		{
+			if (ABaseCharacter* Attacker = Cast<ABaseCharacter>(GetOwner()))
+			{
+				Enemy->ApplyPoiseDamage(Attacker->GetCurrentPoiseDamage(), Attacker);
+			}
+		}
+	}
+
+	// 弹反路径：瞬间清空攻击方敌人的韧性
 	if (Result.bParried)
 	{
 		if (AEnemy* AttackerEnemy = Cast<AEnemy>(GetOwner()))
 		{
-			AttackerEnemy->ApplyParried(Result.ParryStaggerDuration, Result.ParryStaggerPlayRate, HitActor);
+			AttackerEnemy->ApplyPoiseDamage(AttackerEnemy->GetCurrentPoise(), HitActor);
 		}
 	}
 
@@ -199,6 +209,27 @@ void AWeapon::DispatchHitFeedback(AActor* HitActor, const FHitResult& HitPoint, 
 	if (HitActor->Implements<UHitInterface>())
 	{
 		IHitInterface::Execute_GetHit(HitActor, HitPoint.ImpactPoint, GetOwner());
+	}
+
+	// GetHit 之后检查破防flag — 弹反和普通命中都使用敌人自己的参数
+	if (Result.bParried)
+	{
+		// 弹反破防：对攻击方敌人触发
+		if (AEnemy* AttackerEnemy = Cast<AEnemy>(GetOwner()))
+		{
+			if (AttackerEnemy->ShouldTriggerStanceBreak())
+			{
+				AttackerEnemy->ApplyStanceBreak(AttackerEnemy->StanceBreakDuration, AttackerEnemy->StanceBreakPlayRate);
+			}
+		}
+	}
+	else if (AEnemy* Enemy = Cast<AEnemy>(HitActor))
+	{
+		// 普通韧性破防：对受击方敌人触发
+		if (Enemy->ShouldTriggerStanceBreak())
+		{
+			Enemy->ApplyStanceBreak(Enemy->StanceBreakDuration, Enemy->StanceBreakPlayRate);
+		}
 	}
 
 	CameraShake();

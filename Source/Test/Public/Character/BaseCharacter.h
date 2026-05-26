@@ -44,6 +44,7 @@ public:
 
 	FORCEINLINE float GetAttackDamageMultiplier() const { return CurrentAttackDamageMultiplier; }
 	FORCEINLINE void SetAttackDamageMultiplier(float Multiplier) { CurrentAttackDamageMultiplier = Multiplier; }
+	FORCEINLINE float GetCurrentPoiseDamage() const { return CurrentPoiseDamage; }
 
 	/* 命中上下文 + 后退 */
 	void CachePendingHitContext(AActor* HitInstigator, float KnockbackScale, bool bWasBlocked, bool bApplyStun);
@@ -125,6 +126,9 @@ protected:
 
 	// 当前攻击伤害倍率（连招系统使用）
 	float CurrentAttackDamageMultiplier = 1.0f;
+
+	// 当前攻击韧性伤害（连招系统使用）
+	float CurrentPoiseDamage = 1.f;
 
 public:
 	FORCEINLINE AWeapon* GetWeapon() const { return EquippedWeapon; }

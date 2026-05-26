@@ -20,6 +20,10 @@ struct FComboSegment
 	// 该段体力消耗
 	UPROPERTY(EditAnywhere, Category = "Stamina", meta = (ClampMin = "0.0"))
 	float StaminaCost = 15.0f;
+
+	// 该段韧性伤害倍率（相对武器基础韧性伤害）
+	UPROPERTY(EditAnywhere, Category = "Poise", meta = (ClampMin = "0.1", ClampMax = "5.0"))
+	float PoiseDamageMultiplier = 1.0f;
 };
 
 /**

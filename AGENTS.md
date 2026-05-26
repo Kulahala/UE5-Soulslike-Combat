@@ -60,7 +60,7 @@ All gameplay states are defined as `UENUM` enums in `CharacterTypes.h` — the s
 |------|-----------|---------|
 | `EWeaponState` | `EWS_Unequipped`, `EWS_OneHandEquipped`, `EWS_TwoHandEquipped` | `ABaseCharacter`, `AMyCharacter`, `USlashAnimInstance` |
 | `EActionState` | `EAS_UnOccupied`, `EAS_Attacking`, `EAS_Stunning`, `EAS_Exhausted`, `EAS_Parrying`, `EAS_Dodging`, `EAS_UsingPotion`, `EAS_Dead` | `AMyCharacter` |
-| `EEnemyState` | `EES_UnOccupied`, `EES_Patrolling`, `EES_Searching`, `EES_Chasing`, `EES_Combating`, `EES_Attacking`, `EES_Stunned`, `EES_Dead` | `AEnemy` |
+| `EEnemyState` | `EES_UnOccupied`, `EES_Patrolling`, `EES_Searching`, `EES_Chasing`, `EES_Combating`, `EES_Attacking`, `EES_Stunned`, `EES_StanceBreak`, `EES_Dead` | `AEnemy` |
 | `EItemState` | `EIS_Spawning`, `EIS_Dropped`, `EIS_Equipped` | `Aitem` (in `item.h`) |
 
 **Critical: state flow is mixed C++ + montage delegate + `AnimNotify` driven.** Entry states are often set directly in C++ (`Attack()`, `GetHit_Implementation()`, `Die()`, `Dodge()`, `SetEnemyState()`). Recovery commonly uses `FOnMontageEnded` delegates with `bInterrupted` guards, while `AnimNotify` classes handle collision windows and designer-timed recoveries (`UAnimNotifyState_WeaponCollision`, `UAnimNotifyState_DodgeInvulnerable`, `UAnimNotify_SetActionState`, `UAnimNotify_EnemyHitReactEnd`, `UAnimNotify_EnemyAttackEnd`, `UAnimNotify_CharacterHitReactEnd`). Do not hardcode recovery transitions in `Tick()`.
@@ -75,8 +75,8 @@ All gameplay states are defined as `UENUM` enums in `CharacterTypes.h` — the s
 ```
 AActor
 ├── Aitem (parabolic spawning, floating animation, overlap events)
-│   ├── AWeapon (box-trace sweep collision, hit-stop, camera shake)
-│   ├── AShield (offhand equip, block angle/damage/stamina config, block FX)
+│   ├── AWeapon (box-trace sweep collision, hit-stop, camera shake, base poise damage)
+│   ├── AShield (offhand equip, block angle/damage/stamina config, block FX, parry FX + stance break params)
 │   └── ATreasure (gold value, UTreasureData asset)
 ├── ABreakAbleActor + IHitInterface (StaticMesh → GeometryCollection swap)
 ├── AArenaGenerator (USplineComponent + UPCGComponent)
@@ -84,7 +84,7 @@ AActor
 
 ACharacter
 ├── AMyCharacter + IBlockableInterface (UAttributeComponent, spring arm + camera, weapon/shield equipping, hold-to-block)
-└── AEnemy + IHitInterface (AI patrol/search/chase/combat FSM, directional hit react)
+└── AEnemy + IHitInterface (AI patrol/search/chase/combat FSM, directional hit react, poise/stance break system)
 
 APlayerController → ACharacterController (Enhanced Input, move/look/jump/equip/attack/sprint/walk/block/lock-on/dodge/parry/potion/pause bindings, pause state management, input debug snapshot owner)
 UActorComponent → UAttributeComponent (health, gold, OnHealthChanged delegate)
@@ -95,12 +95,12 @@ UUserWidget → UBaseHealthBarWidget (PB_Health + PB_Buffer progress bars, delay
            └── UPauseMenuWidget (Btn_Resume + Overlay_Background, delegate-driven, keyboard resume via NativeOnKeyDown)
 UAnimInstance → USlashAnimInstance (GroundSpeed, Direction, state enums)
 UDataAsset → UTreasureData
-           └── UComboDataAsset (light attack combo chain configurations)
+            └── UComboDataAsset (light attack combo chain configurations, poise damage multiplier per segment)
 UAnimNotifyState → UAnimNotifyState_WeaponCollision
                  ├── UAnimNotifyState_DodgeInvulnerable
                  └── UAnimNotifyState_ComboWindow (opens character combo buffer window)
 UAnimNotify → UAnimNotify_PotionHeal (configurable HealPercent, triggers during potion montage)
-UInterface → UBlockableInterface (weapon hit interception before final damage application)
+UInterface → UBlockableInterface (weapon hit interception before final damage application, parry → stance break duration/playrate)
 ```
 
 ### Combat Pipeline
@@ -114,7 +114,12 @@ UInterface → UBlockableInterface (weapon hit interception before final damage 
    - cross-team hits may be intercepted by `IBlockableInterface::TryBlockHit()` before final damage is applied
    - for `ABaseCharacter` targets, `AWeapon::ExecuteWeaponTrace()` writes a per-hit `FPendingHitContext` (instigator, knockback scale, blocked flag, stun flag) before calling `IHitInterface::GetHit()`
    - `ABaseCharacter::GetHit_Implementation()` consumes that context for knockback / normal hit-react routing, and leaf classes (`AMyCharacter`, `AEnemy`) clear it after their own stun logic runs
-   - `AWeapon::ExecuteWeaponTrace()` is intentionally decomposed into `BuildIgnoreList()`, `ResolveHit()`, and `DispatchHitFeedback()`. Keep `ResolveHit()` focused on same-team/block/damage math, and keep `DispatchHitFeedback()` focused on context write / `GetHit()` / camera shake / hit stop / ignore list; do not inflate it into a generic combat pipeline without a real new use case
+   - **Poise damage is applied in `DispatchHitFeedback()`** (not `ResolveHit()`), following a deferred trigger pattern to avoid state conflicts:
+     1. `ApplyPoiseDamage()` reduces enemy poise and sets `bPendingStanceBreak` flag if poise reaches zero
+     2. `GetHit()` executes normally → enemy enters `EES_Stunned`
+     3. After `GetHit()`, `ShouldTriggerStanceBreak()` is checked → `ApplyStanceBreak()` overrides to `EES_StanceBreak` + slow-motion hit react
+   - **Parry poise damage targets the attacker** (`GetOwner()`), not `HitActor`: parry occurs when an enemy weapon hits the player, so `HitActor` is the player. `Cast<AEnemy>(HitActor)` would fail; `Cast<AEnemy>(GetOwner())` correctly targets the attacking enemy
+   - `AWeapon::ExecuteWeaponTrace()` is intentionally decomposed into `BuildIgnoreList()`, `ResolveHit()`, and `DispatchHitFeedback()`. Keep `ResolveHit()` focused on same-team/block/damage math, and keep `DispatchHitFeedback()` focused on context write / poise damage / `GetHit()` / stance break check / camera shake / hit stop / ignore list; do not inflate it into a generic combat pipeline without a real new use case
 6. **NotifyEnd** → clears `IgnoreActors` + `SetAttackHyperArmor(false)` (player only)
 7. `OnAttackMontageEnded` delegate (with `bInterrupted` guard that restores `ActionState`) → restores `EAS_UnOccupied` and resumes stamina regen
 
@@ -139,12 +144,42 @@ UInterface → UBlockableInterface (weapon hit interception before final damage 
 - **Extensibility**: Currently player-only. Future expansion: move `bAttackHyperArmor` to `ABaseCharacter` + add `virtual bool ShouldUseHyperArmor()` hook for Boss-type enemies.
 - **Files**: `MyCharacter.h:219` (member), `MyCharacter.cpp:272-329` (GetHit logic), `AnimNotifyState_WeaponCollision.cpp:27-30, 65-68` (lifecycle).
 
+### Poise / Stance Break System
+
+- **Unified mechanism**: Parry and combo-based poise depletion both trigger `EES_StanceBreak` — there is no separate `EES_Parried` state. Parry = instant poise clear, combo = gradual poise reduction, both converge on the same `ApplyStanceBreak()`.
+- **Poise damage formula**: `Final Poise Damage = Weapon::BasePoiseDamage × ComboSegment::PoiseDamageMultiplier` (or `× SprintAttackPoiseDamageMultiplier` for sprint attacks). `CurrentPoiseDamage` is set in `Attack()` / `PerformSprintAttack()` before montage play, read by `DispatchHitFeedback()`.
+- **Deferred trigger pattern** (`DispatchHitFeedback()` execution order):
+  1. `ApplyPoiseDamage(Damage, Instigator)` reduces `CurrentPoise` and sets `bPendingStanceBreak` flag if poise reaches zero — does **not** immediately trigger stance break
+  2. `CachePendingHitContext()` + `GetHit()` → enemy enters `EES_Stunned` with normal hit react
+  3. `ShouldTriggerStanceBreak()` checked → `ApplyStanceBreak()` overrides to `EES_StanceBreak` + slow-motion hit react
+  4. Visual result: brief normal hit → transition to slow-motion stance break (natural feel)
+- **Parry path**: In `DispatchHitFeedback()`, parry poise damage targets `GetOwner()` (the attacking enemy), not `HitActor` (the player). `ShouldTriggerStanceBreak()` is also checked on `GetOwner()` for parry. **Stance break parameters are unified** — both parry and normal poise break use `Enemy->StanceBreakDuration/PlayRate` (enemy's own parameters).
+- **Normal combo path**: `ShouldTriggerStanceBreak()` is checked on `HitActor` (the enemy). Uses `Enemy->StanceBreakDuration/PlayRate` from enemy config.
+- **Parameter source**: Shield no longer holds `StanceBreakDuration/PlayRate`. `FBlockResult` and `FWeaponHitResult` no longer pass these fields. All stance breaks use enemy parameters, allowing different enemy types to have different stance break characteristics.
+- **`ApplyPoiseDamage()` guards**: Early-returns on `EES_Dead` and `EES_StanceBreak`. Records `LastPoiseDamageInstigator` for directional hit react in `ApplyStanceBreak()`.
+- **`ApplyStanceBreak()` behavior**: Clears `bPendingStanceBreak`, calls `ResetPoise()` (immediate poise refill), stops current montage, sets `EES_StanceBreak`, plays `DirectionalHitReact` from `LastPoiseDamageInstigator`, applies slow `PlayRate`, starts `StanceBreakRecoveryTimer`.
+- **Poise reset**: `PoiseResetTimer` (default `5.f` seconds, `PoiseResetDelay`) resets `CurrentPoise = MaxPoise`. Timer is cleared and restarted on each `ApplyPoiseDamage()`. Not started when poise hits zero (stance break handles it).
+- **Recovery**: `RecoverFromStanceBreak()` restores montage play rate to `1.f` and delegates to `CheckCombatTarget()` for state transition.
+- **Death cleanup**: `Die()` clears `bPendingStanceBreak`, `LastPoiseDamageInstigator`, `PoiseResetTimer`, `StanceBreakRecoveryTimer`.
+- **Debug**: `DrawDebugInfo()` shows `Poise: X.X/Y.Y` in cyan; `"BREAK"` in red when in `EES_StanceBreak`.
+- **Config on `AEnemy`** (all `EditAnywhere` under `"Combat|Poise"`):
+  - `MaxPoise` — default `10.f`
+  - `PoiseResetDelay` — default `5.f` (seconds)
+  - `StanceBreakDuration` — default `2.f` (seconds)
+  - `StanceBreakPlayRate` — default `0.3f`
+- **Config on `AWeapon`** (protected, `EditAnywhere` under `"Combat|Poise"`):
+  - `BasePoiseDamage` — default `1.f`; accessed via `GetBasePoiseDamage()`
+- **Config on `AMyCharacter`** (`EditDefaultsOnly` under `"Combat|Sprint Attack"`):
+  - `SprintAttackPoiseDamageMultiplier` — default `2.f`
+- **Implementation files**: `Source/Test/Public/Enemy/Enemy.h:57-79` (declaration + params), `Source/Test/Private/Enemy/Enemy.cpp:223-311` (implementation), `Source/Test/Public/Items/Weapon/Weapon.h:76-78,103` (BasePoiseDamage), `Source/Test/Private/Items/Weapon/Weapon.cpp:183-233` (DispatchHitFeedback poise/stance break logic), `Source/Test/Public/Combat/ComboDataAsset.h:24-26` (PoiseDamageMultiplier), `Source/Test/Public/Character/BaseCharacter.h:47,131` (CurrentPoiseDamage + getter), `Source/Test/Public/Character/MyCharacter.h:260-261` (SprintAttackPoiseDamageMultiplier), `Source/Test/Public/Items/Shield/Shield.h` (StanceBreak params removed), `Source/Test/Public/Interfaces/BlockableInterface.h` (StanceBreak fields removed from FBlockResult).
+
 ### Block System
 
 - `AMyCharacter` implements `IBlockableInterface` and owns hold-to-block state through `bBlockInputHeld` + `bIsBlocking`.
 - `ACharacterController` binds `BlockAction` start/end to `StartBlockInput()` / `ReleaseBlockInput()`.
 - `AShield` is equipped to the offhand via `EquipToOffhand()` and provides block tuning values:
   `BlockHalfAngleDegrees`, `BlockedDamageMultiplier`, `BlockStaminaCostPerDamage`, `BlockMoveSpeedMultiplier`.
+  Parry-specific params: `ParryStaminaCost` (default `15.f`), `ParryCooldown` (default `0.4f`), `ParrySound`, `ParryParticle`.
 - `AMyCharacter::CanStartBlock()` is intentionally independent of weapon equip state. Current block-start gates are: shield equipped, `EAS_UnOccupied`, and grounded.
 - `AWeapon::ExecuteWeaponTrace()` checks `IBlockableInterface` on the hit actor before final damage application.
 - Successful blocks reduce or redirect damage through `FBlockResult`, suppress shared `DirectionalHitReact()` / `PlayHitEffects()`, and play shield-specific sound/particle feedback.
@@ -197,12 +232,13 @@ UInterface → UBlockableInterface (weapon hit interception before final damage 
 
 ### Combo System
 
-- **Data-Driven Configuration**: A light attack combo chain is defined via `UComboDataAsset` (set on `AMyCharacter::LightAttackCombo`). Each segment configures a custom Montage Section, a damage multiplier (scales base weapon damage), and a stamina cost.
+- **Data-Driven Configuration**: A light attack combo chain is defined via `UComboDataAsset` (set on `AMyCharacter::LightAttackCombo`). Each segment configures a custom Montage Section, a damage multiplier (scales base weapon damage), a stamina cost, and a poise damage multiplier (scales weapon base poise damage).
 - **Input Buffering**: Checked during `ACharacterController::Input_Attack()`. If `AMyCharacter::IsComboWindowOpen()` is true, the input is buffered by setting `bComboInputReceived = true`. Otherwise, a normal attack is initiated.
 - **Combo Window State**: Controlled by `UAnimNotifyState_ComboWindow` placed in the attack montage. It calls `OpenComboWindow()` and `CloseComboWindow()` to toggle the input window.
 - **Combo Progression**: In `AMyCharacter::OnAttackMontageEnded()`, if `bComboInputReceived` is true and a next combo segment exists, the character increases the combo counter, temporarily marks the action state as `EActionState::EAS_UnOccupied` (to pass the `CanAttack()` gate), and immediately triggers `Attack()`.
-- **Reset Guards & Interruption**: On attack finish (without buffered inputs), normal interruption (getting hit, death, dodge roll, or exhaustion), `ResetCombo()` is called to reset the combo counter, input flag, and restore the damage multiplier to `1.0f`.
+- **Reset Guards & Interruption**: On attack finish (without buffered inputs), normal interruption (getting hit, death, dodge roll, or exhaustion), `ResetCombo()` is called to reset the combo counter, input flag, and restore the damage multiplier to `1.0f` and poise damage to `1.f`.
 - **Damage Multiplier Application**: Applied in `AWeapon::ResolveHit()`. The weapon queries the attacker's `GetAttackDamageMultiplier()` to scale the raw damage *before* passing it to `IBlockableInterface::TryBlockHit()`, ensuring block stamina costs and damage mitigation calculations scale accordingly.
+- **Poise Damage Multiplier Application**: `CurrentPoiseDamage = EquippedWeapon->GetBasePoiseDamage() * Segment.PoiseDamageMultiplier` is set in `Attack()` before montage play. Sprint attack uses `EquippedWeapon->GetBasePoiseDamage() * SprintAttackPoiseDamageMultiplier`. The final value is read by `DispatchHitFeedback()` when calling `Enemy->ApplyPoiseDamage()`.
 - **Debug Visibility**: Rendered via `FDebugDrawHelper` in `DrawDebugInfo` when master debug rendering is active, printing combo index, input/window status, and current damage multiplier.
 
 ### Sprint Attack System
@@ -223,6 +259,7 @@ UInterface → UBlockableInterface (weapon hit interception before final damage 
   - `SprintAttackMontage` — independent montage asset
   - `SprintAttackDamageMultiplier` — default `1.8f`
   - `SprintAttackStaminaCost` — default `25.f`
+  - `SprintAttackPoiseDamageMultiplier` — default `2.f` (scales weapon `BasePoiseDamage`)
 - **Implementation files**: `Source/Test/Public/Character/MyCharacter.h:34-35` (declaration), `Source/Test/Private/Character/MyCharacter.cpp:95-153` (implementation).
 
 ### Lock-On System
@@ -289,7 +326,7 @@ UInterface → UBlockableInterface (weapon hit interception before final damage 
 ### Enemy AI (`AEnemy`)
 
 - Controlled by `AAIController` through `SetEnemyState(EEnemyState)` — the real flow is Patrol/Search/Chase/Combat, not just chase/attack.
-- `CheckCombatTarget()` runs before per-state Tick logic: invalid target returns to patrol, non-combat states enter `EES_Combating` inside `CombatingRadius`, and combat-family states (`EES_Combating`, `EES_Attacking`, `EES_Stunned`) use `CombatingRadius + CombatExitBuffer` as their chase fallback threshold before dropping to `EES_Chasing`.
+- `CheckCombatTarget()` runs before per-state Tick logic: invalid target returns to patrol, non-combat states enter `EES_Combating` inside `CombatingRadius`, and combat-family states (`EES_Combating`, `EES_Attacking`, `EES_Stunned`, `EES_StanceBreak`) use `CombatingRadius + CombatExitBuffer` as their chase fallback threshold before dropping to `EES_Chasing`.
 - `CheckCombatTarget()` validity is no longer just pointer validity: `IsValidCombatTarget()` treats dead `ABaseCharacter` targets as invalid, so corpse targets are cleared and the enemy returns to patrol instead of looping on attacks.
 - `TargetPerceptionUpdated()` and `CanAttack()` also gate on `IsValidCombatTarget()`, preventing sight reacquire or attack start against a dead player even if the Actor still exists.
 - `SetEnemyState(EES_Combating)` is an entry-action boundary: it disables orient-to-movement and resets combat reposition state. When entering from `EES_Chasing` while still outside `CombatAttackMaxRadius`, it intentionally skips `StopEnemyMovementIfPossible()` so the chase-to-combat handoff does not create a visible brake.
@@ -310,7 +347,7 @@ UInterface → UBlockableInterface (weapon hit interception before final damage 
 - `MoveToCombatLocation()` intentionally uses `FAIMoveRequest` with `SetReachTestIncludesAgentRadius(false)` and `SetReachTestIncludesGoalRadius(false)`. Do not reintroduce manual `ProjectPointToNavigation(...)` here; `AAIController::MoveTo()` already performs goal projection with the AI's nav agent properties.
 - `MoveToTarget()`, `MoveToLocation()`, `MoveToCombatLocation()`, and `MoveToCombatTarget()` are intentionally separate semantic wrappers. If you ever dedupe them, only extract the shared `FAIMoveRequest` boilerplate; do not collapse them into one flag-heavy helper.
 - When planning extensibility for new enemy archetypes, prefer splitting **combat decision** from **navigation execution**. Current `AEnemy` seam is: `OnChasing()` is virtual, and combat behavior is split into `ShouldTriggerAttack(...)`, `HandleAttackReadyPositioning(...)`, and `HandleCooldownPositioning(...)`. Extend new archetypes by overriding those hooks rather than `MoveTo*()` helpers or copying the whole combat loop. Keep `SetEnemyState()` / `CheckCombatTarget()` as base-owned boundaries unless a variant truly needs a different state machine.
-- `EES_Attacking`, `EES_Stunned`, and `EES_Dead` are hard-stop states for Tick-driven AI reactions.
+- `EES_Attacking`, `EES_Stunned`, `EES_StanceBreak`, and `EES_Dead` are hard-stop states for Tick-driven AI reactions.
 
 ### Hearing Perception System
 
@@ -355,7 +392,7 @@ Prevents multiple enemies from attacking simultaneously for better gameplay feel
 - **Dual entry points**:
   - `OnCombating()` Tick (Enemy.cpp:687-714): checks when `ShouldTriggerAttack()` returns false and `!bAttackOnCooldown` — only applies to enemies that are combat-eligible but not yet attacking.
   - `OnAttackCooldownEnd()` (Enemy.cpp:339-359): re-checks before the original CD expiry logic runs, preventing a same-frame window where two enemies' cooldowns could expire simultaneously and both attack.
-- **Interruption recovery**: If the attacking ally is stunned/parried and exits `EES_Attacking`, the waiting enemy's next `IsAllyAttackingNearby()` call finds no attacking ally and proceeds to attack immediately. Blocked/damage flags apply normally — the waiting enemy is still in `EES_Combating` and can be hit.
+- **Interruption recovery**: If the attacking ally is stunned/stance-broken and exits `EES_Attacking`, the waiting enemy's next `IsAllyAttackingNearby()` call finds no attacking ally and proceeds to attack immediately. Blocked/damage flags apply normally — the waiting enemy is still in `EES_Combating` and can be hit.
 - **Forced attack cap**: `MaxAttackCoordinationWait` (3s) prevents infinite waiting if an ally gets stuck in `EES_Attacking` state (e.g., unusually long montage).
 - **`ShouldTriggerAttack()` remains `const`**: The coordination logic lives in the callers (`OnCombating()` and `OnAttackCooldownEnd()`), not inside the predicate, preserving the existing extension seam for derived enemy classes.
 - **Debug**: Yellow `"WaitAlly"` text via `FDebugDrawHelper` when coordination is active, visible when `test.Debug.Enemy` is enabled.
@@ -404,7 +441,7 @@ Prevents multiple enemies from attacking simultaneously for better gameplay feel
   - `test.Debug.Shapes` → world debug sphere toggle
 - Player debug currently includes input snapshot text, HP, stamina, potion count/cooldown, action state, montage name, and movement speed.
 - Player debug currently includes the short-lived `LockOn`, `Potion`, and other action markers from controller input snapshots, in addition to the held-state text.
-- Enemy debug currently includes enemy state / ground speed text, distance text, optional chase/combat/attack radius spheres, and `CombatMove: Ready/Retreat/BackDiag/Strafe/Press/AlreadyAtGoal/MoveFail` while in `EES_Combating`.
+- Enemy debug currently includes enemy state / ground speed text, distance text, optional chase/combat/attack radius spheres, poise display (`Poise: X.X/Y.Y` in cyan, `"BREAK"` in red during stance break), and `CombatMove: Ready/Retreat/BackDiag/Strafe/Press/AlreadyAtGoal/MoveFail` while in `EES_Combating`.
 
 ### Pause Menu System
 
