@@ -385,12 +385,12 @@ void AEnemy::OnAttackCooldownEnd()
 	}
 
 	// 攻击协调检查
-	float AllyRemainingTime = 0.f;
-	if (IsAllyAttackingNearby(AllyRemainingTime))
+	float AllySuggestedWaitTime = 0.f;
+	if (IsAllyAttackingNearby(AllySuggestedWaitTime))
 	{
-		// 延长CD，等待队友结束
+		// 短暂让位给正在攻击同一目标的队友，避免群体同时出手
 		float NewCooldown = FMath::Clamp(
-			AllyRemainingTime + AttackCoordinationBuffer,
+			AllySuggestedWaitTime,
 			0.1f,
 			MaxAttackCoordinationWait
 		);
@@ -733,17 +733,39 @@ void AEnemy::OnCombating(float DeltaTime)
 
 	if (ShouldTriggerAttack(DistanceToTarget, Dot))
 	{
-		Attack();
+		float AllySuggestedWaitTime = 0.f;
+		if (IsAllyAttackingNearby(AllySuggestedWaitTime))
+		{
+			// 攻击条件已满足时也要先做协调，否则同帧 ready 的敌人会一起出手
+			float NewCooldown = FMath::Clamp(
+				AllySuggestedWaitTime,
+				0.1f,
+				MaxAttackCoordinationWait
+			);
+
+			GetWorldTimerManager().SetTimer(AttackCooldownTimer, this,
+				&AEnemy::OnAttackCooldownEnd, NewCooldown, false);
+			bAttackOnCooldown = true;
+
+			if (FDebugDrawHelper::IsEnemyEnabled())
+			{
+				FDebugDrawHelper::Add(TEXT("WaitAlly"), FColor::Yellow);
+			}
+		}
+		else
+		{
+			Attack();
+		}
 	}
 	else if (!bAttackOnCooldown)
 	{
 		// 攻击协调检查
-		float AllyRemainingTime = 0.f;
-		if (IsAllyAttackingNearby(AllyRemainingTime))
+		float AllySuggestedWaitTime = 0.f;
+		if (IsAllyAttackingNearby(AllySuggestedWaitTime))
 		{
-			// 延长自己的CD到队友结束 + 缓冲时间
+			// 短暂让位给正在攻击同一目标的队友，避免群体同时出手
 			float NewCooldown = FMath::Clamp(
-				AllyRemainingTime + AttackCoordinationBuffer,
+				AllySuggestedWaitTime,
 				0.1f,
 				MaxAttackCoordinationWait
 			);
@@ -1234,13 +1256,17 @@ void AEnemy::ClearAllTimers()
 	GetWorldTimerManager().ClearTimer(StanceBreakRecoveryTimer);
 }
 
-bool AEnemy::IsAllyAttackingNearby(float& OutMaxRemainingTime)
+bool AEnemy::IsAllyAttackingNearby(float& OutSuggestedWaitTime)
 {
+	OutSuggestedWaitTime = 0.f;
+
+	if (!IsValidCombatTarget(ChasingTarget))
+	{
+		return false;
+	}
+
 	TArray<AActor*> NearbyEnemies;
 	UGameplayStatics::GetAllActorsOfClass(GetWorld(), AEnemy::StaticClass(), NearbyEnemies);
-
-	bool bFound = false;
-	float MaxRemaining = 0.f;
 
 	for (AActor* Actor : NearbyEnemies)
 	{
@@ -1248,23 +1274,15 @@ bool AEnemy::IsAllyAttackingNearby(float& OutMaxRemainingTime)
 		if (OtherEnemy && OtherEnemy != this)
 		{
 			float Distance = FVector::Dist(GetActorLocation(), OtherEnemy->GetActorLocation());
-			if (Distance <= AttackCoordinationRange && OtherEnemy->GetEnemyState() == EEnemyState::EES_Attacking)
+			if (Distance <= AttackCoordinationRange
+				&& OtherEnemy->GetEnemyState() == EEnemyState::EES_Attacking
+				&& OtherEnemy->ChasingTarget == ChasingTarget)
 			{
-				// TODO: 检查 OtherEnemy->ChasingTarget == this->ChasingTarget 以避免不同战斗组的误协调
-				float Remaining = GetWorld()->GetTimerManager().GetTimerRemaining(OtherEnemy->AttackCooldownTimer);
-				if (Remaining > MaxRemaining)
-				{
-					MaxRemaining = Remaining;
-				}
-				bFound = true;
+				OutSuggestedWaitTime = AttackCoordinationBuffer;
+				return true;
 			}
 		}
 	}
 
-	if (bFound)
-	{
-		OutMaxRemainingTime = MaxRemaining;
-		return true;
-	}
 	return false;
 }

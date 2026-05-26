@@ -302,8 +302,8 @@ private:
 	bool MoveToCombatTarget(); // 攻击 ready 时动态追踪目标 Actor
 	void ResetCombatReposition();
 
-	// 攻击协调：检查附近是否有队友正在攻击，返回最大剩余时间
-	bool IsAllyAttackingNearby(float& OutMaxRemainingTime);
+	// 攻击协调：检查同目标附近队友是否正在攻击，返回建议等待时间
+	bool IsAllyAttackingNearby(float& OutSuggestedWaitTime);
 
 	void StartCombatRetreatSpeedEase(const FVector& GoalLocation);
 	void UpdateCombatRetreatSpeedEase();
