@@ -17,6 +17,7 @@ class UPlayerHUDWidget;
 class UCameraShakeBase;
 class UPlayerLockOnComponent;
 class UComboDataAsset;
+class UAttackConfigDataAsset;
 class USoundBase;
 
 UCLASS()
@@ -247,18 +248,9 @@ private:
 	// 受击染红缩放系数（TryBlockHit 设置，TakeDamage 推送给 HUD 后归位）
 	float LastDamageFlashScale = 1.f;
 
-	/* 冲刺攻击 */
-	UPROPERTY(EditDefaultsOnly, Category = "Combat|Sprint Attack", meta = (AllowPrivateAccess = "true", ToolTip = "冲刺攻击蒙太奇。"))
-	UAnimMontage* SprintAttackMontage;
-
-	UPROPERTY(EditDefaultsOnly, Category = "Combat|Sprint Attack", meta = (AllowPrivateAccess = "true", ToolTip = "冲刺攻击伤害倍率。"))
-	float SprintAttackDamageMultiplier = 1.8f;
-
-	UPROPERTY(EditDefaultsOnly, Category = "Combat|Sprint Attack", meta = (AllowPrivateAccess = "true", ToolTip = "冲刺攻击体力消耗。"))
-	float SprintAttackStaminaCost = 25.f;
-
-	UPROPERTY(EditDefaultsOnly, Category = "Combat|Sprint Attack", meta = (AllowPrivateAccess = "true", ToolTip = "冲刺攻击韧性伤害倍率（相对武器基础韧性伤害）。"))
-	float SprintAttackPoiseDamageMultiplier = 2.f;
+	/* 攻击配置 */
+	UPROPERTY(EditDefaultsOnly, Category = "Combat", meta = (AllowPrivateAccess = "true", ToolTip = "攻击配置资产，管理所有攻击类型"))
+	TObjectPtr<UAttackConfigDataAsset> AttackConfig;
 
 	/* 听觉感知 */
 	FTimerHandle MovementNoiseTimerHandle;
@@ -299,9 +291,6 @@ private:
 	float PotionNoiseRange = 500.f;
 
 	/* 连招系统 */
-	UPROPERTY(EditDefaultsOnly, Category = "Combat|Combo", meta = (AllowPrivateAccess = "true"))
-	TObjectPtr<UComboDataAsset> LightAttackCombo;
-
 	int32 ComboCounter = 0;
 	bool bComboWindowOpen = false;
 	bool bComboInputReceived = false;

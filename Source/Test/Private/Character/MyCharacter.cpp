@@ -2,6 +2,7 @@
 
 #include "Character/MyCharacter.h"
 #include "Combat/ComboDataAsset.h"
+#include "Combat/AttackConfigDataAsset.h"
 #include "Character/Components/PlayerLockOnComponent.h"
 #include "Character/Controller/CharacterController.h"
 
@@ -46,6 +47,9 @@ void AMyCharacter::BeginPlay()
 {
 	Super::BeginPlay();
 	Tags.Add(FName("Player"));
+
+	// 校验 AttackConfig
+	ensureMsgf(AttackConfig, TEXT("AttackConfig is not set on %s — all attacks will fail"), *GetName());
 
 	// 初始化缓存为当前实际值（Blueprint 可能已覆盖）
 	CachedSocketOffset = SpringArm->SocketOffset;
@@ -119,10 +123,16 @@ bool AMyCharacter::ShouldUseSprintAttack() const
 
 void AMyCharacter::PerformSprintAttack()
 {
-	// 0. 蒙太奇检查
-	if (!SprintAttackMontage)
+	if (!AttackConfig)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("SprintAttackMontage not configured"));
+		UE_LOG(LogTemp, Warning, TEXT("AttackConfig not configured"));
+		return;
+	}
+
+	const FSpecialAttackConfig* SprintConfig = AttackConfig->FindSpecialAttack(ESpecialAttackType::SprintAttack);
+	if (!SprintConfig || !SprintConfig->Montage)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("SprintAttack not configured in AttackConfig"));
 		return;
 	}
 
@@ -132,15 +142,15 @@ void AMyCharacter::PerformSprintAttack()
 	// 2. 扣除体力并暂停恢复（支持透支）
 	if (Attributes)
 	{
-		Attributes->UseStamina(SprintAttackStaminaCost);
+		Attributes->UseStamina(SprintConfig->StaminaCost);
 		Attributes->PauseStaminaRegen();
 	}
 
 	// 3. 设置伤害倍率和韧性伤害
-	SetAttackDamageMultiplier(SprintAttackDamageMultiplier);
+	SetAttackDamageMultiplier(SprintConfig->DamageMultiplier);
 	if (EquippedWeapon)
 	{
-		CurrentPoiseDamage = EquippedWeapon->GetBasePoiseDamage() * SprintAttackPoiseDamageMultiplier;
+		CurrentPoiseDamage = EquippedWeapon->GetBasePoiseDamage() * SprintConfig->PoiseDamageMultiplier;
 	}
 
 	// 4. 对齐攻击方向
@@ -158,20 +168,21 @@ void AMyCharacter::PerformSprintAttack()
 	// 6. 停止冲刺
 	StopSprinting();
 
-	// 7. 播放攻击蒙太奇
+	// 7. 播放攻击蒙太奇（关键：必须保留 Montage_Play + Montage_SetEndDelegate 模式！）
+	// 原因：当前实现依赖手动绑定 delegate，不能简化为 PlayAnimMontage()
 	ActionState = EActionState::EAS_Attacking;
 	UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
 	if (AnimInstance)
 	{
-		AnimInstance->Montage_Play(SprintAttackMontage);
+		AnimInstance->Montage_Play(SprintConfig->Montage);
 
 		// 冲刺攻击发出噪音
 		EmitNoise(AttackNoiseLoudness, AttackNoiseRange);
 
-		// 绑定结束回调（复用 OnAttackMontageEnded）
+		// 手动绑定 End Delegate（与 PlayAttackMontage 保持一致）
 		FOnMontageEnded MontageEndedDelegate;
 		MontageEndedDelegate.BindUObject(this, &AMyCharacter::OnAttackMontageEnded);
-		AnimInstance->Montage_SetEndDelegate(MontageEndedDelegate, SprintAttackMontage);
+		AnimInstance->Montage_SetEndDelegate(MontageEndedDelegate, SprintConfig->Montage);
 	}
 }
 
@@ -190,15 +201,14 @@ void AMyCharacter::Attack()
 
 	if (!CanAttack()) return;
 
-	// 连招系统检查
-	if (!LightAttackCombo || !LightAttackCombo->ComboMontage)
+	if (!AttackConfig || !AttackConfig->LightAttackCombo || !AttackConfig->LightAttackCombo->ComboMontage)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("LightAttackCombo not configured"));
+		UE_LOG(LogTemp, Warning, TEXT("AttackConfig or LightAttackCombo not configured"));
 		return;
 	}
 
 	// 获取当前段配置
-	const FComboSegment* Segment = LightAttackCombo->GetSegment(ComboCounter);
+	const FComboSegment* Segment = AttackConfig->LightAttackCombo->GetSegment(ComboCounter);
 	if (!Segment)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("Invalid combo segment: %d"), ComboCounter);
@@ -229,13 +239,15 @@ void AMyCharacter::Attack()
 	// 清除旧的输入标记
 	bComboInputReceived = false;
 
-	UE_LOG(LogTemp, Log, TEXT("Attack Segment %d: %s (Damage x%.1f)"), 
+	UE_LOG(LogTemp, Log, TEXT("Attack Segment %d: %s (Damage x%.1f)"),
 	       ComboCounter, *Segment->SectionName.ToString(), Segment->DamageMultiplier);
 }
 
 void AMyCharacter::PlayAttackMontage(const FName& SectionName)
 {
-	UAnimMontage* MontageToPlay = (LightAttackCombo && LightAttackCombo->ComboMontage) ? LightAttackCombo->ComboMontage.Get() : AttackMontage;
+	UAnimMontage* MontageToPlay = (AttackConfig && AttackConfig->LightAttackCombo && AttackConfig->LightAttackCombo->ComboMontage)
+		? AttackConfig->LightAttackCombo->ComboMontage.Get()
+		: AttackMontage;
 	PlayMontageSection(MontageToPlay, SectionName);
 
 	if (UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance(); AnimInstance && MontageToPlay)
@@ -1034,8 +1046,9 @@ void AMyCharacter::OnAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted
 
 	// 连招续接判断（在状态恢复之前）
 	const bool bShouldContinueCombo = bComboInputReceived &&
-	                                   LightAttackCombo &&
-	                                   (ComboCounter + 1) < LightAttackCombo->GetComboCount();
+	                                   AttackConfig &&
+	                                   AttackConfig->LightAttackCombo &&
+	                                   (ComboCounter + 1) < AttackConfig->LightAttackCombo->GetComboCount();
 
 	const bool bWillExhaust = IsExhaustionTimerActive();
 
@@ -1492,12 +1505,12 @@ void AMyCharacter::DrawDebugInfo() const
 	}
 
 	// [调试] 连招信息 — 仅配置了连招且在连招过程中或连招窗口打开时显示
-	if (LightAttackCombo)
+	if (AttackConfig && AttackConfig->LightAttackCombo)
 	{
 		FString ComboInfo = FString::Printf(
 			TEXT("Combo: %d/%d %s%s (x%.1f)"),
 			ComboCounter + 1,
-			LightAttackCombo->GetComboCount(),
+			AttackConfig->LightAttackCombo->GetComboCount(),
 			bComboWindowOpen ? TEXT("[WINDOW]") : TEXT(""),
 			bComboInputReceived ? TEXT("[INPUT]") : TEXT(""),
 			GetAttackDamageMultiplier()

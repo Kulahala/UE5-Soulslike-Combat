@@ -95,7 +95,8 @@ UUserWidget → UBaseHealthBarWidget (PB_Health + PB_Buffer progress bars, delay
            └── UPauseMenuWidget (Btn_Resume + Overlay_Background, delegate-driven, keyboard resume via NativeOnKeyDown)
 UAnimInstance → USlashAnimInstance (GroundSpeed, Direction, state enums)
 UDataAsset → UTreasureData
-            └── UComboDataAsset (light attack combo chain configurations, poise damage multiplier per segment)
+             ├── UComboDataAsset (light attack combo chain configurations, poise damage multiplier per segment)
+             └── UAttackConfigDataAsset (unified attack config: LightAttackCombo reference + TArray<FSpecialAttackConfig> for special attacks)
 UAnimNotifyState → UAnimNotifyState_WeaponCollision
                  ├── UAnimNotifyState_DodgeInvulnerable
                  └── UAnimNotifyState_ComboWindow (opens character combo buffer window)
@@ -147,7 +148,7 @@ UInterface → UBlockableInterface (weapon hit interception before final damage 
 ### Poise / Stance Break System
 
 - **Unified mechanism**: Parry and combo-based poise depletion both trigger `EES_StanceBreak` — there is no separate `EES_Parried` state. Parry = instant poise clear, combo = gradual poise reduction, both converge on the same `ApplyStanceBreak()`.
-- **Poise damage formula**: `Final Poise Damage = Weapon::BasePoiseDamage × ComboSegment::PoiseDamageMultiplier` (or `× SprintAttackPoiseDamageMultiplier` for sprint attacks). `CurrentPoiseDamage` is set in `Attack()` / `PerformSprintAttack()` before montage play, read by `DispatchHitFeedback()`.
+- **Poise damage formula**: `Final Poise Damage = Weapon::BasePoiseDamage × PoiseDamageMultiplier`. For combo attacks, the multiplier comes from `ComboSegment::PoiseDamageMultiplier`; for sprint attacks, from `FSpecialAttackConfig::PoiseDamageMultiplier` via `AttackConfig->FindSpecialAttack(ESpecialAttackType::SprintAttack)`. `CurrentPoiseDamage` is set in `Attack()` / `PerformSprintAttack()` before montage play, read by `DispatchHitFeedback()`.
 - **Deferred trigger pattern** (`DispatchHitFeedback()` execution order):
   1. `ApplyPoiseDamage(Damage, Instigator)` reduces `CurrentPoise` and sets `bPendingStanceBreak` flag if poise reaches zero — does **not** immediately trigger stance break
   2. `CachePendingHitContext()` + `GetHit()` → enemy enters `EES_Stunned` with normal hit react
@@ -169,9 +170,9 @@ UInterface → UBlockableInterface (weapon hit interception before final damage 
   - `StanceBreakPlayRate` — default `0.3f`
 - **Config on `AWeapon`** (protected, `EditAnywhere` under `"Combat|Poise"`):
   - `BasePoiseDamage` — default `1.f`; accessed via `GetBasePoiseDamage()`
-- **Config on `AMyCharacter`** (`EditDefaultsOnly` under `"Combat|Sprint Attack"`):
-  - `SprintAttackPoiseDamageMultiplier` — default `2.f`
-- **Implementation files**: `Source/Test/Public/Enemy/Enemy.h:57-79` (declaration + params), `Source/Test/Private/Enemy/Enemy.cpp:223-311` (implementation), `Source/Test/Public/Items/Weapon/Weapon.h:76-78,103` (BasePoiseDamage), `Source/Test/Private/Items/Weapon/Weapon.cpp:183-233` (DispatchHitFeedback poise/stance break logic), `Source/Test/Public/Combat/ComboDataAsset.h:24-26` (PoiseDamageMultiplier), `Source/Test/Public/Character/BaseCharacter.h:47,131` (CurrentPoiseDamage + getter), `Source/Test/Public/Character/MyCharacter.h:260-261` (SprintAttackPoiseDamageMultiplier), `Source/Test/Public/Items/Shield/Shield.h` (StanceBreak params removed), `Source/Test/Public/Interfaces/BlockableInterface.h` (StanceBreak fields removed from FBlockResult).
+- **Config on `AMyCharacter`** (`EditDefaultsOnly` under `"Combat"`):
+  - `AttackConfig` — `UAttackConfigDataAsset*`, unified attack configuration asset
+- **Implementation files**: `Source/Test/Public/Enemy/Enemy.h:57-79` (declaration + params), `Source/Test/Private/Enemy/Enemy.cpp:223-311` (implementation), `Source/Test/Public/Items/Weapon/Weapon.h:76-78,103` (BasePoiseDamage), `Source/Test/Private/Items/Weapon/Weapon.cpp:183-233` (DispatchHitFeedback poise/stance break logic), `Source/Test/Public/Combat/ComboDataAsset.h:24-26` (PoiseDamageMultiplier), `Source/Test/Public/Combat/AttackConfigDataAsset.h` (ESpecialAttackType + FSpecialAttackConfig), `Source/Test/Public/Character/BaseCharacter.h:47,131` (CurrentPoiseDamage + getter), `Source/Test/Public/Character/MyCharacter.h:252-253` (AttackConfig), `Source/Test/Public/Items/Shield/Shield.h` (StanceBreak params removed), `Source/Test/Public/Interfaces/BlockableInterface.h` (StanceBreak fields removed from FBlockResult).
 
 ### Block System
 
@@ -232,13 +233,15 @@ UInterface → UBlockableInterface (weapon hit interception before final damage 
 
 ### Combo System
 
-- **Data-Driven Configuration**: A light attack combo chain is defined via `UComboDataAsset` (set on `AMyCharacter::LightAttackCombo`). Each segment configures a custom Montage Section, a damage multiplier (scales base weapon damage), a stamina cost, and a poise damage multiplier (scales weapon base poise damage).
+- **Data-Driven Configuration**: A light attack combo chain is defined via `UComboDataAsset`. Each segment configures a custom Montage Section, a damage multiplier (scales base weapon damage), a stamina cost, and a poise damage multiplier (scales weapon base poise damage).
+- **Unified Attack Config**: `AMyCharacter` uses `UAttackConfigDataAsset` (referenced as `AttackConfig` member) to manage all attack types. `AttackConfigDataAsset` references `LightAttackCombo` (`UComboDataAsset`) and contains a `TArray<FSpecialAttackConfig>` for special attacks (sprint, future: jump, charged). Each `FSpecialAttackConfig` has a `Type` enum (`ESpecialAttackType`), `Montage`, `DamageMultiplier`, `PoiseDamageMultiplier`, and `StaminaCost`. Lookup is via `AttackConfig->FindSpecialAttack(ESpecialAttackType::SprintAttack)`.
+- **No backward compat layer**: Old fields (`LightAttackCombo`, `SprintAttackMontage`, `SprintAttackDamageMultiplier`, `SprintAttackStaminaCost`, `SprintAttackPoiseDamageMultiplier`) have been **removed**. `AttackConfig` is the single source of truth. `BeginPlay()` has `ensureMsgf(AttackConfig, ...)` guard.
 - **Input Buffering**: Checked during `ACharacterController::Input_Attack()`. If `AMyCharacter::IsComboWindowOpen()` is true, the input is buffered by setting `bComboInputReceived = true`. Otherwise, a normal attack is initiated.
 - **Combo Window State**: Controlled by `UAnimNotifyState_ComboWindow` placed in the attack montage. It calls `OpenComboWindow()` and `CloseComboWindow()` to toggle the input window.
 - **Combo Progression**: In `AMyCharacter::OnAttackMontageEnded()`, if `bComboInputReceived` is true and a next combo segment exists, the character increases the combo counter, temporarily marks the action state as `EActionState::EAS_UnOccupied` (to pass the `CanAttack()` gate), and immediately triggers `Attack()`.
-- **Reset Guards & Interruption**: On attack finish (without buffered inputs), normal interruption (getting hit, death, dodge roll, or exhaustion), `ResetCombo()` is called to reset the combo counter, input flag, and restore the damage multiplier to `1.0f` and poise damage to `1.f`.
+- **Reset Guards & Interruption**: On attack finish (without buffered inputs), normal interruption (getting hit, death, dodge roll, or exhaustion), `ResetCombo()` is called to reset the combo counter, input flag, and restore the damage multiplier to `1.0f` and poise damage to `EquippedWeapon->GetBasePoiseDamage()` (or `1.f` fallback if no weapon equipped).
 - **Damage Multiplier Application**: Applied in `AWeapon::ResolveHit()`. The weapon queries the attacker's `GetAttackDamageMultiplier()` to scale the raw damage *before* passing it to `IBlockableInterface::TryBlockHit()`, ensuring block stamina costs and damage mitigation calculations scale accordingly.
-- **Poise Damage Multiplier Application**: `CurrentPoiseDamage = EquippedWeapon->GetBasePoiseDamage() * Segment.PoiseDamageMultiplier` is set in `Attack()` before montage play. Sprint attack uses `EquippedWeapon->GetBasePoiseDamage() * SprintAttackPoiseDamageMultiplier`. The final value is read by `DispatchHitFeedback()` when calling `Enemy->ApplyPoiseDamage()`.
+- **Poise Damage Multiplier Application**: For combo attacks, `CurrentPoiseDamage = EquippedWeapon->GetBasePoiseDamage() * Segment.PoiseDamageMultiplier` is set in `Attack()` before montage play. For sprint attacks, `CurrentPoiseDamage = EquippedWeapon->GetBasePoiseDamage() * SprintConfig->PoiseDamageMultiplier` via `AttackConfig->FindSpecialAttack(ESpecialAttackType::SprintAttack)`. The final value is read by `DispatchHitFeedback()` when calling `Enemy->ApplyPoiseDamage()`.
 - **Debug Visibility**: Rendered via `FDebugDrawHelper` in `DrawDebugInfo` when master debug rendering is active, printing combo index, input/window status, and current damage multiplier.
 
 ### Sprint Attack System
@@ -247,20 +250,17 @@ UInterface → UBlockableInterface (weapon hit interception before final damage 
 - **Priority**: sprint attack is checked **before** `CanAttack()` and the normal combo flow. Guard order: `bIsBlocking` → `ShouldUseSprintAttack()` → `CanAttack()` → combo logic.
 - **Conditions** (`ShouldUseSprintAttack()`): `bIsSprinting`, movement input (`GetLastMovementInputVector().SizeSquared2D() > KINDA_SMALL_NUMBER`), weapon equipped (`WeaponState != EWS_Unequipped`), `EAS_UnOccupied`, grounded. No lock-on restriction — works in both lock-on and non-lock states.
 - **Reuses `EAS_Attacking`**: no new `EActionState` enum value. No `bIsSprintAttack` flag — `OnAttackMontageEnded()` handles cleanup correctly without one: sprint attacks never open a combo window, so `bShouldContinueCombo` is always false, and `ResetCombo()` + `RestoreRotationMode()` + exhaustion check all work as-is.
-- **Independent montage** (`SprintAttackMontage`): separate from the combo montage to avoid pollution. Requires `AnimNotifyState_WeaponCollision` for weapon trace windows. End delegate reuses `OnAttackMontageEnded()`.
+- **Independent montage**: separate from the combo montage to avoid pollution. Requires `AnimNotifyState_WeaponCollision` for weapon trace windows. End delegate reuses `OnAttackMontageEnded()`.
+- **Configuration**: Managed via `AttackConfig->FindSpecialAttack(ESpecialAttackType::SprintAttack)`. Returns `FSpecialAttackConfig` containing `Montage`, `DamageMultiplier`, `PoiseDamageMultiplier`, `StaminaCost`. No fallback to deprecated fields — `AttackConfig` must be set on `BP_MyCharacter`.
 - **Replaces lock-on free-run attack**: the old `ShouldUseLockOnFreeRun()` + `FaceDirection2D()` + `SetMovementRotationMode()` branch in `Attack()` is removed. `ShouldUseLockOnFreeRun()` itself is preserved — it's still needed for lock-on sprint **movement** behavior (speed, rotation mode, camera in `UpdateMovementSpeed()`, `ApplyLockOnRotationMode()`, `GetLockOnCameraTargets()`).
 - **Allows stamina overspend**: uses `Attributes->UseStamina()` directly with no `CheckStamina()` gate, consistent with the "last action overspend" design shared by dodge, parry, and normal attacks.
-- **Clears combo state**: calls `ResetCombo()` at the start of `PerformSprintAttack()` before setting `SprintAttackDamageMultiplier`, so stale combo state from a prior attack cannot contaminate the sprint hit.
+- **Clears combo state**: calls `ResetCombo()` at the start of `PerformSprintAttack()` before setting damage multiplier, so stale combo state from a prior attack cannot contaminate the sprint hit.
 - **Direction with fallback**: faces `GetLastMovementInputVector().GetSafeNormal2D()` direction, falling back to `GetActorForwardVector()` if input is nearly zero (defensive pattern borrowed from `ComputeDodgeDirection()`).
 - **Rotation lock**: sets `bOrientRotationToMovement = false` and `bUseControllerRotationYaw = false` during the attack; `OnAttackMontageEnded()` calls `RestoreRotationMode()` to recover.
 - **Stops sprinting**: calls `StopSprinting()` after rotation lock and before montage play, so the character returns to normal run speed when the attack montage ends.
 - **Not in combo system**: sprint attack does not use `AnimNotifyState_ComboWindow` and does not advance `ComboCounter`. It is a single-hit attack that ends with `EAS_UnOccupied`.
-- **Config** (all `EditDefaultsOnly` on `AMyCharacter` under `"Combat|Sprint Attack"`):
-  - `SprintAttackMontage` — independent montage asset
-  - `SprintAttackDamageMultiplier` — default `1.8f`
-  - `SprintAttackStaminaCost` — default `25.f`
-  - `SprintAttackPoiseDamageMultiplier` — default `2.f` (scales weapon `BasePoiseDamage`)
-- **Implementation files**: `Source/Test/Public/Character/MyCharacter.h:34-35` (declaration), `Source/Test/Private/Character/MyCharacter.cpp:95-153` (implementation).
+- **Default values** (in `DA_AttackConfig` asset): SprintAttack `DamageMultiplier = 1.8`, `StaminaCost = 25`, `PoiseDamageMultiplier = 2.0`.
+- **Implementation files**: `Source/Test/Public/Combat/AttackConfigDataAsset.h` (ESpecialAttackType + FSpecialAttackConfig + UAttackConfigDataAsset), `Source/Test/Private/Combat/AttackConfigDataAsset.cpp` (FindSpecialAttack + PostInitProperties), `Source/Test/Public/Character/MyCharacter.h:252-253` (AttackConfig declaration), `Source/Test/Private/Character/MyCharacter.cpp` (Attack, PerformSprintAttack, OnAttackMontageEnded, PlayAttackMontage, BeginPlay).
 
 ### Lock-On System
 
@@ -273,7 +273,7 @@ UInterface → UBlockableInterface (weapon hit interception before final damage 
 - Lock-on camera framing currently stays on **yaw-only** control rotation. If future work wants target-height framing to matter, that requires changing the camera-aim math; adding a height offset alone is a no-op while `LookAt.Pitch` is cleared back to zero.
 - Lock-on Sprint free-run is a derived movement mode, **not** a separate `EActionState`. `ShouldUseLockOnFreeRun()` is based on lock-on, sprint intent, `EAS_UnOccupied`, grounded state, and live movement input.
 - During lock-on free-run, the target remains locked and the controller / camera still yaw toward the enemy, but the character body temporarily uses `bOrientRotationToMovement=true` and `bUseControllerRotationYaw=false` so movement direction drives facing.
-- **Sprint Attack replaces free-run attack**: the old free-run attack branch in `Attack()` (which played a normal combo segment at movement direction) has been removed. Sprinting + attack now triggers `PerformSprintAttack()` regardless of lock-on state, with a dedicated `SprintAttackMontage` and configurable damage multiplier. `ShouldUseLockOnFreeRun()` is still used for lock-on sprint **movement** (speed, rotation mode, camera offset).
+- **Sprint Attack replaces free-run attack**: the old free-run attack branch in `Attack()` (which played a normal combo segment at movement direction) has been removed. Sprinting + attack now triggers `PerformSprintAttack()` regardless of lock-on state, with montage and parameters from `AttackConfig->FindSpecialAttack(ESpecialAttackType::SprintAttack)`. `ShouldUseLockOnFreeRun()` is still used for lock-on sprint **movement** (speed, rotation mode, camera offset).
 - Lock-on Sprint free-run camera framing now adds a small movement-direction offset under `LockOnCamera`: strafe input shifts the shoulder laterally, while backward input adds extra camera height plus an optional `TargetArmLength` bonus. Keep the target locked; do not turn this into a free-look mode.
 
 ### Lock-On Camera

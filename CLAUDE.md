@@ -396,7 +396,9 @@ UDataAsset → UComboDataAsset (combo chain: SectionName, DamageMultiplier, Stam
 
 ### 连招系统（Combo System）
 - **架构**：数据驱动 + AnimNotifyState 驱动窗口
-- **数据结构**：`UComboDataAsset` 存储连招链（`TArray<FComboSegment>`），每段配置 `SectionName`、`DamageMultiplier`、`StaminaCost`
+- **统一攻击配置**：`AMyCharacter` 使用 `UAttackConfigDataAsset` 统一管理所有攻击类型。`AttackConfigDataAsset` 引用 `LightAttackCombo`（UComboDataAsset）并包含 `TArray<FSpecialAttackConfig>` 管理特殊攻击（冲刺、跳跃、蓄力）。
+- **数据结构**：`UComboDataAsset` 存储连招链（`TArray<FComboSegment>`），每段配置 `SectionName`、`DamageMultiplier`、`StaminaCost`、`PoiseDamageMultiplier`
+- **特殊攻击配置**：`FSpecialAttackConfig` 包含 `Type`（enum class ESpecialAttackType）、`Montage`、`DamageMultiplier`、`PoiseDamageMultiplier`、`StaminaCost`。通过 `AttackConfig->FindSpecialAttack(Type)` 查找。
 - **连招窗口**：`UAnimNotifyState_ComboWindow` 在蒙太奇中标记输入窗口（可视化调整，自动跟随 PlayRate）
 - **输入缓冲**：`Input_Attack()` 检查 `IsComboWindowOpen()`，窗口内设置 `bComboInputReceived = true`，窗口外直接调用 `Attack()`
 - **连招续接**：`OnAttackMontageEnded()` 检查 `bComboInputReceived`：
@@ -407,7 +409,7 @@ UDataAsset → UComboDataAsset (combo chain: SectionName, DamageMultiplier, Stam
 - **中断清理**：所有中断点（`GetHit`、`Die`、`HandleExhausted`、`Dodge`）必须调用 `ResetCombo()`
 - **累积式动画**：支持 Attack1:a, Attack2:a+b, Attack3:a+b+c 的动画结构，通过蒙太奇 section 跳转实现（第二段跳到"b开始"，第三段跳到"c开始"）
 - **AnimNotifyState vs Timer**：连招窗口必须用 AnimNotifyState，原因：(1) 自动跟随 PlayRate，(2) 可视化调整无需改代码，(3) 动画迭代零代码改动
-- **文件位置**：`Source/Test/Public/Combat/ComboDataAsset.h`、`Source/Test/Public/AnimNotify/AnimNotifyState_ComboWindow.h`
+- **文件位置**：`Source/Test/Public/Combat/AttackConfigDataAsset.h`（统一配置）、`Source/Test/Public/Combat/ComboDataAsset.h`（连招链）、`Source/Test/Public/AnimNotify/AnimNotifyState_ComboWindow.h`（窗口标记）
 
 ### 替换式状态更新：先清后判
 当函数需要"覆盖旧状态"时，先清空旧状态再做 early-return 守卫。
