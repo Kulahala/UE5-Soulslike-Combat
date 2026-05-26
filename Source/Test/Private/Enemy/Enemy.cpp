@@ -91,6 +91,14 @@ void AEnemy::WeaponInit()
 	if (WeaponClass)
 	{
 		AWeapon* Weapon = GetWorld()->SpawnActor<AWeapon>(WeaponClass);
+		if (!Weapon)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("%s failed to spawn weapon from class %s"),
+				*GetName(),
+				*GetNameSafe(WeaponClass));
+			return;
+		}
+
 		Weapon->Equip(GetMesh(), FName("RightHandSocket"), this, this);
 		EquippedWeapon = Weapon;
 	}

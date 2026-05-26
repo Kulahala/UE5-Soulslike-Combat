@@ -76,7 +76,7 @@ All gameplay states are defined as `UENUM` enums in `CharacterTypes.h` — the s
 AActor
 ├── Aitem (parabolic spawning, floating animation, overlap events)
 │   ├── AWeapon (box-trace sweep collision, hit-stop, camera shake, base poise damage)
-│   ├── AShield (offhand equip, block angle/damage/stamina config, block FX, parry FX + stance break params)
+│   ├── AShield (offhand equip, block angle/damage/stamina/move-speed config, block FX, parry FX)
 │   └── ATreasure (gold value, UTreasureData asset)
 ├── ABreakAbleActor + IHitInterface (StaticMesh → GeometryCollection swap)
 ├── AArenaGenerator (USplineComponent + UPCGComponent)
@@ -101,7 +101,7 @@ UAnimNotifyState → UAnimNotifyState_WeaponCollision
                  ├── UAnimNotifyState_DodgeInvulnerable
                  └── UAnimNotifyState_ComboWindow (opens character combo buffer window)
 UAnimNotify → UAnimNotify_PotionHeal (configurable HealPercent, triggers during potion montage)
-UInterface → UBlockableInterface (weapon hit interception before final damage application, parry → stance break duration/playrate)
+UInterface → UBlockableInterface (weapon hit interception before final damage application, block/parry result only; no stance-break params)
 ```
 
 ### Combat Pipeline
@@ -121,7 +121,7 @@ UInterface → UBlockableInterface (weapon hit interception before final damage 
      3. After `GetHit()`, `ShouldTriggerStanceBreak()` is checked → `ApplyStanceBreak()` overrides to `EES_StanceBreak` + slow-motion hit react
    - **Parry poise damage targets the attacker** (`GetOwner()`), not `HitActor`: parry occurs when an enemy weapon hits the player, so `HitActor` is the player. `Cast<AEnemy>(HitActor)` would fail; `Cast<AEnemy>(GetOwner())` correctly targets the attacking enemy
    - `AWeapon::ExecuteWeaponTrace()` is intentionally decomposed into `BuildIgnoreList()`, `ResolveHit()`, and `DispatchHitFeedback()`. Keep `ResolveHit()` focused on same-team/block/damage math, and keep `DispatchHitFeedback()` focused on context write / poise damage / `GetHit()` / stance break check / camera shake / hit stop / ignore list; do not inflate it into a generic combat pipeline without a real new use case
-6. **NotifyEnd** → clears `IgnoreActors` + `SetAttackHyperArmor(false)` (player only)
+6. **NotifyEnd** → clears the weapon hit ignore list through `ClearIgnoreActors()` + `SetAttackHyperArmor(false)` (player only)
 7. `OnAttackMontageEnded` delegate (with `bInterrupted` guard that restores `ActionState`) → restores `EAS_UnOccupied` and resumes stamina regen
 
 ### Hit Knockback
@@ -154,8 +154,8 @@ UInterface → UBlockableInterface (weapon hit interception before final damage 
   2. `CachePendingHitContext()` + `GetHit()` → enemy enters `EES_Stunned` with normal hit react
   3. `ShouldTriggerStanceBreak()` checked → `ApplyStanceBreak()` overrides to `EES_StanceBreak` + slow-motion hit react
   4. Visual result: brief normal hit → transition to slow-motion stance break (natural feel)
-- **Parry path**: In `DispatchHitFeedback()`, parry poise damage targets `GetOwner()` (the attacking enemy), not `HitActor` (the player). `ShouldTriggerStanceBreak()` is also checked on `GetOwner()` for parry. **Stance break parameters are unified** — both parry and normal poise break use `Enemy->StanceBreakDuration/PlayRate` (enemy's own parameters).
-- **Normal combo path**: `ShouldTriggerStanceBreak()` is checked on `HitActor` (the enemy). Uses `Enemy->StanceBreakDuration/PlayRate` from enemy config.
+- **Parry path**: In `DispatchHitFeedback()`, parry poise damage targets `GetOwner()` (the attacking enemy), not `HitActor` (the player). `ShouldTriggerStanceBreak()` is also checked on `GetOwner()` for parry. **Stance break parameters are unified** — both parry and normal poise break use `Enemy->GetStanceBreakDuration()` / `Enemy->GetStanceBreakPlayRate()` (enemy's own parameters).
+- **Normal combo path**: `ShouldTriggerStanceBreak()` is checked on `HitActor` (the enemy). Uses `Enemy->GetStanceBreakDuration()` / `Enemy->GetStanceBreakPlayRate()` from enemy config.
 - **Parameter source**: Shield no longer holds `StanceBreakDuration/PlayRate`. `FBlockResult` and `FWeaponHitResult` no longer pass these fields. All stance breaks use enemy parameters, allowing different enemy types to have different stance break characteristics.
 - **`ApplyPoiseDamage()` guards**: Early-returns on `EES_Dead` and `EES_StanceBreak`. Records `LastPoiseDamageInstigator` for directional hit react in `ApplyStanceBreak()`.
 - **`ApplyStanceBreak()` behavior**: Clears `bPendingStanceBreak`, calls `ResetPoise()` (immediate poise refill), stops current montage, sets `EES_StanceBreak`, plays `DirectionalHitReact` from `LastPoiseDamageInstigator`, applies slow `PlayRate`, starts `StanceBreakRecoveryTimer`.
@@ -172,7 +172,7 @@ UInterface → UBlockableInterface (weapon hit interception before final damage 
   - `BasePoiseDamage` — default `1.f`; accessed via `GetBasePoiseDamage()`
 - **Config on `AMyCharacter`** (`EditDefaultsOnly` under `"Combat"`):
   - `AttackConfig` — `UAttackConfigDataAsset*`, unified attack configuration asset
-- **Implementation files**: `Source/Test/Public/Enemy/Enemy.h:57-79` (declaration + params), `Source/Test/Private/Enemy/Enemy.cpp:223-311` (implementation), `Source/Test/Public/Items/Weapon/Weapon.h:76-78,103` (BasePoiseDamage), `Source/Test/Private/Items/Weapon/Weapon.cpp:183-233` (DispatchHitFeedback poise/stance break logic), `Source/Test/Public/Combat/ComboDataAsset.h:24-26` (PoiseDamageMultiplier), `Source/Test/Public/Combat/AttackConfigDataAsset.h` (ESpecialAttackType + FSpecialAttackConfig), `Source/Test/Public/Character/BaseCharacter.h:47,131` (CurrentPoiseDamage + getter), `Source/Test/Public/Character/MyCharacter.h:252-253` (AttackConfig), `Source/Test/Public/Items/Shield/Shield.h` (StanceBreak params removed), `Source/Test/Public/Interfaces/BlockableInterface.h` (StanceBreak fields removed from FBlockResult).
+- **Implementation files**: `Source/Test/Public/Enemy/Enemy.h` (poise API/getters + private params), `Source/Test/Private/Enemy/Enemy.cpp` (poise/stance-break implementation), `Source/Test/Public/Items/Weapon/Weapon.h` (`BasePoiseDamage` + `GetBasePoiseDamage()`), `Source/Test/Private/Items/Weapon/Weapon.cpp` (`DispatchHitFeedback` poise/stance-break logic), `Source/Test/Public/Combat/ComboDataAsset.h` (`PoiseDamageMultiplier`), `Source/Test/Public/Combat/AttackConfigDataAsset.h` (`ESpecialAttackType` + `FSpecialAttackConfig`), `Source/Test/Public/Character/BaseCharacter.h` (`CurrentPoiseDamage` + getter), `Source/Test/Public/Character/MyCharacter.h` (`AttackConfig`), `Source/Test/Public/Items/Shield/Shield.h` (no stance-break params), `Source/Test/Public/Interfaces/BlockableInterface.h` (`FBlockResult` has no stance-break fields).
 
 ### Block System
 
@@ -181,12 +181,13 @@ UInterface → UBlockableInterface (weapon hit interception before final damage 
 - `AShield` is equipped to the offhand via `EquipToOffhand()` and provides block tuning values:
   `BlockHalfAngleDegrees`, `BlockedDamageMultiplier`, `BlockStaminaCostPerDamage`, `BlockMoveSpeedMultiplier`.
   Parry-specific params: `ParryStaminaCost` (default `15.f`), `ParryCooldown` (default `0.4f`), `ParrySound`, `ParryParticle`.
+- `AShield` parameters are private `UPROPERTY` values with `AllowPrivateAccess`; gameplay code reads them through `GetBlock*()`, `GetParry*()`, and `GetOffhandSocketName()` accessors.
 - `AMyCharacter::CanStartBlock()` is intentionally independent of weapon equip state. Current block-start gates are: shield equipped, `EAS_UnOccupied`, and grounded.
 - `AWeapon::ExecuteWeaponTrace()` checks `IBlockableInterface` on the hit actor before final damage application.
 - Successful blocks reduce or redirect damage through `FBlockResult`, suppress shared `DirectionalHitReact()` / `PlayHitEffects()`, and play shield-specific sound/particle feedback.
 - Blocked hits still flow through `GetHit` via `FPendingHitContext`, so scaled knockback and class-specific feedback can still happen even when normal hit react is suppressed.
 - Blocking is canceled when shield/state/falling conditions become invalid; blocked movement speed is reduced through `UpdateMovementSpeed()`.
-- When tuning block damage reduction, update both the C++ default (`AShield::BlockedDamageMultiplier`) and the actual `BP_Shield` asset if it overrides the value in Blueprint.
+- When tuning block damage reduction, update both the C++ default (`AShield::BlockedDamageMultiplier`, read through `GetBlockedDamageMultiplier()`) and the actual `BP_Shield` asset if it overrides the value in Blueprint.
 
 ### Dodge System
 
@@ -320,7 +321,7 @@ UInterface → UBlockableInterface (weapon hit interception before final damage 
 - Current base speeds are walk `200`, run `300`, sprint `360`. Non-lock movement is treated as free movement and passes a forward dot into `CalcBaseSpeed()` so sprint intent can apply without fake side/back penalties.
 - Ordinary lock-on movement uses directional speed interpolation from forward `1.0` through `LockOnStrafeSpeedMultiplier` to `LockOnBackSpeedMultiplier`; current defaults are strafe `0.95` and back `0.9`.
 - Lock-on Sprint free-run bypasses lock-on directional slowdown: any movement-input direction can reach sprint speed while the locked camera remains on the enemy.
-- The state multiplier is chosen before directional scaling: blocking uses `EquippedShield->BlockMoveSpeedMultiplier`, otherwise `1.0f`. `EAS_UsingPotion` early-returns with `WalkSpeed` before `TickSprintStamina()` and directional scaling. Being armed / holding a weapon does not reduce normal movement speed by itself.
+- The state multiplier is chosen before directional scaling: blocking uses `EquippedShield->GetBlockMoveSpeedMultiplier()`, otherwise `1.0f`. `EAS_UsingPotion` early-returns with `WalkSpeed` before `TickSprintStamina()` and directional scaling. Being armed / holding a weapon does not reduce normal movement speed by itself.
 - `TickSprintStamina()` drains stamina while grounded, unblocked, and moving. In ordinary lock-on combat step it still uses the forward-dot gate, while lock-on free-run bypasses that gate so side/back sprint consumes stamina.
 
 ### Enemy AI (`AEnemy`)
@@ -348,6 +349,7 @@ UInterface → UBlockableInterface (weapon hit interception before final damage 
 - `MoveToTarget()`, `MoveToLocation()`, `MoveToCombatLocation()`, and `MoveToCombatTarget()` are intentionally separate semantic wrappers. If you ever dedupe them, only extract the shared `FAIMoveRequest` boilerplate; do not collapse them into one flag-heavy helper.
 - When planning extensibility for new enemy archetypes, prefer splitting **combat decision** from **navigation execution**. Current `AEnemy` seam is: `OnChasing()` is virtual, and combat behavior is split into `ShouldTriggerAttack(...)`, `HandleAttackReadyPositioning(...)`, and `HandleCooldownPositioning(...)`. Extend new archetypes by overriding those hooks rather than `MoveTo*()` helpers or copying the whole combat loop. Keep `SetEnemyState()` / `CheckCombatTarget()` as base-owned boundaries unless a variant truly needs a different state machine.
 - `EES_Attacking`, `EES_Stunned`, `EES_StanceBreak`, and `EES_Dead` are hard-stop states for Tick-driven AI reactions.
+- `WeaponInit()` treats `WeaponClass == nullptr` as an intentional unarmed enemy, but if `WeaponClass` is set and `SpawnActor<AWeapon>()` fails it must log and return before `Equip()`. Do not dereference spawned runtime actors without a null guard even when the class config looks valid.
 
 ### Hearing Perception System
 
@@ -385,13 +387,13 @@ Enemies use `UAISenseConfig_Hearing` alongside the existing `UAISenseConfig_Sigh
 
 ### Attack Coordination System
 
-Prevents multiple enemies from attacking simultaneously for better gameplay feel. Uses `UGameplayStatics::GetAllActorsOfClass` traversal with distance + state filtering.
+Prevents multiple enemies from attacking simultaneously for better gameplay feel. Uses `UGameplayStatics::GetAllActorsOfClass` traversal with distance + same-target + state filtering.
 
-- **Detection**: `AEnemy::IsAllyAttackingNearby(float& OutMaxRemainingTime)` — traverses all `AEnemy` actors, checks if any ally within `AttackCoordinationRange` (800cm default) is in `EES_Attacking` state, returns the **maximum** remaining CD time across all attacking allies (not the first found).
-- **Extension strategy**: Extends own CD to `max_ally_remaining_time + AttackCoordinationBuffer` (0.5s default), capped by `MaxAttackCoordinationWait` (3s default). The coordination-extended CD follows the same cooldown path — next tick enters `HandleCooldownPositioning()` for normal combat spacing.
-- **Dual entry points**:
-  - `OnCombating()` Tick (Enemy.cpp:687-714): checks when `ShouldTriggerAttack()` returns false and `!bAttackOnCooldown` — only applies to enemies that are combat-eligible but not yet attacking.
-  - `OnAttackCooldownEnd()` (Enemy.cpp:339-359): re-checks before the original CD expiry logic runs, preventing a same-frame window where two enemies' cooldowns could expire simultaneously and both attack.
+- **Detection**: `AEnemy::IsAllyAttackingNearby(float& OutSuggestedWaitTime)` traverses all `AEnemy` actors and returns true only when another enemy is within `AttackCoordinationRange`, is in `EES_Attacking`, and has the same `ChasingTarget`.
+- **Wait strategy**: Coordination waits use this enemy's `AttackCoordinationBuffer` (0.5s default), capped by `MaxAttackCoordinationWait` (3s default). Do not read the attacking ally's `AttackCooldownTimer`; that timer represents the full attack interval, not attack animation/state remaining time, and makes combat feel too passive.
+- **Entry points**:
+  - `OnCombating()` checks coordination both before the ready-to-attack `Attack()` path and in the attack-ready positioning path. All real attack starts must pass this coordination gate.
+  - `OnAttackCooldownEnd()` re-checks before the original CD expiry logic runs, preventing a same-frame window where two enemies' cooldowns could expire simultaneously and both attack.
 - **Interruption recovery**: If the attacking ally is stunned/stance-broken and exits `EES_Attacking`, the waiting enemy's next `IsAllyAttackingNearby()` call finds no attacking ally and proceeds to attack immediately. Blocked/damage flags apply normally — the waiting enemy is still in `EES_Combating` and can be hit.
 - **Forced attack cap**: `MaxAttackCoordinationWait` (3s) prevents infinite waiting if an ally gets stuck in `EES_Attacking` state (e.g., unusually long montage).
 - **`ShouldTriggerAttack()` remains `const`**: The coordination logic lives in the callers (`OnCombating()` and `OnAttackCooldownEnd()`), not inside the predicate, preserving the existing extension seam for derived enemy classes.
@@ -400,8 +402,8 @@ Prevents multiple enemies from attacking simultaneously for better gameplay feel
   - `AttackCoordinationRange` — default `800.f` (cm)
   - `AttackCoordinationBuffer` — default `0.5f` (seconds)
   - `MaxAttackCoordinationWait` — default `3.f` (seconds)
-- **Implementation files**: `Source/Test/Public/Enemy/Enemy.h:198-206` (parameters), `Source/Test/Public/Enemy/Enemy.h:292-293` (declaration), `Source/Test/Private/Enemy/Enemy.cpp:1185-1218` (`IsAllyAttackingNearby`), `Source/Test/Private/Enemy/Enemy.cpp:683-718` (`OnCombating` modification), `Source/Test/Private/Enemy/Enemy.cpp:328-374` (`OnAttackCooldownEnd` modification)
-- **Future work**: Same-target check via `OtherEnemy->ChasingTarget == this->ChasingTarget` (currently coordinates across different combat targets — marked as TODO comment), AI Perception Team-based sensing for large scenes, priority system for elite enemies, attack slot system allowing 2+ simultaneous attackers, attack mode toggle (coordinated / free).
+- **Implementation files**: `Source/Test/Public/Enemy/Enemy.h` (parameters + declaration), `Source/Test/Private/Enemy/Enemy.cpp` (`IsAllyAttackingNearby`, `OnCombating`, `OnAttackCooldownEnd`)
+- **Future work**: AI Perception Team-based sensing for large scenes, priority system for elite enemies, attack slot system allowing 2+ simultaneous attackers, attack mode toggle (coordinated / free).
 
 ### Health Bar Buffer System
 
@@ -424,7 +426,7 @@ Prevents multiple enemies from attacking simultaneously for better gameplay feel
 
 - Player hurt feedback is split intentionally: **camera shake = hit reaction**, **red vignette = health loss**.
 - `AMyCharacter::GetHit_Implementation()` triggers `HitReceivedCameraShake` for the local player whenever the weapon-hit feedback path reaches `GetHit`, including blocked hits and same-team weapon hits.
-- `AMyCharacter::TryBlockHit()` writes `LastDamageFlashScale` from `AShield::BlockedDamageMultiplier`; `TakeDamage()` pushes that scale into `UPlayerHUDWidget::SetPendingDamageFlashScale(...)` before damage application, then immediately resets the local value so hits cannot leak state across frames.
+- `AMyCharacter::TryBlockHit()` writes `LastDamageFlashScale` from `EquippedShield->GetBlockedDamageMultiplier()`; `TakeDamage()` pushes that scale into `UPlayerHUDWidget::SetPendingDamageFlashScale(...)` before damage application, then immediately resets the local value so hits cannot leak state across frames.
 - `UPlayerHUDWidget::SetHealthPercent()` consumes `PendingDamageFlashScale` only when health actually drops, so the vignette intensity tracks final post-block damage instead of raw incoming damage.
 - Result: blocked or friendly hits may still shake the camera, but only real health loss drives the red vignette.
 - The vignette mask is generated in C++ as an **edge-distance gradient**, not a radial center fade. `VignetteFadeWidth = 0.2` means roughly the outer 20% of the screen carries the red falloff while the center stays clear.
@@ -464,6 +466,7 @@ Prevents multiple enemies from attacking simultaneously for better gameplay feel
 - The current Slate geometry calls use `ToPaintGeometry(Size, FSlateLayoutTransform(...))`; do not reintroduce older deprecated signatures.
 - `UPlayerHUDWidget`'s runtime vignette is a transient texture. When rebuilding it, clear the brush resource first, destroy the old texture with `ConditionalBeginDestroy()`, then recreate it with `UTexture2D::CreateTransient(...)`.
 - `AWeapon::ResolveHit()` returning `FWeaponHitResult` is an established local pattern. Prefer a small result struct over piling on more out params when a combat helper needs to return several coupled values.
+- `AWeapon::IgnoreActors` is private; notify/caller code must clear it through `ClearIgnoreActors()` instead of direct array mutation.
 
 ### Content Organization
 
@@ -499,6 +502,14 @@ class AWeapon;
 - Any function bound through `AddDynamic(...)` must be marked with `UFUNCTION()`, even if it is not exposed to Blueprint. Current examples include `HandleExhausted`, `TargetPerceptionUpdated`, `SphereOverlap`, `SphereEndOverlap`, and HUD health/stamina update callbacks.
 - UMG child widgets are bound with `UPROPERTY(meta = (BindWidget))`; Blueprint-owned presentation hooks use `BlueprintImplementableEvent` (for example `UBaseHealthBarWidget::PlayFadeOutAnim()`).
 - Do not assume a repo-wide `TObjectPtr` migration. Follow the surrounding file style: this codebase mostly uses reflected raw pointers, with `TObjectPtr` appearing only in a few spots such as `AArenaGenerator`.
+
+### Encapsulation
+
+- Editable config that external code only reads should be `private` `UPROPERTY(EditAnywhere/EditDefaultsOnly, meta = (AllowPrivateAccess = "true"))` plus a `FORCEINLINE` getter.
+- Runtime state that should be visible but not externally mutated should be `private` `UPROPERTY(VisibleInstanceOnly, meta = (AllowPrivateAccess = "true"))` plus a getter.
+- Keep members `protected` only when subclasses genuinely need direct access; current examples include `PendingHitContext` and `ConsumePendingHitKnockback()`.
+- Container members such as `TArray` / `TMap` should stay private behind controlled methods when callers only need a narrow operation. Current example: `AWeapon::IgnoreActors` is cleared through `ClearIgnoreActors()`.
+- Recent examples to follow: `AEnemy` poise parameters, `AShield` block/parry/equip parameters, `AWeapon::IgnoreActors`, and `ABaseCharacter` internal knockback state.
 
 ### Naming
 

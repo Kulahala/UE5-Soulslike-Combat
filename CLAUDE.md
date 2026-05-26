@@ -478,6 +478,33 @@ UDataAsset → UComboDataAsset (combo chain: SectionName, DamageMultiplier, Stam
 - 英文用于 API 文档和技术笔记。
 - `/** */` 仅用于 UFUNCTION/UPROPERTY 文档。
 
+### Spawn Actor Safety Pattern
+所有 `SpawnActor` 调用后必须检查返回值是否为空：
+- 配置类资产（`WeaponClass`、`ShieldClass`）可能配置错误或未设置
+- Spawn 位置可能被阻挡（碰撞检测失败）
+- 内存不足等运行时错误
+
+**标准模式：**
+```cpp
+AActor* Actor = GetWorld()->SpawnActor<AActor>(ActorClass);
+if (!Actor)
+{
+    UE_LOG(LogTemp, Warning, TEXT("%s failed to spawn actor from class %s"),
+        *GetName(),
+        *GetNameSafe(ActorClass));
+    return;
+}
+// 使用 Actor
+Actor->SomeMethod();
+```
+
+**关键点：**
+- 使用 `GetNameSafe(ActorClass)` 防止类指针本身为空时的二次崩溃
+- 日志包含调用者名称（`GetName()`）和类名，便于定位配置错误
+- Early return 避免后续代码访问空指针
+
+**实例：** `AEnemy::WeaponInit()` (Enemy.cpp:91-101)
+
 ## User Profile & Preferences (Updated 2026-04-27)
 
 ### 1. 人口统计信息
