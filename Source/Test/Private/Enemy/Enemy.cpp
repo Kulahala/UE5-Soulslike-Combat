@@ -386,6 +386,12 @@ void AEnemy::OnAttackCooldownEnd()
 	bAttackOnCooldown = false;
 	ResetCombatReposition();
 
+	// 如果是 CoordinatedWaiting 结束，清除子状态让它重新评估
+	if (CombatSubState == EEnemyCombatSubState::CoordinatedWaiting)
+	{
+		CombatSubState = EEnemyCombatSubState::None;
+	}
+
 	// 非战斗态或目标无效时只清标志，不打断当前导航（避免打断 Chasing MoveTo）
 	if (EnemyState != EEnemyState::EES_Combating || !IsValidCombatTarget(ChasingTarget))
 	{
@@ -396,21 +402,7 @@ void AEnemy::OnAttackCooldownEnd()
 	float AllySuggestedWaitTime = 0.f;
 	if (IsAllyAttackingNearby(AllySuggestedWaitTime))
 	{
-		// 短暂让位给正在攻击同一目标的队友，避免群体同时出手
-		float NewCooldown = FMath::Clamp(
-			AllySuggestedWaitTime,
-			0.1f,
-			MaxAttackCoordinationWait
-		);
-
-		GetWorldTimerManager().SetTimer(AttackCooldownTimer, this,
-			&AEnemy::OnAttackCooldownEnd, NewCooldown, false);
-		bAttackOnCooldown = true;
-
-		if (FDebugDrawHelper::IsEnemyEnabled())
-		{
-			FDebugDrawHelper::Add(TEXT("WaitAlly"), FColor::Yellow);
-		}
+		SetCombatSubState(EEnemyCombatSubState::CoordinatedWaiting, AllySuggestedWaitTime);
 		return;
 	}
 
@@ -427,6 +419,104 @@ void AEnemy::OnAttackCooldownEnd()
 		// 未满足出手条件：复用 attack-ready 定位钩子，让子类策略自动生效
 		HandleAttackReadyPositioning(DistanceToTarget, ToTarget);
 	}
+}
+
+// ==================== 战斗局部 HFSM ====================
+
+AEnemy::EEnemyCombatSubState AEnemy::EvaluateCombatSubState(float DistanceToTarget, float ForwardDot, float& OutAllySuggestedWaitTime) const
+{
+	if (bAttackOnCooldown)
+	{
+		if (CombatSubState == EEnemyCombatSubState::CoordinatedWaiting)
+		{
+			return EEnemyCombatSubState::CoordinatedWaiting;
+		}
+		return EEnemyCombatSubState::CooldownSpacing;
+	}
+
+	if (IsAllyAttackingNearby(OutAllySuggestedWaitTime))
+	{
+		return EEnemyCombatSubState::CoordinatedWaiting;
+	}
+
+	if (ShouldTriggerAttack(DistanceToTarget, ForwardDot))
+	{
+		return EEnemyCombatSubState::None;
+	}
+
+	if (DistanceToTarget <= CombatAttackMaxRadius)
+	{
+		return EEnemyCombatSubState::Orienting;
+	}
+
+	return EEnemyCombatSubState::AttackReadyPressing;
+}
+
+void AEnemy::SetCombatSubState(EEnemyCombatSubState NewSubState, float AllySuggestedWaitTime)
+{
+	if (CombatSubState == NewSubState) return;
+
+	if (CombatSubState == EEnemyCombatSubState::CooldownSpacing || CombatSubState == EEnemyCombatSubState::CoordinatedWaiting)
+	{
+		ClearCombatRetreatSpeedEase();
+	}
+
+	CombatSubState = NewSubState;
+	CombatMoveDetailDebug.Empty();
+
+	if (CombatSubState == EEnemyCombatSubState::Orienting)
+	{
+		StopEnemyMovementIfPossible();
+	}
+	else if (CombatSubState == EEnemyCombatSubState::CoordinatedWaiting)
+	{
+		float NewCooldown = FMath::Clamp(AllySuggestedWaitTime, 0.1f, MaxAttackCoordinationWait);
+		GetWorldTimerManager().SetTimer(AttackCooldownTimer, this, &AEnemy::OnAttackCooldownEnd, NewCooldown, false);
+		bAttackOnCooldown = true;
+	}
+}
+
+void AEnemy::TickCombatFacing(float DeltaTime, const FVector& ToTarget)
+{
+	FRotator TargetRot = ToTarget.Rotation();
+	SetActorRotation(FMath::RInterpTo(GetActorRotation(), TargetRot, DeltaTime, CombatRotationSpeed));
+}
+
+void AEnemy::TickCombatSubState(float DeltaTime, EEnemyCombatSubState SubState, float DistanceToTarget, const FVector& ToTarget, float AllySuggestedWaitTime)
+{
+	switch (SubState)
+	{
+	case EEnemyCombatSubState::Orienting:
+		break;
+	case EEnemyCombatSubState::AttackReadyPressing:
+		HandleAttackReadyPositioning(DistanceToTarget, ToTarget);
+		break;
+	case EEnemyCombatSubState::CoordinatedWaiting:
+	case EEnemyCombatSubState::CooldownSpacing:
+		HandleCooldownPositioning(DeltaTime, DistanceToTarget, ToTarget);
+		break;
+	default:
+		break;
+	}
+}
+
+FString AEnemy::GetCombatSubStateDebugText() const
+{
+	FString StateStr;
+	switch (CombatSubState)
+	{
+	case EEnemyCombatSubState::None: StateStr = TEXT("Ready"); break;
+	case EEnemyCombatSubState::Orienting: StateStr = TEXT("Orienting"); break;
+	case EEnemyCombatSubState::AttackReadyPressing: StateStr = TEXT("Pressing"); break;
+	case EEnemyCombatSubState::CoordinatedWaiting: StateStr = TEXT("WaitAlly"); break;
+	case EEnemyCombatSubState::CooldownSpacing: StateStr = TEXT("Cooldown"); break;
+	}
+
+	if (!CombatMoveDetailDebug.IsEmpty())
+	{
+		return FString::Printf(TEXT("%s [%s]"), *StateStr, *CombatMoveDetailDebug);
+	}
+	return StateStr;
 }
 
 // ==================== 状态机 ====================
@@ -516,6 +606,7 @@ void AEnemy::SetEnemyState(EEnemyState NewState)
 			StopEnemyMovementIfPossible();
 		}
 		ResetCombatReposition();
+		SetCombatSubState(EEnemyCombatSubState::None);
 		break;
 	}
 	case EEnemyState::EES_Attacking:
@@ -523,6 +614,7 @@ void AEnemy::SetEnemyState(EEnemyState NewState)
 	case EEnemyState::EES_StanceBreak:
 		StopEnemyMovementIfPossible();
 		bRepositionInProgress = false;
+		SetCombatSubState(EEnemyCombatSubState::None);
 		break;
 	case EEnemyState::EES_Dead:
 		Die();
@@ -603,10 +695,7 @@ void AEnemy::Tick(float DeltaTime)
 
 		if (EnemyState == EEnemyState::EES_Combating)
 		{
-			const FString MoveState = LastCombatMoveDebug.IsEmpty()
-				? TEXT("Ready")
-				: LastCombatMoveDebug;
-			FDebugDrawHelper::Add(FString::Printf(TEXT("CombatMove: %s"), *MoveState), FColor::Cyan);
+			FDebugDrawHelper::Add(FString::Printf(TEXT("CombatMove: %s"), *GetCombatSubStateDebugText()), FColor::Cyan);
 		}
 	}
 
@@ -734,69 +823,21 @@ void AEnemy::OnCombating(float DeltaTime)
 	float Dot = CalcForwardDot2D(ToTarget);
 	float DistanceToTarget = FVector::Dist2D(GetActorLocation(), ChasingTarget->GetActorLocation());
 
-	// 平滑面向目标
-	FRotator TargetRot = ToTarget.Rotation();
-	SetActorRotation(FMath::RInterpTo(GetActorRotation(), TargetRot, DeltaTime, CombatRotationSpeed));
+	TickCombatFacing(DeltaTime, ToTarget);
 	UpdateCombatRetreatSpeedEase();
 
-	if (ShouldTriggerAttack(DistanceToTarget, Dot))
+	float AllyWaitTime = 0.f;
+	EEnemyCombatSubState NewSubState = EvaluateCombatSubState(DistanceToTarget, Dot, AllyWaitTime);
+
+	if (NewSubState == EEnemyCombatSubState::None)
 	{
-		float AllySuggestedWaitTime = 0.f;
-		if (IsAllyAttackingNearby(AllySuggestedWaitTime))
-		{
-			// 攻击条件已满足时也要先做协调，否则同帧 ready 的敌人会一起出手
-			float NewCooldown = FMath::Clamp(
-				AllySuggestedWaitTime,
-				0.1f,
-				MaxAttackCoordinationWait
-			);
-
-			GetWorldTimerManager().SetTimer(AttackCooldownTimer, this,
-				&AEnemy::OnAttackCooldownEnd, NewCooldown, false);
-			bAttackOnCooldown = true;
-
-			if (FDebugDrawHelper::IsEnemyEnabled())
-			{
-				FDebugDrawHelper::Add(TEXT("WaitAlly"), FColor::Yellow);
-			}
-		}
-		else
-		{
-			Attack();
-		}
+		SetCombatSubState(EEnemyCombatSubState::None, 0.f);
+		Attack();
+		return;
 	}
-	else if (!bAttackOnCooldown)
-	{
-		// 攻击协调检查
-		float AllySuggestedWaitTime = 0.f;
-		if (IsAllyAttackingNearby(AllySuggestedWaitTime))
-		{
-			// 短暂让位给正在攻击同一目标的队友，避免群体同时出手
-			float NewCooldown = FMath::Clamp(
-				AllySuggestedWaitTime,
-				0.1f,
-				MaxAttackCoordinationWait
-			);
 
-			GetWorldTimerManager().SetTimer(AttackCooldownTimer, this,
-				&AEnemy::OnAttackCooldownEnd, NewCooldown, false);
-			bAttackOnCooldown = true;
-
-			// 调试可视化
-			if (FDebugDrawHelper::IsEnemyEnabled())
-			{
-				FDebugDrawHelper::Add(TEXT("WaitAlly"), FColor::Yellow);
-			}
-		}
-		else
-		{
-			HandleAttackReadyPositioning(DistanceToTarget, ToTarget);
-		}
-	}
-	else
-	{
-		HandleCooldownPositioning(DeltaTime, DistanceToTarget, ToTarget);
-	}
+	SetCombatSubState(NewSubState, AllyWaitTime);
+	TickCombatSubState(DeltaTime, CombatSubState, DistanceToTarget, ToTarget, AllyWaitTime);
 }
 
 bool AEnemy::ShouldTriggerAttack(float DistanceToTarget, float ForwardDot) const
@@ -912,7 +953,7 @@ void AEnemy::UpdateCombatMovement(float DeltaTime, float DistanceToTarget, const
 
 	ClearCombatRetreatSpeedEase();
 	GetCharacterMovement()->MaxWalkSpeed = MovePlan.MoveSpeed;
-	LastCombatMoveDebug = GetCombatMoveDebugName(MovePlan.MoveType);
+	CombatMoveDetailDebug = GetCombatMoveDebugName(MovePlan.MoveType);
 
 	if (MoveToCombatLocation(MovePlan.GoalLocation))
 	{
@@ -952,11 +993,11 @@ bool AEnemy::MoveToCombatLocation(const FVector& Location)
 
 	if (Result.Code == EPathFollowingRequestResult::AlreadyAtGoal)
 	{
-		LastCombatMoveDebug = TEXT("AlreadyAtGoal");
+		CombatMoveDetailDebug = TEXT("AlreadyAtGoal");
 	}
 	else
 	{
-		LastCombatMoveDebug = TEXT("MoveFail");
+		CombatMoveDetailDebug = TEXT("MoveFail");
 	}
 	return false;
 }
@@ -977,11 +1018,11 @@ bool AEnemy::MoveToCombatTarget()
 	if (Result.Code == EPathFollowingRequestResult::RequestSuccessful
 		|| Result.Code == EPathFollowingRequestResult::AlreadyAtGoal)
 	{
-		LastCombatMoveDebug = TEXT("AttackPress");
+		CombatMoveDetailDebug = TEXT("AttackPress");
 		return true;
 	}
 
-	LastCombatMoveDebug = TEXT("MoveFail");
+	CombatMoveDetailDebug = TEXT("MoveFail");
 	return false;
 }
 
@@ -990,7 +1031,7 @@ void AEnemy::ResetCombatReposition()
 	bRepositionInProgress = false;
 	NextCombatRepositionTime = 0.f;
 	ClearCombatRetreatSpeedEase();
-	LastCombatMoveDebug.Empty();
+	CombatMoveDetailDebug.Empty();
 }
 
 void AEnemy::StartCombatRetreatSpeedEase(const FVector& GoalLocation)
@@ -1264,7 +1305,7 @@ void AEnemy::ClearAllTimers()
 	GetWorldTimerManager().ClearTimer(StanceBreakRecoveryTimer);
 }
 
-bool AEnemy::IsAllyAttackingNearby(float& OutSuggestedWaitTime)
+bool AEnemy::IsAllyAttackingNearby(float& OutSuggestedWaitTime) const
 {
 	OutSuggestedWaitTime = 0.f;
 

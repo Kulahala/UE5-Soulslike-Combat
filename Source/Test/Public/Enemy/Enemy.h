@@ -303,9 +303,8 @@ private:
 	void ResetCombatReposition();
 
 	// 攻击协调：检查同目标附近队友是否正在攻击，返回建议等待时间
-	bool IsAllyAttackingNearby(float& OutSuggestedWaitTime);
-
-	void StartCombatRetreatSpeedEase(const FVector& GoalLocation);
+	bool IsAllyAttackingNearby(float& OutSuggestedWaitTime) const;
+	void StartCombatRetreatSpeedEase(const FVector& GoalLocation);
 	void UpdateCombatRetreatSpeedEase();
 	void ClearCombatRetreatSpeedEase();
 	UFUNCTION()
@@ -315,7 +314,24 @@ private:
 	bool bRetreatSpeedEaseActive = false;
 	FVector RetreatSpeedEaseGoalLocation = FVector::ZeroVector;
 	float RetreatSpeedEaseTotalDistance = 0.f;
-	FString LastCombatMoveDebug;
+
+	enum class EEnemyCombatSubState : uint8
+	{
+		None,
+		Orienting,
+		AttackReadyPressing,
+		CoordinatedWaiting,
+		CooldownSpacing
+	};
+
+	EEnemyCombatSubState CombatSubState = EEnemyCombatSubState::None;
+	void SetCombatSubState(EEnemyCombatSubState NewSubState, float AllySuggestedWaitTime = 0.f);
+	EEnemyCombatSubState EvaluateCombatSubState(float DistanceToTarget, float ForwardDot, float& OutAllySuggestedWaitTime) const;
+	void TickCombatFacing(float DeltaTime, const FVector& ToTarget);
+	void TickCombatSubState(float DeltaTime, EEnemyCombatSubState SubState, float DistanceToTarget, const FVector& ToTarget, float AllySuggestedWaitTime);
+	FString GetCombatSubStateDebugText() const;
+
+	FString CombatMoveDetailDebug;
 
 	/* 定时器 */
 	FTimerHandle PatrolTimer; // 巡逻等待定时器

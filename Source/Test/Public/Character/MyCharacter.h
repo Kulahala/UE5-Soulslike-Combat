@@ -153,6 +153,13 @@ protected:
 	float SprintSpeed = 360.f;
 
 private:
+	/* 动作状态恢复 Helpers */
+	bool ShouldRecoverToExhausted_Generic() const;
+	bool ShouldRecoverToExhausted_Attack() const;
+	void EnsureExhaustionRecoveryTimer();
+	EActionState RecoverActionStateAfterMontage(EActionState ExpectedState, bool bResumeStaminaRegen);
+	void CleanupInterruptedAttack();
+
 	/* 提取方法 */
 	void InitializePlayerHUD();
 	void DrawDebugInfo() const;

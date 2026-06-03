@@ -778,19 +778,10 @@ void AMyCharacter::OnParryMontageEnded(UAnimMontage* Montage, bool bInterrupted)
 	if (bInterrupted) return;  // InterruptParry() 已处理清理
 	if (ActionState != EActionState::EAS_Parrying) return;
 
-	if (IsExhaustionTimerActive())
-	{
-		ActionState = EActionState::EAS_Exhausted;
-		bIsParrying = false;
-		bParryActive = false;
-		StartParryCooldown();
-		return;
-	}
-
-	ActionState = EActionState::EAS_UnOccupied;
 	bIsParrying = false;
 	bParryActive = false;
 	StartParryCooldown();
+	RecoverActionStateAfterMontage(EActionState::EAS_Parrying, false);
 }
 
 // ==================== 翻滚 ====================
@@ -889,15 +880,10 @@ void AMyCharacter::OnDodgeMontageEnded(UAnimMontage* Montage, bool bInterrupted)
 
 	if (bInterrupted) return;
 
-	if (IsExhaustionTimerActive())
+	if (RecoverActionStateAfterMontage(EActionState::EAS_Dodging, true) == EActionState::EAS_Exhausted)
 	{
-		ActionState = EActionState::EAS_Exhausted;
-		Attributes->ResumeStaminaRegen();
 		return;
 	}
-
-	ActionState = EActionState::EAS_UnOccupied;
-	Attributes->ResumeStaminaRegen();
 
 	// 翻滚结束后，如果仍在移动则重启定时器
 	if (GetLastMovementInputVector().SizeSquared2D() > KINDA_SMALL_NUMBER)
@@ -988,14 +974,8 @@ void AMyCharacter::OnPotionMontageEnded(UAnimMontage* Montage, bool bInterrupted
 	if (bInterrupted) return;  // InterruptPotion() 已处理
 	if (ActionState != EActionState::EAS_UsingPotion) return;
 
-	if (IsExhaustionTimerActive())
-	{
-		ActionState = EActionState::EAS_Exhausted;
-		StartPotionCooldown();
-		return;
-	}
-	ActionState = EActionState::EAS_UnOccupied;
 	StartPotionCooldown();
+	RecoverActionStateAfterMontage(EActionState::EAS_UsingPotion, false);
 }
 
 void AMyCharacter::HealFromPotion(float Percent)
@@ -1162,34 +1142,14 @@ void AMyCharacter::OnAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted
 {
 	Super::OnAttackMontageEnded(Montage, bInterrupted);
 
-	CancelChargeInputState(); // 新增蓄力清理
-
-	// 旋转恢复必须在 interrupted guard 之前：free-run 攻击设了双 false，打断后必须还原
-	RestoreRotationMode();
-
 	if (bInterrupted)
 	{
-		ResetCombo();
-
-		if (bPendingExhaustedAfterAttack)
-		{
-			bPendingExhaustedAfterAttack = false;
-			if (!IsExhaustionTimerActive())
-			{
-				GetWorldTimerManager().SetTimer(
-					ExhaustionTimerHandle, this,
-					&AMyCharacter::RecoverFromExhaustion,
-					ExhaustedTime, false);
-			}
-		}
-
-		// 打断时必须恢复状态，否则会永远卡在 EAS_Attacking
-		if (ActionState == EActionState::EAS_Attacking)
-		{
-			ActionState = EActionState::EAS_UnOccupied;
-		}
+		CleanupInterruptedAttack();
 		return;
 	}
+
+	CancelChargeInputState(); // 新增蓄力清理
+	RestoreRotationMode();
 
 	// 连招续接判断（在状态恢复之前）
 	const bool bShouldContinueCombo = bComboInputReceived &&
@@ -1197,10 +1157,7 @@ void AMyCharacter::OnAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted
 	                                   AttackConfig->LightAttackCombo &&
 	                                   (ComboCounter + 1) < AttackConfig->LightAttackCombo->GetComboCount();
 
-	const bool bWillExhaust = bPendingExhaustedAfterAttack || IsExhaustionTimerActive();
-	bPendingExhaustedAfterAttack = false; // 消费 flag
-
-	if (bShouldContinueCombo && !bWillExhaust)
+	if (bShouldContinueCombo && !ShouldRecoverToExhausted_Attack())
 	{
 		// 连招续接：临时恢复 UnOccupied 让 CanAttack() 通过
 		ComboCounter++;
@@ -1215,23 +1172,20 @@ void AMyCharacter::OnAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted
 
 	if (ActionState == EActionState::EAS_Attacking)
 	{
-		ActionState = EActionState::EAS_UnOccupied;
+		if (ShouldRecoverToExhausted_Attack())
+		{
+			ActionState = EActionState::EAS_Exhausted;
+			EnsureExhaustionRecoveryTimer();
+		}
+		else
+		{
+			ActionState = EActionState::EAS_UnOccupied;
+		}
 	}
 
-	// 体力恢复处理
-	if (bWillExhaust)
-	{
-		ActionState = EActionState::EAS_Exhausted;
-		if (!IsExhaustionTimerActive())
-		{
-			GetWorldTimerManager().SetTimer(
-				ExhaustionTimerHandle, this,
-				&AMyCharacter::RecoverFromExhaustion,
-				ExhaustedTime, false);
-		}
-		Attributes->ResumeStaminaRegen();
-	}
-	else
+	bPendingExhaustedAfterAttack = false;
+
+	if (Attributes)
 	{
 		Attributes->ResumeStaminaRegen();
 	}
@@ -1716,5 +1670,78 @@ void AMyCharacter::UpdateCameraRecenter(float DeltaTime)
 		FMath::IsNearlyEqual(NewRotation.Pitch, RecenterTargetRotation.Pitch, 1.f))
 	{
 		bRecenteringCamera = false;
+	}
+}
+
+// ==================== 状态恢复 Helpers ====================
+
+bool AMyCharacter::ShouldRecoverToExhausted_Generic() const
+{
+	return IsExhaustionTimerActive();
+}
+
+bool AMyCharacter::ShouldRecoverToExhausted_Attack() const
+{
+	return bPendingExhaustedAfterAttack || IsExhaustionTimerActive();
+}
+
+void AMyCharacter::EnsureExhaustionRecoveryTimer()
+{
+	if (!IsExhaustionTimerActive())
+	{
+		GetWorldTimerManager().SetTimer(
+			ExhaustionTimerHandle, this,
+			&AMyCharacter::RecoverFromExhaustion,
+			ExhaustedTime, false);
+	}
+}
+
+EActionState AMyCharacter::RecoverActionStateAfterMontage(EActionState ExpectedState, bool bResumeStaminaRegen)
+{
+	if (ActionState != ExpectedState) return ActionState;
+
+	if (ShouldRecoverToExhausted_Generic())
+	{
+		ActionState = EActionState::EAS_Exhausted;
+		EnsureExhaustionRecoveryTimer();
+	}
+	else
+	{
+		ActionState = EActionState::EAS_UnOccupied;
+	}
+
+	if (bResumeStaminaRegen && Attributes)
+	{
+		Attributes->ResumeStaminaRegen();
+	}
+
+	return ActionState;
+}
+
+void AMyCharacter::CleanupInterruptedAttack()
+{
+	// 旋转恢复必须在早期还原：free-run 攻击设了双 false，打断后必须还原
+	RestoreRotationMode();
+	CancelChargeInputState();
+	ResetCombo();
+
+	if (ActionState == EActionState::EAS_Attacking)
+	{
+		if (ShouldRecoverToExhausted_Attack())
+		{
+			ActionState = EActionState::EAS_Exhausted;
+			EnsureExhaustionRecoveryTimer();
+		}
+		else
+		{
+			ActionState = EActionState::EAS_UnOccupied;
+		}
+	}
+
+	bPendingExhaustedAfterAttack = false;
+
+	if (Attributes)
+	{
+		Attributes->ResumeStaminaRegen();
 	}
 }
