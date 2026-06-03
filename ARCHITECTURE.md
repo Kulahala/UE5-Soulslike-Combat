@@ -15,8 +15,11 @@ For agent-specific collaboration rules, see:
 
 This file stores stable project architecture only. Agent workflow and documentation update rules belong in `AGENTS.md` / `CLAUDE.md` / `GEMINI.md`.
 
+Stable HTML anchors are used by `README.md` deep links. When renaming or moving major sections, preserve existing anchors or update the README links in the same change.
+
 ---
 
+<a name="project-overview"></a>
 ## Project Overview
 
 - **Unreal Engine 5.7** project, **Windows only**, **Visual Studio 2022** required
@@ -24,6 +27,7 @@ This file stores stable project architecture only. Agent workflow and documentat
 - Targets: `TestEditor` (Editor), `Test` (Game)
 - Build.cs dependencies: `Core`, `CoreUObject`, `Engine`, `InputCore`, `EnhancedInput`, `AnimGraphRuntime`, `Niagara`, `GeometryCollectionEngine`, `PCG`, `UMG`, `AIModule`, `Slate`, `SlateCore`
 
+<a name="state-machine-system"></a>
 ## State Machine System (`CharacterTypes.h`)
 
 All gameplay states are defined as `UENUM` enums in `CharacterTypes.h`. This is the single source of truth for state flow:
@@ -36,6 +40,208 @@ All gameplay states are defined as `UENUM` enums in `CharacterTypes.h`. This is 
 
 **State transition pattern**: Mixed C++ + AnimNotify driven. Entry states are set directly in C++ (`Attack()`, `GetHit_Implementation()`, `Die()`). Recovery transitions use `FOnMontageEnded` delegates with `bInterrupted` guards as primary path. `UAnimNotify_CharacterHitReactEnd` is the exception — used for player hit react recovery so designers can tune stun duration in the animation editor. Enemy recovery has double coverage (delegate + AnimNotify with state guards).
 
+<a name="player-state-machine-flow"></a>
+## Player State Machine Flow
+
+### Action States (`EActionState`)
+
+| State | Meaning |
+|------|---------|
+| `EAS_UnOccupied` | Normal state. Movement, attack, jump, sprint, block, parry, dodge, and potion entry are handled through guards. Blocking is a sub-state via `bIsBlocking`. |
+| `EAS_Attacking` | Attack montage is playing. Used by normal combo, sprint attack, and charged attack. |
+| `EAS_Stunning` | Player hit react / short stun. |
+| `EAS_Exhausted` | Stamina exhausted. Player can only walk until timed recovery. |
+| `EAS_Parrying` | Parry montage is playing. `bParryActive` marks the active parry window. |
+| `EAS_Dodging` | Dodge montage is playing. Invulnerability is driven by `UAnimNotifyState_DodgeInvulnerable`. |
+| `EAS_UsingPotion` | Potion montage is playing. Movement remains allowed at walk speed. |
+| `EAS_Dead` | Death state. Collision and movement are disabled. |
+
+```mermaid
+stateDiagram-v2
+    [*] --> UnOccupied
+
+    UnOccupied --> Attacking : Attack / sprint attack / charged attack
+    UnOccupied --> Stunning : Hit react
+    UnOccupied --> Exhausted : Stamina reaches zero
+    UnOccupied --> Parrying : Parry input
+    UnOccupied --> Dodging : Dodge input
+    UnOccupied --> UsingPotion : Potion input
+
+    note right of UnOccupied
+        Blocking is a sub-state:
+        bIsBlocking + bBlockInputHeld
+    end note
+
+    Attacking --> UnOccupied : Montage ended
+    Attacking --> Exhausted : Montage ended while exhaustion timer active
+    Stunning --> UnOccupied : Hit react recovery
+    Exhausted --> UnOccupied : RecoverFromExhaustion
+    Parrying --> UnOccupied : Montage ended + cooldown
+    Dodging --> UnOccupied : Montage ended
+    Dodging --> Exhausted : Montage ended while exhaustion timer active
+    UsingPotion --> UnOccupied : Montage ended
+    UsingPotion --> Exhausted : Potion ended while exhaustion timer active
+
+    Parrying --> Stunning : Hit during failed parry
+    UsingPotion --> Stunning : Interrupted by hit
+
+    UnOccupied --> Dead : Health <= 0
+    Attacking --> Dead : Health <= 0
+    Stunning --> Dead : Health <= 0
+    Exhausted --> Dead : Health <= 0
+    Parrying --> Dead : Health <= 0
+    Dodging --> Dead : Health <= 0
+    UsingPotion --> Dead : Health <= 0
+```
+
+### Stamina / Exhaustion Flow
+
+```mermaid
+flowchart LR
+    A[Attack / dodge / parry / sprint] -->|UseStamina| B[AttributeComponent]
+    B --> C{Stamina <= 0?}
+    C -->|No| D[Continue current action]
+    C -->|Yes| E[OnExhausted delegate]
+    E --> F[ActionState = Exhausted or delayed exhausted after montage]
+    F --> G[Recovery timer]
+    G --> H[Recover stamina]
+    H --> I[ActionState = UnOccupied]
+
+    J[Stamina below max] -->|after regen delay| K[Tick stamina regen]
+```
+
+- The project intentionally allows stamina overdraft for a final committed action.
+- Montage end handlers must check the exhaustion timer before restoring `EAS_UnOccupied`.
+- Attack recovery uses `ShouldRecoverToExhausted_Attack()` because attack has the extra `bPendingExhaustedAfterAttack` flag.
+- Dodge / parry / potion use `RecoverActionStateAfterMontage(...)` and the generic exhaustion check.
+
+### Weapon State (`EWeaponState`)
+
+```mermaid
+stateDiagram-v2
+    [*] --> Unequipped
+    Unequipped --> OneHandEquipped : Pick up weapon
+    OneHandEquipped --> Unequipped : Future drop / unequip path
+```
+
+<a name="enemy-state-machine-flow"></a>
+## Enemy State Machine Flow
+
+### Enemy States (`EEnemyState`)
+
+| State | Meaning |
+|------|---------|
+| `EES_UnOccupied` | Initial state, quickly transitions into patrol behavior. |
+| `EES_Patrolling` | Moves between patrol targets. |
+| `EES_Searching` | Looks around at patrol points or at the last known target position. |
+| `EES_Chasing` | Chases a valid combat target. |
+| `EES_Combating` | Target is inside combat range. Local combat substate controls facing, pressing, waiting, and spacing. |
+| `EES_Attacking` | Attack montage is playing. Movement is locked. |
+| `EES_Stunned` | Normal hit react / short stun. |
+| `EES_StanceBreak` | Long poise-break stun from parry or poise depletion. |
+| `EES_Dead` | Death state. Timers, movement, collision, and combat state are cleared. |
+
+```mermaid
+stateDiagram-v2
+    [*] --> Patrolling
+    state "CheckCombatTarget()" as Recheck
+
+    Patrolling --> Searching : Reaches patrol point
+    Searching --> Patrolling : Search timer ends
+    Searching --> Chasing : Senses target
+
+    Patrolling --> Chasing : Senses target
+    Chasing --> Combating : Enters combat radius
+    Combating --> Chasing : Leaves combat radius + exit buffer
+    Chasing --> SearchingLost : Target lost / leaves chase radius
+    SearchingLost --> Patrolling : Search timer ends
+    SearchingLost --> Chasing : Senses target again
+
+    Combating --> Attacking : Local HFSM allows attack
+    Attacking --> Recheck : Montage ended
+
+    Patrolling --> Stunned : Hit while alive
+    Chasing --> Stunned : Hit while alive
+    Combating --> Stunned : Hit while alive
+    Attacking --> Stunned : Hit while alive
+    Attacking --> StanceBreak : Parried / poise depleted
+
+    Stunned --> Recheck : Hit react ends
+    StanceBreak --> Recheck : Stance break timer ends
+    Recheck --> Combating : Still inside combat radius
+    Recheck --> Chasing : Inside chase radius
+    Recheck --> Patrolling : No valid target
+
+    Patrolling --> Dead : Fatal damage
+    Chasing --> Dead : Fatal damage
+    Combating --> Dead : Fatal damage
+    Attacking --> Dead : Fatal damage
+    Stunned --> Dead : Fatal damage
+    StanceBreak --> Dead : Fatal damage
+```
+
+<a name="enemy-tick-flow"></a>
+### Enemy Tick Flow
+
+```mermaid
+flowchart TD
+    A[Tick] --> B{State guard}
+    B -->|Dead / Stunned / Attacking / StanceBreak| C[Return]
+    B -->|Other states| D[CheckCombatTarget]
+    D --> E{Target distance / validity}
+    E -->|Combat range| F[Set EES_Combating]
+    E -->|Chase range| G[Set EES_Chasing]
+    E -->|Invalid or lost| H[Set EES_Searching or Patrolling]
+    F --> I{State Tick}
+    G --> I
+    H --> I
+    I --> J[OnPatrolling]
+    I --> K[OnSearching]
+    I --> L[OnChasing]
+    I --> M[OnCombating]
+    M --> N[EvaluateCombatSubState]
+    N --> O[TickCombatFacing]
+    O --> P[TickCombatSubState]
+```
+
+<a name="combat-cooldown-coordination-flow"></a>
+### Combat Cooldown / Coordination Flow
+
+```mermaid
+flowchart LR
+    A[Attack] --> B[Set attack cooldown]
+    B --> C[Play attack montage]
+    C --> D[Montage ended]
+    D --> E[CheckCombatTarget]
+    E --> F{Cooldown active?}
+    F -->|Yes| G[CooldownSpacing / CoordinatedWaiting]
+    F -->|No| H{Same-target ally attacking?}
+    H -->|Yes| I[CoordinatedWaiting]
+    H -->|No| J{Inside attack range and facing?}
+    J -->|Yes| K[Attack]
+    J -->|No| L[Orienting / AttackReadyPressing]
+```
+
+<a name="key-enemy-method-responsibilities"></a>
+### Key Enemy Method Responsibilities
+
+| Method | Called From | Responsibility |
+|--------|-------------|----------------|
+| `Tick()` | Every frame | State guard, target recheck, state tick dispatch. |
+| `CheckCombatTarget()` | Tick / montage recovery | Validates target and chooses patrol/chase/combat state by distance. |
+| `SetEnemyState()` | State transition | Old-state cleanup and new-state initialization. |
+| `EvaluateCombatSubState(...)` | `OnCombating()` | Chooses local combat substate. |
+| `SetCombatSubState(...)` | Combat substate transition | One-shot entry / exit behavior, including coordinated wait cooldown. |
+| `TickCombatFacing(...)` | Combat tick | Smoothly faces the target. |
+| `TickCombatSubState(...)` | Combat tick | Dispatches orienting, pressing, coordinated wait, and cooldown spacing behavior. |
+| `Attack()` | Combat substate decision | Starts cooldown, switches to attacking, and plays attack montage. |
+| `TakeDamage()` | Damage pipeline | Applies health damage and enters death if needed. |
+| `ApplyPoiseDamage()` | Weapon hit feedback | Reduces poise and sets `bPendingStanceBreak` when poise reaches zero. |
+| `ApplyStanceBreak()` | After `GetHit()` checks pending flag | Stops montage, sets `EES_StanceBreak`, plays slow hit react, starts recovery timer. |
+| `RecoverFromStanceBreak()` | Stance break timer | Restores montage play rate and delegates next state choice to `CheckCombatTarget()`. |
+| `Die()` | Fatal damage | Clears timers, movement, collision, poise state, and combat substate. |
+
+<a name="class-hierarchy"></a>
 ## Class Hierarchy
 
 ```
@@ -66,6 +272,7 @@ UDataAsset → UComboDataAsset (combo chain: SectionName, DamageMultiplier, Stam
 UDataAsset → UAttackConfigDataAsset (LightAttackCombo + SpecialAttacks for sprint/jump-style specials + ChargedAttack)
 ```
 
+<a name="combat-pipeline"></a>
 ## Combat Pipeline
 
 1. `ACharacterController` splits attack input: `Started` → `Input_AttackPressed()`, `Completed` / `Canceled` → `Input_AttackReleased()`
@@ -94,6 +301,7 @@ UDataAsset → UAttackConfigDataAsset (LightAttackCombo + SpecialAttacks for spr
     - true + not exhausted → `ComboCounter++`, temp set `ActionState = EAS_UnOccupied`, call `Attack()` (continues combo)
     - false or exhausted → `ResetCombo()`, restore `EAS_UnOccupied`, resume stamina regen
 
+<a name="player-action-recovery-helpers"></a>
 ## Player Action Recovery Helpers
 
 - `AMyCharacter` keeps `EActionState` as the public action state and uses private recovery helpers instead of a full HFSM.
@@ -125,6 +333,7 @@ UDataAsset → UAttackConfigDataAsset (LightAttackCombo + SpecialAttacks for spr
 - **中断恢复**：`OnAttackMontageEnded(bInterrupted=true)` 确保恢复 `ActionState`，防止卡在 `EAS_Attacking` 状态。
 - **优先级**：翻滚无敌帧（`bDodgeInvulnerable`）优先级高于霸体，完全免疫 vs 部分免疫。
 
+<a name="enemy-ai"></a>
 ## Enemy AI (`AEnemy`)
 
 - Controlled by `AAIController` via `EEnemyState` FSM.
@@ -152,6 +361,7 @@ UDataAsset → UAttackConfigDataAsset (LightAttackCombo + SpecialAttacks for spr
 - During Exhausted: player can only walk. `RecoverFromExhaustion()` resets state to `EAS_UnOccupied` with state guard.
 - **"最后一击"设计**：透支时允许播放动画，蒙太奇结束回调中检查 `IsExhaustionTimerActive()`，如果计时器活跃则恢复到 `EAS_Exhausted`。
 
+<a name="shield-blocking-system"></a>
 ## Shield & Blocking System
 
 - `IBlockableInterface` + `FBlockResult` — 纯 C++ virtual interface，独立于 `IHitInterface`，通过 `Cast<IBlockableInterface>(HitActor)` 调用。
@@ -160,6 +370,7 @@ UDataAsset → UAttackConfigDataAsset (LightAttackCombo + SpecialAttacks for spr
 - `TryBlockHit()` 判定链：存活 → 方向(`DotProduct` vs `Cos(HalfAngle)`) → 体力成本检查 → 扣体力 + 减伤。
 - 格挡拦截点：`Weapon::ExecuteWeaponTrace()` 命中后、`ApplyDamage()` 前，仅跨阵营触发。格挡成功时 `bPlayNormalHitReact = false` 跳过受击硬直。
 
+<a name="poise-stance-break-system"></a>
 ## Poise & Stance Break System (韧性与破防系统)
 
 - **架构**：Dark Souls 风格的隐藏韧性条系统，统一弹反和韧性破防到 `EES_StanceBreak` 状态。
@@ -171,12 +382,14 @@ UDataAsset → UAttackConfigDataAsset (LightAttackCombo + SpecialAttacks for spr
   - **普通路径**：普通命中累积韧性伤害，对受击方敌人（`HitActor`）触发破防
 - **破防效果**：停止当前蒙太奇，设置 `EES_StanceBreak` 状态，播放方向性受击反应，慢放蒙太奇（使用敌人自己的参数，默认 0.3x），启动恢复计时器（默认 2.0s）。
 
+<a name="parry-system"></a>
 ## Parry System (弹反系统)
 
 - **架构**：基于盾牌的主动防御机制，独立于格挡系统。弹反成功时瞬间清空攻击方韧性触发破防。
 - **状态管理**：`bIsParrying`（蒙太奇播放中）、`bParryActive`（激活窗口开启，由 `UAnimNotifyState_ParryActive` 控制）、`bParryOnCooldown`（冷却期）
 - **判定流程**：敌人攻击命中玩家 → `TryBlockHit()` 检查 `bParryActive` + 方向 → 弹反成功扣除 `ParryStaminaCost`，返回 `bParried=true` → 对攻击方调用 `ApplyPoiseDamage(GetCurrentPoise())` → 触发破防
 
+<a name="lock-on-system"></a>
 ## Lock-On System (`AMyCharacter` + `UPlayerLockOnComponent`)
 
 - **组件架构**：`UPlayerLockOnComponent` 拥有锁定状态、目标搜索/评分逻辑、所有 `LockOn*` 参数。`AMyCharacter` 保留 facade + 旋转/相机实际写入。
@@ -184,12 +397,14 @@ UDataAsset → UAttackConfigDataAsset (LightAttackCombo + SpecialAttacks for spr
 - **旋转模式切换**：开启时缓存 `bOrientRotationToMovement` / `bUseControllerRotationYaw` / `bUsePawnControlRotation`，切换到锁定模式。
 - **锁定冲刺 Free-Run**：`ShouldUseLockOnFreeRun()` 条件 = `bIsLockingOn && bIsSprinting && EAS_UnOccupied && !IsFalling && 有移动输入`。满足时角色临时恢复自由移动语义，控制器/相机继续盯敌人。
 
+<a name="combo-system"></a>
 ## Combo System（连招系统）
 
 - **架构**：数据驱动 + AnimNotifyState 驱动窗口。`UAttackConfigDataAsset` 统一管理 `LightAttackCombo`（连招链）、`SpecialAttacks`（冲刺/跳跃）、`ChargedAttack`（蓄力）
 - **续接时序关键**：`OnAttackMontageEnded()` 中连招续接判断必须在状态恢复之前，临时设 `ActionState = EAS_UnOccupied` 让 `CanAttack()` 通过，只存在于调用链内部
 - **中断清理**：所有中断点（`GetHit`、`Die`、`HandleExhausted`、`Dodge`）必须调用 `ResetCombo()`
 
+<a name="charged-attack-system"></a>
 ## Charged Attack System（蓄力攻击系统）
 
 - **优先级**：连招窗口缓存 > 冲刺攻击 > 蓄力。持有超过 `ChargeInputThreshold` 进入蓄力，释放时跳到 `Release` Section
@@ -200,6 +415,7 @@ UDataAsset → UAttackConfigDataAsset (LightAttackCombo + SpecialAttacks for spr
 - **蒙太奇契约**：C++ 硬编码跳转 `Default` 和 `Release` Section。常见链接 `Default -> Loop -> Loop`，`Release` 作为 Loop 结束边界，实际进入靠 `Montage_JumpToSection("Release")`
 - **动画约束**：Loop 段用无根运动定格/短循环，Release 段可保留根运动。`WeaponCollision` 放 Release 段，不放 `ComboWindow`
 
+<a name="dodge-roll-system"></a>
 ## Dodge Roll System（翻滚系统）
 
 - **状态**：`EAS_Dodging`，无敌帧由 `AnimNotifyState_DodgeInvulnerable` 覆盖全程
@@ -218,6 +434,7 @@ UDataAsset → UAttackConfigDataAsset (LightAttackCombo + SpecialAttacks for spr
 - **智能锁定处理**：暂停时检查锁定旋转完成度（角度差 < 1°保持，≥ 1°清除），必须先 `IsValid(LockedTarget)` 检查
 - **死亡时序**：`Die()` 最前面调用 `ClearPauseIfActive()` + `SetCanPause(false)`，先恢复游戏状态再处理死亡演出
 
+<a name="potion-system"></a>
 ## Potion System (药瓶系统)
 
 - **恢复机制**：`UAnimNotify_PotionHeal` 在蒙太奇中触发两段式恢复（开头 25% + 中间 25%），被打断只保留已触发部分
