@@ -186,6 +186,130 @@ void AMyCharacter::PerformSprintAttack()
 	}
 }
 
+void AMyCharacter::CancelChargeInputState()
+{
+	bAttackInputHeld = false;
+	bIsChargingAttack = false;
+	GetWorldTimerManager().ClearTimer(ChargeDecisionTimer);
+}
+
+bool AMyCharacter::CanStartChargedAttack() const
+{
+	return !bIsBlocking &&
+	       ActionState == EActionState::EAS_UnOccupied &&
+	       WeaponState != EWeaponState::EWS_Unequipped &&
+	       !GetCharacterMovement()->IsFalling();
+}
+
+void AMyCharacter::OnAttackInputPressed()
+{
+	if (ShouldUseSprintAttack())
+	{
+		PerformSprintAttack();
+		return;
+	}
+	if (!CanStartChargedAttack()) return;
+
+	bAttackInputHeld = true;
+	AttackInputPressTime = GetWorld()->GetTimeSeconds();
+	GetWorldTimerManager().SetTimer(ChargeDecisionTimer, this, &AMyCharacter::EnterChargeMode, ChargeInputThreshold, false);
+}
+
+void AMyCharacter::OnAttackInputReleased()
+{
+	bAttackInputHeld = false;
+	if (GetWorldTimerManager().IsTimerActive(ChargeDecisionTimer))
+	{
+		GetWorldTimerManager().ClearTimer(ChargeDecisionTimer);
+		if (CanStartChargedAttack() || ShouldUseSprintAttack())
+		{
+			Attack(); // 阈值前松开，走普攻
+		}
+		return;
+	}
+	if (bIsChargingAttack)
+	{
+		PerformChargedRelease(); // 蓄力中松开，释放蓄力攻击
+	}
+}
+
+void AMyCharacter::EnterChargeMode()
+{
+	if (!bAttackInputHeld) return;
+	if (!CanStartChargedAttack())
+	{
+		CancelChargeInputState();
+		return;
+	}
+
+	if (!AttackConfig || !AttackConfig->ChargedAttack.Montage)
+	{
+		CancelChargeInputState();
+		Attack(); // 无配置或无蒙太奇，回退普通攻击
+		return;
+	}
+
+	ResetCombo(); // 蓄力前清空普攻 combo 计数
+	bIsChargingAttack = true;
+	ActionState = EActionState::EAS_Attacking;
+	if (Attributes)
+	{
+		Attributes->PauseStaminaRegen();
+	}
+
+	static const FName ChargeSectionName(TEXT("Default"));
+	PlayMontageSection(AttackConfig->ChargedAttack.Montage, ChargeSectionName);
+
+	UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
+	if (AnimInstance)
+	{
+		FOnMontageEnded MontageEndedDelegate;
+		MontageEndedDelegate.BindUObject(this, &AMyCharacter::OnAttackMontageEnded);
+		AnimInstance->Montage_SetEndDelegate(MontageEndedDelegate, AttackConfig->ChargedAttack.Montage);
+	}
+}
+
+void AMyCharacter::PerformChargedRelease()
+{
+	bIsChargingAttack = false;
+	if (!AttackConfig || !AttackConfig->ChargedAttack.Montage)
+	{
+		CancelChargeInputState();
+		return;
+	}
+
+	const FChargedAttackConfig& Config = AttackConfig->ChargedAttack;
+
+	float HeldTime = GetWorld()->GetTimeSeconds() - AttackInputPressTime;
+	float ChargeAlpha = 0.0f;
+	if (Config.MaxChargeHoldTime > Config.MinChargeHoldTime)
+	{
+		ChargeAlpha = FMath::Clamp((HeldTime - Config.MinChargeHoldTime) / (Config.MaxChargeHoldTime - Config.MinChargeHoldTime), 0.f, 1.f);
+	}
+
+	float FinalDamageMultiplier = FMath::Lerp(1.f, Config.MaxDamageMultiplier, ChargeAlpha);
+	float FinalPoiseMultiplier = FMath::Lerp(1.f, Config.MaxPoiseDamageMultiplier, ChargeAlpha);
+
+	SetAttackDamageMultiplier(FinalDamageMultiplier);
+	if (EquippedWeapon)
+	{
+		CurrentPoiseDamage = EquippedWeapon->GetBasePoiseDamage() * FinalPoiseMultiplier;
+	}
+
+	if (Attributes)
+	{
+		Attributes->UseStamina(Config.StaminaCost);
+	}
+
+	static const FName ChargedReleaseSectionName(TEXT("Release"));
+	UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
+	if (AnimInstance)
+	{
+		AnimInstance->Montage_JumpToSection(ChargedReleaseSectionName, Config.Montage);
+		EmitNoise(AttackNoiseLoudness, AttackNoiseRange);
+	}
+}
+
 void AMyCharacter::Attack()
 {
 	if (bIsBlocking) return;  // 保留现有守卫
@@ -369,6 +493,8 @@ void AMyCharacter::Die()
 	InterruptBlock(true);
 	ClearParryState();
 	InterruptPotion();  // 死亡时中断喝药
+	CancelChargeInputState();
+	bPendingExhaustedAfterAttack = false;
 	ClearLockOn();
 	bRecenteringCamera = false; // 新增：死亡时中断归中
 	ActionState = EActionState::EAS_Dead;
@@ -395,6 +521,12 @@ void AMyCharacter::Die()
 void AMyCharacter::HandleExhausted()
 {
 	if (ActionState == EActionState::EAS_UsingPotion) return;
+	if (ActionState == EActionState::EAS_Attacking)
+	{
+		bPendingExhaustedAfterAttack = true;
+		bIsSprinting = false;
+		return;
+	}
 
 	ResetCombo();
 	InterruptBlock(true);
@@ -1030,12 +1162,27 @@ void AMyCharacter::OnAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted
 {
 	Super::OnAttackMontageEnded(Montage, bInterrupted);
 
+	CancelChargeInputState(); // 新增蓄力清理
+
 	// 旋转恢复必须在 interrupted guard 之前：free-run 攻击设了双 false，打断后必须还原
 	RestoreRotationMode();
 
 	if (bInterrupted)
 	{
 		ResetCombo();
+
+		if (bPendingExhaustedAfterAttack)
+		{
+			bPendingExhaustedAfterAttack = false;
+			if (!IsExhaustionTimerActive())
+			{
+				GetWorldTimerManager().SetTimer(
+					ExhaustionTimerHandle, this,
+					&AMyCharacter::RecoverFromExhaustion,
+					ExhaustedTime, false);
+			}
+		}
+
 		// 打断时必须恢复状态，否则会永远卡在 EAS_Attacking
 		if (ActionState == EActionState::EAS_Attacking)
 		{
@@ -1050,7 +1197,8 @@ void AMyCharacter::OnAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted
 	                                   AttackConfig->LightAttackCombo &&
 	                                   (ComboCounter + 1) < AttackConfig->LightAttackCombo->GetComboCount();
 
-	const bool bWillExhaust = IsExhaustionTimerActive();
+	const bool bWillExhaust = bPendingExhaustedAfterAttack || IsExhaustionTimerActive();
+	bPendingExhaustedAfterAttack = false; // 消费 flag
 
 	if (bShouldContinueCombo && !bWillExhaust)
 	{
@@ -1070,10 +1218,17 @@ void AMyCharacter::OnAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted
 		ActionState = EActionState::EAS_UnOccupied;
 	}
 
-	// 体力恢复处理（保持原有逻辑）
+	// 体力恢复处理
 	if (bWillExhaust)
 	{
 		ActionState = EActionState::EAS_Exhausted;
+		if (!IsExhaustionTimerActive())
+		{
+			GetWorldTimerManager().SetTimer(
+				ExhaustionTimerHandle, this,
+				&AMyCharacter::RecoverFromExhaustion,
+				ExhaustedTime, false);
+		}
 		Attributes->ResumeStaminaRegen();
 	}
 	else

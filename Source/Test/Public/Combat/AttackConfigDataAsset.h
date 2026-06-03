@@ -7,14 +7,14 @@
 #include "AttackConfigDataAsset.generated.h"
 
 class UComboDataAsset;
+class UAnimMontage;
 
 /* 特殊攻击类型枚举（编译期类型安全） */
 UENUM(BlueprintType)
 enum class ESpecialAttackType : uint8
 {
 	SprintAttack   UMETA(DisplayName = "Sprint Attack"),
-	JumpAttack     UMETA(DisplayName = "Jump Attack"),
-	ChargedAttack  UMETA(DisplayName = "Charged Attack")
+	JumpAttack     UMETA(DisplayName = "Jump Attack")
 };
 
 /* 特殊攻击配置 */
@@ -44,6 +44,37 @@ struct FSpecialAttackConfig
 	float StaminaCost = 15.f;
 };
 
+/* 蓄力攻击专用配置 */
+USTRUCT(BlueprintType)
+struct FChargedAttackConfig
+{
+	GENERATED_BODY()
+
+	// 攻击蒙太奇
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Attack", meta = (ToolTip = "蓄力攻击动画蒙太奇 (需包含 Default 和 Release 两个 Section)"))
+	TObjectPtr<UAnimMontage> Montage = nullptr;
+
+	// 最大伤害倍率 (满蓄力时)
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Damage", meta = (ClampMin = "0.1", ClampMax = "10.0", ToolTip = "最大满蓄力伤害倍率（相对武器基础伤害）"))
+	float MaxDamageMultiplier = 1.8f;
+
+	// 最大韧性伤害倍率 (满蓄力时)
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Poise", meta = (ClampMin = "0.1", ClampMax = "10.0", ToolTip = "最大满蓄力韧性伤害倍率（相对武器基础韧性伤害）"))
+	float MaxPoiseDamageMultiplier = 2.0f;
+
+	// 体力消耗
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Stamina", meta = (ClampMin = "1.0", ToolTip = "蓄力释放消耗的体力"))
+	float StaminaCost = 15.f;
+
+	// 最低蓄力时长
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Charge Timing", meta = (ClampMin = "0.0", ToolTip = "最低有效蓄力时长（松开时若低于此值，虽释放蓄力攻击，但使用最低倍率1.0）"))
+	float MinChargeHoldTime = 0.45f;
+
+	// 满蓄力时长
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Charge Timing", meta = (ClampMin = "0.1", ToolTip = "达到满蓄力的时长（达到此值后，倍率不再增加）"))
+	float MaxChargeHoldTime = 1.2f;
+};
+
 /**
  * 攻击配置数据资产
  * 统一管理所有攻击类型的配置（连招、冲刺攻击、跳跃攻击等）
@@ -61,6 +92,10 @@ public:
 	/* 特殊攻击配置（使用 TArray 提升蓝图编辑体验） */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Special Attacks", meta = (ToolTip = "特殊攻击配置（冲刺攻击、跳跃攻击等）"))
 	TArray<FSpecialAttackConfig> SpecialAttacks;
+
+	/* 蓄力攻击配置 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Charged Attack", meta = (ToolTip = "蓄力攻击专用配置"))
+	FChargedAttackConfig ChargedAttack;
 
 	/* Helper 方法：查找特殊攻击配置（线性遍历，3-5 个条目性能无影响） */
 	const FSpecialAttackConfig* FindSpecialAttack(ESpecialAttackType AttackType) const;

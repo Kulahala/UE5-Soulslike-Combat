@@ -32,7 +32,8 @@ protected:
 	void Input_Jump();
 	void Input_StopJumping();
 	void Input_Equip();
-	void Input_Attack();
+	void Input_AttackPressed();
+	void Input_AttackReleased();
 	void Input_SprintStart();
 	void Input_SprintEnd();
 	void Input_WalkStart();

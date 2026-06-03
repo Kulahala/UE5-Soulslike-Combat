@@ -36,5 +36,19 @@ void UAttackConfigDataAsset::PostInitProperties()
 				*UEnum::GetValueAsString(Config.Type));
 		}
 	}
+
+	// 验证蓄力攻击配置
+	if (!ChargedAttack.Montage)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("AttackConfigDataAsset: ChargedAttack has no Montage"));
+	}
+	if (ChargedAttack.MinChargeHoldTime > ChargedAttack.MaxChargeHoldTime)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("AttackConfigDataAsset: ChargedAttack MinChargeHoldTime > MaxChargeHoldTime, clamping required."));
+	}
+	if (ChargedAttack.MaxChargeHoldTime <= 0.f)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("AttackConfigDataAsset: ChargedAttack MaxChargeHoldTime must be > 0"));
+	}
 #endif
 }

@@ -35,6 +35,12 @@ public:
 	virtual void Attack() override;
 	bool ShouldUseSprintAttack() const;
 	void PerformSprintAttack();
+	void OnAttackInputPressed();
+	void OnAttackInputReleased();
+	void EnterChargeMode();
+	void PerformChargedRelease();
+	void CancelChargeInputState();
+	bool CanStartChargedAttack() const;
 	virtual void Jump() override;
 	virtual void GetHit_Implementation(const FVector& ImpactPoint, AActor* HitInstigator) override;
 	virtual float TakeDamage(float DamageAmount, const struct FDamageEvent& DamageEvent,
@@ -195,6 +201,17 @@ private:
 	UPlayerHUDWidget* PlayerHUDWidget;
 
 	/* 状态 */
+	/* Charged Attack */
+	bool bAttackInputHeld = false;
+	bool bIsChargingAttack = false;
+	float AttackInputPressTime = 0.f;
+	FTimerHandle ChargeDecisionTimer;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Combat|Charge")
+	float ChargeInputThreshold = 0.2f;
+
+	bool bPendingExhaustedAfterAttack = false;
+
 	// 当前重叠的可拾取物品
 	UPROPERTY(VisibleInstanceOnly, Category = "State", meta = (AllowPrivateAccess = "true", ToolTip = "当前重叠的可拾取物品。"))
 	Aitem* OverLapItem;

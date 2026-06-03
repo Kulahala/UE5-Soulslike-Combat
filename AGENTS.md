@@ -96,7 +96,7 @@ UUserWidget → UBaseHealthBarWidget (PB_Health + PB_Buffer progress bars, delay
 UAnimInstance → USlashAnimInstance (GroundSpeed, Direction, state enums)
 UDataAsset → UTreasureData
              ├── UComboDataAsset (light attack combo chain configurations, poise damage multiplier per segment)
-             └── UAttackConfigDataAsset (unified attack config: LightAttackCombo reference + TArray<FSpecialAttackConfig> for special attacks)
+             └── UAttackConfigDataAsset (LightAttackCombo + TArray<FSpecialAttackConfig> for sprint/jump-style specials + FChargedAttackConfig for charged attack)
 UAnimNotifyState → UAnimNotifyState_WeaponCollision
                  ├── UAnimNotifyState_DodgeInvulnerable
                  └── UAnimNotifyState_ComboWindow (opens character combo buffer window)
@@ -106,11 +106,13 @@ UInterface → UBlockableInterface (weapon hit interception before final damage 
 
 ### Combat Pipeline
 
-1. `ACharacterController::Input_Attack()` → `AMyCharacter::Attack()` (guard order: `bIsBlocking` → `ShouldUseSprintAttack()` → `CanAttack()` → combo)
-2. `PlayAttackMontage()` with `UAnimNotifyState_WeaponCollision`
-3. **NotifyBegin** → `AWeapon::StartWeaponTrace()` (records old box positions) + `SetAttackHyperArmor(true)` (player only)
-4. **NotifyTick** → `AWeapon::ExecuteWeaponTrace()` (sweep old→new center)
-5. On hit:
+1. `ACharacterController` binds attack press/release separately: `Started` → `Input_AttackPressed()`, `Completed` / `Canceled` → `Input_AttackReleased()`.
+2. Press flow: combo window buffers first; otherwise `AMyCharacter::OnAttackInputPressed()` gives sprint attack priority, then starts the charged-attack decision timer (`ChargeInputThreshold`, default `0.2s`).
+3. Release flow: releasing before the threshold clears the timer and calls normal `Attack()`; holding past the threshold enters charge mode, plays `ChargedAttack.Montage` section `Default`, and release jumps to section `Release`.
+4. Normal/combo attacks still use `PlayAttackMontage()` with `UAnimNotifyState_WeaponCollision`
+5. **NotifyBegin** → `AWeapon::StartWeaponTrace()` (records old box positions) + `SetAttackHyperArmor(true)` (player only)
+6. **NotifyTick** → `AWeapon::ExecuteWeaponTrace()` (sweep old→new center)
+7. On hit:
    - shared tags between attacker and target mean **no `ApplyDamage`**, but the target still enters the shared hit-feedback path (`GetHit`, knockback, hit-stop, camera shake)
    - cross-team hits may be intercepted by `IBlockableInterface::TryBlockHit()` before final damage is applied
    - for `ABaseCharacter` targets, `AWeapon::ExecuteWeaponTrace()` writes a per-hit `FPendingHitContext` (instigator, knockback scale, blocked flag, stun flag) before calling `IHitInterface::GetHit()`
@@ -121,8 +123,8 @@ UInterface → UBlockableInterface (weapon hit interception before final damage 
      3. After `GetHit()`, `ShouldTriggerStanceBreak()` is checked → `ApplyStanceBreak()` overrides to `EES_StanceBreak` + slow-motion hit react
    - **Parry poise damage targets the attacker** (`GetOwner()`), not `HitActor`: parry occurs when an enemy weapon hits the player, so `HitActor` is the player. `Cast<AEnemy>(HitActor)` would fail; `Cast<AEnemy>(GetOwner())` correctly targets the attacking enemy
    - `AWeapon::ExecuteWeaponTrace()` is intentionally decomposed into `BuildIgnoreList()`, `ResolveHit()`, and `DispatchHitFeedback()`. Keep `ResolveHit()` focused on same-team/block/damage math, and keep `DispatchHitFeedback()` focused on context write / poise damage / `GetHit()` / stance break check / camera shake / hit stop / ignore list; do not inflate it into a generic combat pipeline without a real new use case
-6. **NotifyEnd** → clears the weapon hit ignore list through `ClearIgnoreActors()` + `SetAttackHyperArmor(false)` (player only)
-7. `OnAttackMontageEnded` delegate (with `bInterrupted` guard that restores `ActionState`) → restores `EAS_UnOccupied` and resumes stamina regen
+8. **NotifyEnd** → clears the weapon hit ignore list through `ClearIgnoreActors()` + `SetAttackHyperArmor(false)` (player only)
+9. `OnAttackMontageEnded` delegate (with `bInterrupted` guard that restores `ActionState`) → clears charge input state, restores `EAS_UnOccupied` when appropriate, and resumes stamina regen
 
 ### Hit Knockback
 
@@ -148,7 +150,7 @@ UInterface → UBlockableInterface (weapon hit interception before final damage 
 ### Poise / Stance Break System
 
 - **Unified mechanism**: Parry and combo-based poise depletion both trigger `EES_StanceBreak` — there is no separate `EES_Parried` state. Parry = instant poise clear, combo = gradual poise reduction, both converge on the same `ApplyStanceBreak()`.
-- **Poise damage formula**: `Final Poise Damage = Weapon::BasePoiseDamage × PoiseDamageMultiplier`. For combo attacks, the multiplier comes from `ComboSegment::PoiseDamageMultiplier`; for sprint attacks, from `FSpecialAttackConfig::PoiseDamageMultiplier` via `AttackConfig->FindSpecialAttack(ESpecialAttackType::SprintAttack)`. `CurrentPoiseDamage` is set in `Attack()` / `PerformSprintAttack()` before montage play, read by `DispatchHitFeedback()`.
+- **Poise damage formula**: `Final Poise Damage = Weapon::BasePoiseDamage × PoiseDamageMultiplier`. For combo attacks, the multiplier comes from `ComboSegment::PoiseDamageMultiplier`; for sprint attacks, from `FSpecialAttackConfig::PoiseDamageMultiplier` via `AttackConfig->FindSpecialAttack(ESpecialAttackType::SprintAttack)`; for charged attacks, it is interpolated from `1.f` to `FChargedAttackConfig::MaxPoiseDamageMultiplier`. `CurrentPoiseDamage` is set before the weapon collision window and read by `DispatchHitFeedback()`.
 - **Deferred trigger pattern** (`DispatchHitFeedback()` execution order):
   1. `ApplyPoiseDamage(Damage, Instigator)` reduces `CurrentPoise` and sets `bPendingStanceBreak` flag if poise reaches zero — does **not** immediately trigger stance break
   2. `CachePendingHitContext()` + `GetHit()` → enemy enters `EES_Stunned` with normal hit react
@@ -235,19 +237,19 @@ UInterface → UBlockableInterface (weapon hit interception before final damage 
 ### Combo System
 
 - **Data-Driven Configuration**: A light attack combo chain is defined via `UComboDataAsset`. Each segment configures a custom Montage Section, a damage multiplier (scales base weapon damage), a stamina cost, and a poise damage multiplier (scales weapon base poise damage).
-- **Unified Attack Config**: `AMyCharacter` uses `UAttackConfigDataAsset` (referenced as `AttackConfig` member) to manage all attack types. `AttackConfigDataAsset` references `LightAttackCombo` (`UComboDataAsset`) and contains a `TArray<FSpecialAttackConfig>` for special attacks (sprint, future: jump, charged). Each `FSpecialAttackConfig` has a `Type` enum (`ESpecialAttackType`), `Montage`, `DamageMultiplier`, `PoiseDamageMultiplier`, and `StaminaCost`. Lookup is via `AttackConfig->FindSpecialAttack(ESpecialAttackType::SprintAttack)`.
+- **Unified Attack Config**: `AMyCharacter` uses `UAttackConfigDataAsset` (referenced as `AttackConfig` member) to manage attack data. `AttackConfigDataAsset` references `LightAttackCombo` (`UComboDataAsset`), contains a `TArray<FSpecialAttackConfig>` for sprint / future jump-style special attacks, and owns a dedicated `FChargedAttackConfig ChargedAttack`. Each `FSpecialAttackConfig` has a `Type` enum (`ESpecialAttackType`), `Montage`, `DamageMultiplier`, `PoiseDamageMultiplier`, and `StaminaCost`. Lookup is via `AttackConfig->FindSpecialAttack(ESpecialAttackType::SprintAttack)`.
 - **No backward compat layer**: Old fields (`LightAttackCombo`, `SprintAttackMontage`, `SprintAttackDamageMultiplier`, `SprintAttackStaminaCost`, `SprintAttackPoiseDamageMultiplier`) have been **removed**. `AttackConfig` is the single source of truth. `BeginPlay()` has `ensureMsgf(AttackConfig, ...)` guard.
-- **Input Buffering**: Checked during `ACharacterController::Input_Attack()`. If `AMyCharacter::IsComboWindowOpen()` is true, the input is buffered by setting `bComboInputReceived = true`. Otherwise, a normal attack is initiated.
+- **Input Buffering**: Checked during `ACharacterController::Input_AttackPressed()`. If `AMyCharacter::IsComboWindowOpen()` is true, the input is buffered by setting `bComboInputReceived = true` before any charged-attack timer is started. Otherwise press/release handling decides sprint, normal, or charged attack.
 - **Combo Window State**: Controlled by `UAnimNotifyState_ComboWindow` placed in the attack montage. It calls `OpenComboWindow()` and `CloseComboWindow()` to toggle the input window.
 - **Combo Progression**: In `AMyCharacter::OnAttackMontageEnded()`, if `bComboInputReceived` is true and a next combo segment exists, the character increases the combo counter, temporarily marks the action state as `EActionState::EAS_UnOccupied` (to pass the `CanAttack()` gate), and immediately triggers `Attack()`.
 - **Reset Guards & Interruption**: On attack finish (without buffered inputs), normal interruption (getting hit, death, dodge roll, or exhaustion), `ResetCombo()` is called to reset the combo counter, input flag, and restore the damage multiplier to `1.0f` and poise damage to `EquippedWeapon->GetBasePoiseDamage()` (or `1.f` fallback if no weapon equipped).
 - **Damage Multiplier Application**: Applied in `AWeapon::ResolveHit()`. The weapon queries the attacker's `GetAttackDamageMultiplier()` to scale the raw damage *before* passing it to `IBlockableInterface::TryBlockHit()`, ensuring block stamina costs and damage mitigation calculations scale accordingly.
-- **Poise Damage Multiplier Application**: For combo attacks, `CurrentPoiseDamage = EquippedWeapon->GetBasePoiseDamage() * Segment.PoiseDamageMultiplier` is set in `Attack()` before montage play. For sprint attacks, `CurrentPoiseDamage = EquippedWeapon->GetBasePoiseDamage() * SprintConfig->PoiseDamageMultiplier` via `AttackConfig->FindSpecialAttack(ESpecialAttackType::SprintAttack)`. The final value is read by `DispatchHitFeedback()` when calling `Enemy->ApplyPoiseDamage()`.
+- **Poise Damage Multiplier Application**: For combo attacks, `CurrentPoiseDamage = EquippedWeapon->GetBasePoiseDamage() * Segment.PoiseDamageMultiplier` is set in `Attack()` before montage play. For sprint attacks, `CurrentPoiseDamage = EquippedWeapon->GetBasePoiseDamage() * SprintConfig->PoiseDamageMultiplier` via `AttackConfig->FindSpecialAttack(ESpecialAttackType::SprintAttack)`. For charged attacks, `PerformChargedRelease()` interpolates from `1.f` to `ChargedAttack.MaxPoiseDamageMultiplier`. The final value is read by `DispatchHitFeedback()` when calling `Enemy->ApplyPoiseDamage()`.
 - **Debug Visibility**: Rendered via `FDebugDrawHelper` in `DrawDebugInfo` when master debug rendering is active, printing combo index, input/window status, and current damage multiplier.
 
 ### Sprint Attack System
 
-- Triggered via `ACharacterController::Input_Attack()` → `AMyCharacter::Attack()` → `ShouldUseSprintAttack()` → `PerformSprintAttack()`.
+- Triggered via `ACharacterController::Input_AttackPressed()` → `AMyCharacter::OnAttackInputPressed()` / `Attack()` → `ShouldUseSprintAttack()` → `PerformSprintAttack()`.
 - **Priority**: sprint attack is checked **before** `CanAttack()` and the normal combo flow. Guard order: `bIsBlocking` → `ShouldUseSprintAttack()` → `CanAttack()` → combo logic.
 - **Conditions** (`ShouldUseSprintAttack()`): `bIsSprinting`, movement input (`GetLastMovementInputVector().SizeSquared2D() > KINDA_SMALL_NUMBER`), weapon equipped (`WeaponState != EWS_Unequipped`), `EAS_UnOccupied`, grounded. No lock-on restriction — works in both lock-on and non-lock states.
 - **Reuses `EAS_Attacking`**: no new `EActionState` enum value. No `bIsSprintAttack` flag — `OnAttackMontageEnded()` handles cleanup correctly without one: sprint attacks never open a combo window, so `bShouldContinueCombo` is always false, and `ResetCombo()` + `RestoreRotationMode()` + exhaustion check all work as-is.
@@ -261,7 +263,19 @@ UInterface → UBlockableInterface (weapon hit interception before final damage 
 - **Stops sprinting**: calls `StopSprinting()` after rotation lock and before montage play, so the character returns to normal run speed when the attack montage ends.
 - **Not in combo system**: sprint attack does not use `AnimNotifyState_ComboWindow` and does not advance `ComboCounter`. It is a single-hit attack that ends with `EAS_UnOccupied`.
 - **Default values** (in `DA_AttackConfig` asset): SprintAttack `DamageMultiplier = 1.8`, `StaminaCost = 25`, `PoiseDamageMultiplier = 2.0`.
-- **Implementation files**: `Source/Test/Public/Combat/AttackConfigDataAsset.h` (ESpecialAttackType + FSpecialAttackConfig + UAttackConfigDataAsset), `Source/Test/Private/Combat/AttackConfigDataAsset.cpp` (FindSpecialAttack + PostInitProperties), `Source/Test/Public/Character/MyCharacter.h:252-253` (AttackConfig declaration), `Source/Test/Private/Character/MyCharacter.cpp` (Attack, PerformSprintAttack, OnAttackMontageEnded, PlayAttackMontage, BeginPlay).
+- **Implementation files**: `Source/Test/Public/Combat/AttackConfigDataAsset.h` (ESpecialAttackType + FSpecialAttackConfig + FChargedAttackConfig + UAttackConfigDataAsset), `Source/Test/Private/Combat/AttackConfigDataAsset.cpp` (FindSpecialAttack + PostInitProperties), `Source/Test/Public/Character/MyCharacter.h` (AttackConfig declaration), `Source/Test/Private/Character/MyCharacter.cpp` (Attack, PerformSprintAttack, OnAttackMontageEnded, PlayAttackMontage, BeginPlay).
+
+### Charged Attack System
+
+- Triggered via attack input hold/release: `Input_AttackPressed()` starts the path and `Input_AttackReleased()` resolves short press vs charged release.
+- **Priority**: combo window buffering happens first in the controller; sprint attack has priority over charged attack in `OnAttackInputPressed()`. Charged attack uses the same entry guards as a grounded weapon attack: not blocking, `EAS_UnOccupied`, weapon equipped, and not falling.
+- **Short press behavior**: releasing before `ChargeInputThreshold` (default `0.2s`, kept on `AMyCharacter` for input feel only) clears the decision timer and falls back to normal `Attack()`.
+- **Configuration**: `AttackConfig->ChargedAttack` is a dedicated `FChargedAttackConfig`, separate from `SpecialAttacks`. It owns `Montage`, `MaxDamageMultiplier`, `MaxPoiseDamageMultiplier`, `StaminaCost`, `MinChargeHoldTime`, and `MaxChargeHoldTime`. If the charged montage is missing, charge entry cancels and falls back to normal attack.
+- **Charge scaling**: `PerformChargedRelease()` calculates held time, clamps alpha between `MinChargeHoldTime` and `MaxChargeHoldTime`, then interpolates damage and poise multipliers from `1.f` to the configured max values. If `MaxChargeHoldTime <= MinChargeHoldTime`, alpha stays `0.f` rather than dividing by an invalid range.
+- **Montage contract**: C++ hard-codes section names `Default` and `Release`. A typical montage link setup is `Default -> Loop`, `Loop -> Loop`, `Release -> None`; UE Montage section markers are **start markers**, not end markers, so `Release` can bound the loop and still only be entered by `Montage_JumpToSection("Release")`.
+- **Root motion / notify contract**: The hold or loop section should use an in-place/no-root-motion hold pose or tiny static clip; the `Release` section may keep root motion for the forward step. Put `UAnimNotifyState_WeaponCollision` on `Release`, not on the charge hold loop. Do not put `UAnimNotifyState_ComboWindow` in the charged montage.
+- **State/recovery**: charged attack reuses `EAS_Attacking` and `OnAttackMontageEnded()`. End/death paths call `CancelChargeInputState()`. Stamina is consumed on release; exhaustion after release is carried through `bPendingExhaustedAfterAttack` so recovery can enter `EAS_Exhausted` instead of incorrectly returning to idle.
+- **Implementation files**: `Source/Test/Public/Combat/AttackConfigDataAsset.h`, `Source/Test/Private/Combat/AttackConfigDataAsset.cpp`, `Source/Test/Public/Character/Controller/CharacterController.h`, `Source/Test/Private/Character/Controller/CharacterController.cpp`, `Source/Test/Public/Character/MyCharacter.h`, `Source/Test/Private/Character/MyCharacter.cpp`.
 
 ### Lock-On System
 

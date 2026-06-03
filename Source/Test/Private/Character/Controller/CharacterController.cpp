@@ -48,7 +48,9 @@ void ACharacterController::SetupInputComponent()
 		EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Completed, this, &ACharacterController::Input_StopJumping);
 
 		EnhancedInputComponent->BindAction(EquipAction, ETriggerEvent::Started, this, &ACharacterController::Input_Equip);
-		EnhancedInputComponent->BindAction(AttackAction, ETriggerEvent::Started, this, &ACharacterController::Input_Attack);
+		EnhancedInputComponent->BindAction(AttackAction, ETriggerEvent::Started, this, &ACharacterController::Input_AttackPressed);
+		EnhancedInputComponent->BindAction(AttackAction, ETriggerEvent::Completed, this, &ACharacterController::Input_AttackReleased);
+		EnhancedInputComponent->BindAction(AttackAction, ETriggerEvent::Canceled, this, &ACharacterController::Input_AttackReleased);
 
 		EnhancedInputComponent->BindAction(SprintAction, ETriggerEvent::Started, this, &ACharacterController::Input_SprintStart);
 		EnhancedInputComponent->BindAction(SprintAction, ETriggerEvent::Completed, this, &ACharacterController::Input_SprintEnd);
@@ -173,20 +175,27 @@ void ACharacterController::Input_Equip()
 	DebugEquipExpireTime = GetWorld()->GetTimeSeconds() + 0.15f;  // [调试]
 }
 
-void ACharacterController::Input_Attack()
+void ACharacterController::Input_AttackPressed()
 {
+	DebugAttackExpireTime = GetWorld()->GetTimeSeconds() + 0.15f;  // [调试]
+
 	if (AMyCharacter* MyCharacter = GetMyCharacter())
 	{
 		if (MyCharacter->IsComboWindowOpen())
 		{
 			MyCharacter->SetComboInputReceived(true);
+			return;
 		}
-		else
-		{
-			MyCharacter->Attack();
-		}
+		MyCharacter->OnAttackInputPressed();
 	}
-	DebugAttackExpireTime = GetWorld()->GetTimeSeconds() + 0.15f;  // [调试]
+}
+
+void ACharacterController::Input_AttackReleased()
+{
+	if (AMyCharacter* MyCharacter = GetMyCharacter())
+	{
+		MyCharacter->OnAttackInputReleased();
+	}
 }
 
 void ACharacterController::Input_SprintStart()

@@ -58,17 +58,19 @@ UAnimNotifyState → UAnimNotifyState_ParryActive (marks parry active window in 
 UAnimNotifyState → UAnimNotifyState_ComboWindow (marks combo input window in animation)
 UDataAsset → UTreasureData (static mesh, gold value, pickup sound, scale)
 UDataAsset → UComboDataAsset (combo chain: SectionName, DamageMultiplier, StaminaCost, PoiseDamageMultiplier per segment)
+UDataAsset → UAttackConfigDataAsset (LightAttackCombo + SpecialAttacks for sprint/jump-style specials + ChargedAttack)
 ```
 
 ### Combat Pipeline
-1. `ACharacterController::Input_Attack()` → calls `AMyCharacter::Attack()`
-2. **Attack Priority**: `bIsBlocking` guard → **Sprint Attack** (if sprinting + moving + weapon equipped) → `CanAttack()` → Combo/Normal Attack
-3. **Sprint Attack**: Independent system, triggers when sprinting + moving + weapon equipped + grounded. Uses `SprintAttackMontage` (1.8x damage, 25 stamina),朝移动方向攻击，攻击后停止冲刺。不接入连招系统（无 ComboWindow）。复用 `OnAttackMontageEnded` 回调。
-4. **Combo System**: `Attack()` queries `UComboDataAsset` for current segment config (SectionName, DamageMultiplier, StaminaCost), increments `ComboCounter` on successful continuation
-5. `PlayAttackMontage(SectionName)` plays attack animation with `UAnimNotifyState_WeaponCollision` + `UAnimNotifyState_ComboWindow` baked in
-6. **NotifyBegin** → `AWeapon::StartWeaponTrace()` (records old box positions) + `SetAttackHyperArmor(true)` (player only)
-7. **NotifyTick** → `AWeapon::ExecuteWeaponTrace()` (sweeps from old→new center to prevent ghost swings)
-8. On hit:
+1. `ACharacterController` splits attack input: `Started` → `Input_AttackPressed()`, `Completed` / `Canceled` → `Input_AttackReleased()`
+2. **Attack Priority**: combo window buffer first → sprint attack (if sprinting + moving + weapon equipped) → charged decision timer → short release falls back to combo/normal `Attack()`
+3. **Sprint Attack**: Independent system, triggers when sprinting + moving + weapon equipped + grounded. Uses `AttackConfig->FindSpecialAttack(ESpecialAttackType::SprintAttack)`, faces movement direction, stops sprinting after attack, does not use ComboWindow, and reuses `OnAttackMontageEnded`.
+4. **Charged Attack**: Holding past `ChargeInputThreshold` enters `ChargedAttack.Montage` section `Default`; releasing while charging jumps to section `Release` and applies charged damage/poise multipliers.
+5. **Combo System**: `Attack()` queries `UComboDataAsset` for current segment config (SectionName, DamageMultiplier, StaminaCost), increments `ComboCounter` on successful continuation
+6. `PlayAttackMontage(SectionName)` plays normal/combo attack animation with `UAnimNotifyState_WeaponCollision` + `UAnimNotifyState_ComboWindow` baked in
+7. **NotifyBegin** → `AWeapon::StartWeaponTrace()` (records old box positions) + `SetAttackHyperArmor(true)` (player only)
+8. **NotifyTick** → `AWeapon::ExecuteWeaponTrace()` (sweeps from old→new center to prevent ghost swings)
+9. On hit:
    - 同阵营命中：不 `ApplyDamage`，但仍走 `GetHit` 路径（击退、命中反馈、相机晃动）。同阵营判定通过 `FCombatTeamHelper::ShareTeamTag()`（Weapon + Enemy 共用）
    - 跨阵营命中：`IBlockableInterface::TryBlockHit()` 在 `ApplyDamage` 前拦截；格挡成功：减伤 + 跳过硬直；弹反成功：瞬间清空攻击方韧性触发破防
    - `ExecuteWeaponTrace()` 通过 `FPendingHitContext` 写入每命中的上下文（instigator、knockback scale、blocked flag、stun flag），然后调用 `GetHit()`
@@ -78,11 +80,11 @@ UDataAsset → UComboDataAsset (combo chain: SectionName, DamageMultiplier, Stam
    - **弹反分支**：弹反成功时对攻击方敌人调用 `ApplyPoiseDamage(GetCurrentPoise())`（瞬间清空韧性），然后在 `GetHit()` 之后检查 `ShouldTriggerStanceBreak()` 触发破防
    - **破防触发**：`GetHit()` 之后检查 `bPendingStanceBreak` flag，弹反路径对攻击方（`GetOwner()`）触发，普通命中对受击方（`HitActor`）触发
    - **Damage Multiplier**: `ResolveHit()` 在格挡判定前应用 `BaseCharacter->GetAttackDamageMultiplier()`，确保格挡体力消耗基于实际打击伤害
-   - **Poise Damage Multiplier**: 连招系统同时计算 `CurrentPoiseDamage = BasePoiseDamage × PoiseDamageMultiplier`，冲刺攻击使用独立倍率
-9. HitStop + CameraShake（所有命中都触发）
-10. **NotifyEnd** → clears `IgnoreActors` blacklist + `SetAttackHyperArmor(false)` (player only)
-11. **Combo Window**: `AnimNotifyState_ComboWindow` marks combo input window, `Input_Attack()` sets `bComboInputReceived` during window
-12. `OnAttackMontageEnded` delegate fires → `if (bInterrupted)` restores `ActionState` → checks `bComboInputReceived`:
+   - **Poise Damage Multiplier**: 连招系统同时计算 `CurrentPoiseDamage = BasePoiseDamage × PoiseDamageMultiplier`，冲刺攻击使用独立倍率，蓄力攻击按持有时长在 1.0 到 `ChargedAttack.MaxPoiseDamageMultiplier` 间插值
+10. HitStop + CameraShake（所有命中都触发）
+11. **NotifyEnd** → clears `IgnoreActors` blacklist + `SetAttackHyperArmor(false)` (player only)
+12. **Combo Window**: `AnimNotifyState_ComboWindow` marks combo input window, `Input_AttackPressed()` sets `bComboInputReceived` during window before any charged timer starts
+13. `OnAttackMontageEnded` delegate fires → clears charged input state → `if (bInterrupted)` restores `ActionState` → checks `bComboInputReceived`:
     - true + not exhausted → `ComboCounter++`, temp set `ActionState = EAS_UnOccupied`, call `Attack()` (continues combo)
     - false or exhausted → `ResetCombo()`, restore `EAS_UnOccupied`, resume stamina regen
 
@@ -396,11 +398,11 @@ UDataAsset → UComboDataAsset (combo chain: SectionName, DamageMultiplier, Stam
 
 ### 连招系统（Combo System）
 - **架构**：数据驱动 + AnimNotifyState 驱动窗口
-- **统一攻击配置**：`AMyCharacter` 使用 `UAttackConfigDataAsset` 统一管理所有攻击类型。`AttackConfigDataAsset` 引用 `LightAttackCombo`（UComboDataAsset）并包含 `TArray<FSpecialAttackConfig>` 管理特殊攻击（冲刺、跳跃、蓄力）。
+- **统一攻击配置**：`AMyCharacter` 使用 `UAttackConfigDataAsset` 统一管理攻击数据。`AttackConfigDataAsset` 引用 `LightAttackCombo`（UComboDataAsset），用 `TArray<FSpecialAttackConfig>` 管理冲刺/跳跃类特殊攻击，并用专用 `FChargedAttackConfig ChargedAttack` 管理蓄力攻击。
 - **数据结构**：`UComboDataAsset` 存储连招链（`TArray<FComboSegment>`），每段配置 `SectionName`、`DamageMultiplier`、`StaminaCost`、`PoiseDamageMultiplier`
-- **特殊攻击配置**：`FSpecialAttackConfig` 包含 `Type`（enum class ESpecialAttackType）、`Montage`、`DamageMultiplier`、`PoiseDamageMultiplier`、`StaminaCost`。通过 `AttackConfig->FindSpecialAttack(Type)` 查找。
+- **特殊攻击配置**：`FSpecialAttackConfig` 包含 `Type`（enum class ESpecialAttackType）、`Montage`、`DamageMultiplier`、`PoiseDamageMultiplier`、`StaminaCost`。通过 `AttackConfig->FindSpecialAttack(Type)` 查找。不要把蓄力攻击塞回 `SpecialAttacks`。
 - **连招窗口**：`UAnimNotifyState_ComboWindow` 在蒙太奇中标记输入窗口（可视化调整，自动跟随 PlayRate）
-- **输入缓冲**：`Input_Attack()` 检查 `IsComboWindowOpen()`，窗口内设置 `bComboInputReceived = true`，窗口外直接调用 `Attack()`
+- **输入缓冲**：`Input_AttackPressed()` 检查 `IsComboWindowOpen()`，窗口内设置 `bComboInputReceived = true`，并且不启动蓄力计时；窗口外才进入冲刺/蓄力/普通攻击输入路径。
 - **连招续接**：`OnAttackMontageEnded()` 检查 `bComboInputReceived`：
   - true + 非疲惫 → `ComboCounter++`，临时设置 `ActionState = EAS_UnOccupied`（让 `CanAttack()` 通过），调用 `Attack()`
   - false 或疲惫 → `ResetCombo()`，恢复 `EAS_UnOccupied`
@@ -410,6 +412,15 @@ UDataAsset → UComboDataAsset (combo chain: SectionName, DamageMultiplier, Stam
 - **累积式动画**：支持 Attack1:a, Attack2:a+b, Attack3:a+b+c 的动画结构，通过蒙太奇 section 跳转实现（第二段跳到"b开始"，第三段跳到"c开始"）
 - **AnimNotifyState vs Timer**：连招窗口必须用 AnimNotifyState，原因：(1) 自动跟随 PlayRate，(2) 可视化调整无需改代码，(3) 动画迭代零代码改动
 - **文件位置**：`Source/Test/Public/Combat/AttackConfigDataAsset.h`（统一配置）、`Source/Test/Public/Combat/ComboDataAsset.h`（连招链）、`Source/Test/Public/AnimNotify/AnimNotifyState_ComboWindow.h`（窗口标记）
+
+### 蓄力攻击系统（Charged Attack System）
+- **输入入口**：`AttackAction` 的 `Started` 调 `Input_AttackPressed()`，`Completed` / `Canceled` 调 `Input_AttackReleased()`。短按未超过 `ChargeInputThreshold`（默认 0.2 秒）时走普通 `Attack()`；超过阈值进入蓄力。
+- **优先级**：Controller 先处理连招窗口缓存；`AMyCharacter::OnAttackInputPressed()` 里冲刺攻击优先于蓄力。蓄力入口要求未格挡、`EAS_UnOccupied`、已装备武器、地面。
+- **数据配置**：蓄力攻击使用 `AttackConfig->ChargedAttack`（`FChargedAttackConfig`），字段包括 `Montage`、`MaxDamageMultiplier`、`MaxPoiseDamageMultiplier`、`StaminaCost`、`MinChargeHoldTime`、`MaxChargeHoldTime`。缺少蓄力蒙太奇时回退普通攻击。
+- **释放倍率**：`PerformChargedRelease()` 按按住时长在最小/最大蓄力时间之间计算 alpha，伤害和韧性倍率从 `1.f` 插值到配置的最大值。若最大时间不大于最小时间，alpha 保持 0，避免非法除法。
+- **蒙太奇契约**：C++ 硬编码跳转 `Default` 和 `Release` Section。常见链接：`Default -> Loop`、`Loop -> Loop`、`Release -> None`。UE Montage Section 是起点标记，不是终点标记；`Release` 可以作为 Loop 的结束边界，但实际进入 Release 只靠 C++ `Montage_JumpToSection("Release")`。
+- **动画约束**：蓄力保持/Loop 段用无根运动的定格或短循环，Release 段可以保留根运动用于踏步。`UAnimNotifyState_WeaponCollision` 放在 Release 段，蓄力蒙太奇不要放 `UAnimNotifyState_ComboWindow`。
+- **状态恢复**：蓄力复用 `EAS_Attacking` 和 `OnAttackMontageEnded()`；结束/死亡清理 `CancelChargeInputState()`。释放扣体力，体力耗尽通过 `bPendingExhaustedAfterAttack` 延迟恢复到 `EAS_Exhausted`。
 
 ### 替换式状态更新：先清后判
 当函数需要"覆盖旧状态"时，先清空旧状态再做 early-return 守卫。
