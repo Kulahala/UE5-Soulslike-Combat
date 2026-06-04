@@ -301,7 +301,7 @@ private:
 	FEnemyCombatMovePlan BuildCombatMovePlan(float DistanceToTarget, const FVector& ToTarget) const;
 	static const TCHAR* GetCombatMoveDebugName(EEnemyCombatMoveType MoveType);
 	bool MoveToCombatLocation(const FVector& Location);
-	bool MoveToCombatTarget(); // 攻击 ready 时动态追踪目标 Actor
+	bool MoveToCombatTarget(float AcceptanceRadiusOverride = -1.f); // 攻击 ready 时动态追踪目标 Actor
 	void ResetCombatReposition();
 
 	// 攻击协调：检查同目标附近队友是否正在攻击，返回建议等待时间
@@ -328,13 +328,36 @@ private:
 
 	EEnemyCombatSubState CombatSubState = EEnemyCombatSubState::None;
 	void PerformConfiguredAttack(float DistanceToTarget);
+	bool PerformConfiguredAttackByIndex(int32 AttackIndex);
 	void StartAttackCooldown(float MinCooldown, float MaxCooldown);
 	bool PlayEnemyAttackMontage(const FEnemyAttackEntry& Entry);
-	void ClearCurrentAttackConfig();
+	void ClearCurrentAttackConfig(bool bStartCooldown = false);
 	void ValidateEnemyAttackConfig() const;
 	void WarnNoEnemyAttackCandidate(float DistanceToTarget);
+	bool HasPendingAttack() const;
+	void ClearPendingAttack();
+	void RollPendingAttackIntent();
+	bool TryExecutePendingAttack(float DistanceToTarget, float ForwardDot, const FVector& ToTarget);
+	void HandlePendingAttackPositioning(float DistanceToTarget, const FVector& ToTarget);
+	bool IsPendingAttackExpired() const;
+	void BlockPendingAttackRetry(int32 AttackIndex);
+	int32 GetBlockedPendingAttackIndex() const;
+	void StartCurrentAttackCooldownIfNeeded();
+	FString GetPendingAttackDebugString() const;
+	float GetAttackCooldownRemaining() const;
+	void DrawDebugInfo() const;
 	int32 CurrentAttackIndex = INDEX_NONE;
 	float LastAttackConfigWarningTime = -1000.f;
+	int32 PendingAttackIndex = INDEX_NONE;
+	float PendingAttackStartTime = 0.f;
+	int32 LastBlockedPendingAttackIndex = INDEX_NONE;
+	float PendingAttackRetryBlockUntil = 0.f;
+	bool bPendingAttackMoveIssued = false;
+	UPROPERTY(EditAnywhere, Category = "Combat|Attack", meta = (ClampMin = "0.1", ToolTip = "攻击意图等待最长时间，超时后重新抽取招式。"))
+	float PendingAttackTimeout = 2.f;
+	UPROPERTY(EditAnywhere, Category = "Combat|Attack", meta = (ClampMin = "0.0", ToolTip = "Pending 攻击失败后，同一招式被重新抽中的短暂屏蔽时间，防止每帧反复抽中追不上的招式。"))
+	float PendingAttackRetryBlockDuration = 0.8f;
+	bool bCurrentAttackCooldownStarted = false;
 
 	void SetCombatSubState(EEnemyCombatSubState NewSubState, float AllySuggestedWaitTime = 0.f);
 	EEnemyCombatSubState EvaluateCombatSubState(float DistanceToTarget, float ForwardDot, float& OutAllySuggestedWaitTime) const;

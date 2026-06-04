@@ -46,6 +46,47 @@ int32 UEnemyAttackConfigDataAsset::ChooseAttackIndex(float DistanceToTarget) con
 	return CandidateIndices.Last();
 }
 
+int32 UEnemyAttackConfigDataAsset::ChooseAttackIntentIndex(int32 ExcludedAttackIndex) const
+{
+	float TotalWeight = 0.f;
+	TArray<int32> CandidateIndices;
+	CandidateIndices.Reserve(Attacks.Num());
+
+	for (int32 Index = 0; Index < Attacks.Num(); ++Index)
+	{
+		if (Index == ExcludedAttackIndex)
+		{
+			continue;
+		}
+
+		const FEnemyAttackEntry& Entry = Attacks[Index];
+		if (!Entry.Montage || Entry.Weight <= 0.f)
+		{
+			continue;
+		}
+
+		TotalWeight += Entry.Weight;
+		CandidateIndices.Add(Index);
+	}
+
+	if (CandidateIndices.IsEmpty() || TotalWeight <= 0.f)
+	{
+		return INDEX_NONE;
+	}
+
+	float Pick = FMath::FRandRange(0.f, TotalWeight);
+	for (const int32 Index : CandidateIndices)
+	{
+		Pick -= Attacks[Index].Weight;
+		if (Pick <= 0.f)
+		{
+			return Index;
+		}
+	}
+
+	return CandidateIndices.Last();
+}
+
 void UEnemyAttackConfigDataAsset::PostInitProperties()
 {
 	Super::PostInitProperties();

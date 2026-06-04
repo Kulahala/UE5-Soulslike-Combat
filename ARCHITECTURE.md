@@ -187,23 +187,24 @@ stateDiagram-v2
 
 ```mermaid
 flowchart TD
-    A[Tick] --> B{State guard}
-    B -->|Dead / Stunned / Attacking / StanceBreak| C[Return]
-    B -->|Other states| D[CheckCombatTarget]
-    D --> E{Target distance / validity}
-    E -->|Combat range| F[Set EES_Combating]
-    E -->|Chase range| G[Set EES_Chasing]
-    E -->|Invalid or lost| H[Set EES_Searching or Patrolling]
-    F --> I{State Tick}
-    G --> I
-    H --> I
-    I --> J[OnPatrolling]
-    I --> K[OnSearching]
-    I --> L[OnChasing]
-    I --> M[OnCombating]
-    M --> N[EvaluateCombatSubState]
-    N --> O[TickCombatFacing]
-    O --> P[TickCombatSubState]
+    A[Tick] --> B[DrawDebugInfo]
+    B --> C{State guard}
+    C -->|Dead / Stunned / Attacking / StanceBreak| D[Return]
+    C -->|Other states| E[CheckCombatTarget]
+    E --> F{Target distance / validity}
+    F -->|Combat range| G[Set EES_Combating]
+    F -->|Chase range| H[Set EES_Chasing]
+    F -->|Invalid or lost| I[Set EES_Searching or Patrolling]
+    G --> J{State Tick}
+    H --> J
+    I --> J
+    J --> K[OnPatrolling]
+    J --> L[OnSearching]
+    J --> M[OnChasing]
+    J --> N[OnCombating]
+    N --> O[TickCombatFacing / speed easing]
+    O --> P[EvaluateCombatSubState]
+    P --> Q[Pending attack intent or TickCombatSubState]
 ```
 
 <a name="combat-cooldown-coordination-flow"></a>
@@ -211,17 +212,18 @@ flowchart TD
 
 ```mermaid
 flowchart LR
-    A[Attack] --> B[Set attack cooldown]
-    B --> C[Play attack montage]
-    C --> D[Montage ended]
-    D --> E[CheckCombatTarget]
-    E --> F{Cooldown active?}
-    F -->|Yes| G[CooldownSpacing / CoordinatedWaiting]
-    F -->|No| H{Same-target ally attacking?}
-    H -->|Yes| I[CoordinatedWaiting]
-    H -->|No| J{Inside attack range and facing?}
-    J -->|Yes| K[Attack]
-    J -->|No| L[Orienting / AttackReadyPressing]
+    A[Attack decision / pending intent ready] --> B[Play attack montage]
+    B --> C[Montage ended or interrupted]
+    C --> D[CheckCombatTarget]
+    D --> E[SetEnemyState exits EES_Attacking]
+    E --> F[Start current attack cooldown]
+    F --> G{Cooldown active?}
+    G -->|Yes| H[CooldownSpacing / CoordinatedWaiting]
+    G -->|No| I{Same-target ally attacking?}
+    I -->|Yes| J[CoordinatedWaiting]
+    I -->|No| K{Intent ready and facing?}
+    K -->|Yes| L[Attack]
+    K -->|No| M[Orienting / AttackReadyPressing / PendingPress]
 ```
 
 <a name="key-enemy-method-responsibilities"></a>
@@ -229,14 +231,15 @@ flowchart LR
 
 | Method | Called From | Responsibility |
 |--------|-------------|----------------|
-| `Tick()` | Every frame | State guard, target recheck, state tick dispatch. |
+| `Tick()` | Every frame | Calls debug info, applies state guard, target recheck, and state tick dispatch. |
 | `CheckCombatTarget()` | Tick / montage recovery | Validates target and chooses patrol/chase/combat state by distance. |
 | `SetEnemyState()` | State transition | Old-state cleanup and new-state initialization. |
 | `EvaluateCombatSubState(...)` | `OnCombating()` | Chooses local combat substate. |
 | `SetCombatSubState(...)` | Combat substate transition | One-shot entry / exit behavior, including coordinated wait cooldown. |
 | `TickCombatFacing(...)` | Combat tick | Smoothly faces the target. |
 | `TickCombatSubState(...)` | Combat tick | Dispatches orienting, pressing, coordinated wait, and cooldown spacing behavior. |
-| `Attack()` | Combat substate decision | Starts cooldown, switches to attacking, and plays attack montage. |
+| `Attack()` | Combat substate / fallback attack decision | Executes DataAsset-driven attack selection, switches to attacking, and plays attack montage. Cooldown starts when `SetEnemyState()` exits `EES_Attacking`. |
+| `DrawDebugInfo()` | Tick | Assembles enemy debug text/shapes before AI state work, keeping debug output out of gameplay decision branches. |
 | `TakeDamage()` | Damage pipeline | Applies health damage and enters death if needed. |
 | `ApplyPoiseDamage()` | Weapon hit feedback | Reduces poise and sets `bPendingStanceBreak` when poise reaches zero. |
 | `ApplyStanceBreak()` | After `GetHit()` checks pending flag | Stops montage, sets `EES_StanceBreak`, plays slow hit react, starts recovery timer. |
@@ -272,8 +275,18 @@ UAnimNotifyState → UAnimNotifyState_ComboWindow (marks combo input window in a
 UDataAsset → UTreasureData (static mesh, gold value, pickup sound, scale)
 UDataAsset → UComboDataAsset (combo chain: SectionName, DamageMultiplier, StaminaCost, PoiseDamageMultiplier per segment)
 UDataAsset → UAttackConfigDataAsset (LightAttackCombo + SpecialAttacks for sprint/jump-style specials + ChargedAttack)
-UDataAsset → UEnemyAttackConfigDataAsset (Enemy attacks: montage, cooldown, distance, weight, damage multiplier)
+UDataAsset → UEnemyAttackConfigDataAsset (Enemy attacks: montage, section, post-attack cooldown (v1.5: excludes montage duration and starts after attack end/interruption), MinDistance/MaxDistance, weight, damage/block-stamina multipliers)
 ```
+
+<a name="debug-output-system"></a>
+## Debug Output System
+
+- `FDebugDrawHelper` is the shared debug output channel for runtime text entries and simple world shapes. It owns collection/gating, not gameplay state.
+- CVar gates: `test.Debug.Enable` controls all debug output; `test.Debug.Enemy` controls enemy text; `test.Debug.Shapes` controls world shapes.
+- `UPlayerHUDWidget::NativePaint()` renders `FDebugDrawEntry` text from `FDebugDrawHelper::GetEntries()`.
+- Actor/system classes own debug content assembly: current examples are `AMyCharacter::DrawDebugInfo()` and `AEnemy::DrawDebugInfo()`. Keep gameplay-specific strings and field choices in the owning class, then emit through `FDebugDrawHelper`.
+- Do not move gameplay knowledge into `FDebugDrawHelper`; it should not depend on `AEnemy`, `AMyCharacter`, combat state enums, or asset classes.
+- Direct `DrawDebug*` / `GEngine->AddOnScreenDebugMessage(...)` calls should remain temporary diagnosis code or be wrapped by the helper when they become persistent project debug output.
 
 <a name="combat-pipeline"></a>
 ## Combat Pipeline
@@ -356,7 +369,16 @@ UDataAsset → UEnemyAttackConfigDataAsset (Enemy attacks: montage, cooldown, di
 - **战斗决策钩子（Virtual Seam）**：`ShouldTriggerAttack()`、`HandleAttackReadyPositioning()`、`HandleCooldownPositioning()` 三个 `protected virtual` 钩子供派生类覆写。所有战斗决策入口都必须保持在局部 HFSM / 钩子边界内。
 - **Combat Spacing**: `UpdateCombatMovement()` 按距离分 Retreat/BackDiag/Strafe/Press 四种策略，通过 `MoveToCombatLocation()` 发起导航请求。
 - **Attack Coordination**: Prevents multiple enemies from attacking simultaneously. Before attacking, enemies check if nearby allies (within `AttackCoordinationRange`, default 800cm) **chasing the same target** (`ChasingTarget` match) are in `EES_Attacking` state. Only allies attacking the same target participate in coordination. If allies are attacking, the enemy enters local combat substate `CoordinatedWaiting`, with suggested wait time from fixed `AttackCoordinationBuffer` (clamped by `SetCombatSubState()` to `MaxAttackCoordinationWait`).
-- **Attack Configuration**: 敌人攻击行为与伤害倍率由 `UEnemyAttackConfigDataAsset` 驱动，根据距目标的距离加权随机选择攻击。缺少 DataAsset 时不会攻击，并输出配置警告；不再保留旧 `AttackMontage + Attack1` 硬编码回退。配置校验区分 DataAsset 自身校验与 `AEnemy` 边界校验（`CombatAttackMaxRadius`）。
+- **Attack Configuration**: 敌人攻击行为由 `UEnemyAttackConfigDataAsset` 驱动，条目描述 montage / section、post-attack cooldown、`MinDistance` / `MaxDistance`、weight、damage multiplier、block-stamina multiplier。缺少 DataAsset 时不会攻击，并输出配置警告；不再保留旧 `AttackMontage + Attack1` 硬编码回退。配置校验区分 DataAsset 自身校验与 `AEnemy` 边界校验（`CombatAttackMaxRadius`）。
+  - **Cooldown Semantics**: v1.5 后敌人攻击 DataAsset 的 `MinCooldown` / `MaxCooldown` 不包含蒙太奇播放时长；攻击自然结束或被打断并退出 `EES_Attacking` 后才开始计时。
+  - **Attack Selection**: `ChooseAttackIndex(float DistanceToTarget)` 按距离过滤候选招式后加权随机，用于距离筛选/兜底路径；`ChooseAttackIntentIndex(int32 ExcludedAttackIndex)` 忽略距离、只按权重抽取，并可排除一个 index，用于 pending intent + retry block 路径。
+  - **Pending Attack Intent**: 未冷却且未协调等待时，`OnCombating()` 先缓存一个 pending attack intent，再尝试执行。抽中近距离攻击但当前距离大于该招式有效 `MaxDistance` 时，敌人使用 `MoveToCombatTarget(AcceptanceRadiusOverride)` 动态追踪目标并继续前压，直到进入该招式距离内再出手。
+  - **Pending Cleanup**: pending intent 在攻击成功开始、目标丢失、进入 `CooldownSpacing` / `CoordinatedWaiting`、或离开 `EES_Combating` / `EES_Attacking` 到受击、破防、死亡、脱战等状态时清理。
+  - **Distance Contract**: 执行距离上限为 `Min(Entry.MaxDistance, CombatAttackMaxRadius)`。`CombatAttackMaxRadius` 仍表示最大可出手距离，不是 cooldown spacing 距离；调大它时必须同步保持 `CombatAttackMaxRadius <= CombatPreferredMinRadius <= CombatPreferredMaxRadius < CombatingRadius`。
+  - **Retry Block**: pending intent 超时或目标距离小于该招式 `MinDistance` 时，清理 pending 并短暂屏蔽同一招式，防止每帧反复抽中同一条不可执行攻击。
+  - **Retry Block Lifetime**: retry block 通常不随 pending 清理主动清零，而是短时间自然过期；死亡路径会清空 `LastBlockedPendingAttackIndex` / `PendingAttackRetryBlockUntil`，避免死亡对象保留过期调试/状态。
+  - **Cooldown Idempotency**: `bCurrentAttackCooldownStarted` 防止同一次攻击重复启动 cooldown。攻击开始时重置为 `false`，`StartCurrentAttackCooldownIfNeeded()` 检查后置为 `true`；即使 `OnAttackEnd()` 和 `OnAttackMontageEnded()` 都请求 `CheckCombatTarget()`，cooldown 也只应通过 `SetEnemyState()` 的退出攻击路径启动一次。
+  - **Non-goal**: 当前不实现“抽中远距离/跳劈招式但距离太近 -> 先拉远再出手”。太近时依靠 `MinDistance` + retry block 重抽，而不是主动创造距离。
 
 ## Stamina & Exhaustion System
 

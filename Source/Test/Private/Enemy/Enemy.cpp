@@ -360,14 +360,29 @@ bool AEnemy::CanAttack() const
 void AEnemy::PerformConfiguredAttack(float DistanceToTarget)
 {
 	const int32 AttackIndex = EnemyAttackConfig->ChooseAttackIndex(DistanceToTarget);
+	PerformConfiguredAttackByIndex(AttackIndex);
+}
+
+bool AEnemy::PerformConfiguredAttackByIndex(int32 AttackIndex)
+{
+	if (!EnemyAttackConfig)
+	{
+		WarnNoEnemyAttackCandidate(0.f);
+		return false;
+	}
+
 	if (!EnemyAttackConfig->Attacks.IsValidIndex(AttackIndex))
 	{
+		const float DistanceToTarget = IsValidCombatTarget(ChasingTarget)
+			                               ? FVector::Dist2D(GetActorLocation(), ChasingTarget->GetActorLocation())
+			                               : 0.f;
 		WarnNoEnemyAttackCandidate(DistanceToTarget);
-		return;
+		return false;
 	}
 
 	const FEnemyAttackEntry& Entry = EnemyAttackConfig->Attacks[AttackIndex];
 	CurrentAttackIndex = AttackIndex;
+	bCurrentAttackCooldownStarted = false;
 	SetAttackDamageMultiplier(Entry.DamageMultiplier);
 	SetBlockStaminaDamageMultiplier(Entry.BlockStaminaDamageMultiplier);
 	SetEnemyState(EEnemyState::EES_Attacking);
@@ -376,11 +391,13 @@ void AEnemy::PerformConfiguredAttack(float DistanceToTarget)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("%s failed to play enemy attack montage for entry '%s'."),
 		       *GetName(), *Entry.AttackName.ToString());
+		ClearCurrentAttackConfig(false);
 		CheckCombatTarget();
-		return;
+		return false;
 	}
 
-	StartAttackCooldown(Entry.MinCooldown, Entry.MaxCooldown);
+	ClearPendingAttack();
+	return true;
 }
 
 void AEnemy::StartAttackCooldown(float MinCooldown, float MaxCooldown)
@@ -424,9 +441,15 @@ bool AEnemy::PlayEnemyAttackMontage(const FEnemyAttackEntry& Entry)
 	return true;
 }
 
-void AEnemy::ClearCurrentAttackConfig()
+void AEnemy::ClearCurrentAttackConfig(bool bStartCooldown)
 {
+	if (bStartCooldown)
+	{
+		StartCurrentAttackCooldownIfNeeded();
+	}
+
 	CurrentAttackIndex = INDEX_NONE;
+	bCurrentAttackCooldownStarted = false;
 	SetAttackDamageMultiplier(1.f);
 	SetBlockStaminaDamageMultiplier(1.f);
 }
@@ -443,7 +466,7 @@ void AEnemy::ValidateEnemyAttackConfig() const
 		if (Entry.MaxDistance > CombatAttackMaxRadius)
 		{
 			UE_LOG(LogTemp, Warning,
-			       TEXT("%s: Enemy attack entry '%s' MaxDistance %.1f is greater than CombatAttackMaxRadius %.1f and will not be reachable in v1."),
+			       TEXT("%s: Enemy attack entry '%s' MaxDistance %.1f is greater than CombatAttackMaxRadius %.1f; pending intent will clamp execution to CombatAttackMaxRadius."),
 			       *GetName(), *Entry.AttackName.ToString(), Entry.MaxDistance, CombatAttackMaxRadius);
 		}
 	}
@@ -470,6 +493,201 @@ void AEnemy::WarnNoEnemyAttackCandidate(float DistanceToTarget)
 	       *GetName(), DistanceToTarget);
 }
 
+bool AEnemy::HasPendingAttack() const
+{
+	return PendingAttackIndex != INDEX_NONE;
+}
+
+void AEnemy::ClearPendingAttack()
+{
+	PendingAttackIndex = INDEX_NONE;
+	PendingAttackStartTime = 0.f;
+	bPendingAttackMoveIssued = false;
+}
+
+void AEnemy::RollPendingAttackIntent()
+{
+	if (!EnemyAttackConfig)
+	{
+		WarnNoEnemyAttackCandidate(0.f);
+		return;
+	}
+
+	const int32 BlockedAttackIndex = GetBlockedPendingAttackIndex();
+	PendingAttackIndex = EnemyAttackConfig->ChooseAttackIntentIndex(BlockedAttackIndex);
+	PendingAttackStartTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
+	bPendingAttackMoveIssued = false;
+
+	if (!EnemyAttackConfig->Attacks.IsValidIndex(PendingAttackIndex))
+	{
+		if (BlockedAttackIndex == INDEX_NONE)
+		{
+			WarnNoEnemyAttackCandidate(IsValidCombatTarget(ChasingTarget)
+				                           ? FVector::Dist2D(GetActorLocation(), ChasingTarget->GetActorLocation())
+				                           : 0.f);
+		}
+		ClearPendingAttack();
+	}
+}
+
+bool AEnemy::TryExecutePendingAttack(float DistanceToTarget, float ForwardDot, const FVector& ToTarget)
+{
+	if (!HasPendingAttack())
+	{
+		return false;
+	}
+
+	if (!EnemyAttackConfig || !EnemyAttackConfig->Attacks.IsValidIndex(PendingAttackIndex))
+	{
+		ClearPendingAttack();
+		return false;
+	}
+
+	const FEnemyAttackEntry& Entry = EnemyAttackConfig->Attacks[PendingAttackIndex];
+	const float EffectiveMaxDistance = FMath::Min(Entry.MaxDistance, CombatAttackMaxRadius);
+	if (IsPendingAttackExpired())
+	{
+		BlockPendingAttackRetry(PendingAttackIndex);
+		ClearPendingAttack();
+		return true;
+	}
+
+	if (DistanceToTarget > EffectiveMaxDistance)
+	{
+		HandlePendingAttackPositioning(DistanceToTarget, ToTarget);
+		return true;
+	}
+
+	if (DistanceToTarget < Entry.MinDistance)
+	{
+		BlockPendingAttackRetry(PendingAttackIndex);
+		ClearPendingAttack();
+		return true;
+	}
+
+	if (ForwardDot <= AttackAngleThreshold)
+	{
+		StopEnemyMovementIfPossible();
+		CombatMoveDetailDebug = TEXT("PendingOrient");
+		return true;
+	}
+
+	const int32 AttackIndex = PendingAttackIndex;
+	return PerformConfiguredAttackByIndex(AttackIndex);
+}
+
+void AEnemy::HandlePendingAttackPositioning(float DistanceToTarget, const FVector& ToTarget)
+{
+	if (!EnemyAttackConfig || !EnemyAttackConfig->Attacks.IsValidIndex(PendingAttackIndex))
+	{
+		return;
+	}
+
+	const FEnemyAttackEntry& Entry = EnemyAttackConfig->Attacks[PendingAttackIndex];
+	const float EffectiveMaxDistance = FMath::Min(Entry.MaxDistance, CombatAttackMaxRadius);
+	if (DistanceToTarget <= EffectiveMaxDistance)
+	{
+		StopEnemyMovementIfPossible();
+		return;
+	}
+
+	if (EnemyController && (!bPendingAttackMoveIssued || EnemyController->GetMoveStatus() != EPathFollowingStatus::Moving))
+	{
+		ClearCombatRetreatSpeedEase();
+		GetCharacterMovement()->MaxWalkSpeed = ChaseSpeed;
+		const float AcceptanceRadius = FMath::Max(15.f, EffectiveMaxDistance - CombatPressMargin);
+		if (MoveToCombatTarget(AcceptanceRadius))
+		{
+			bPendingAttackMoveIssued = true;
+			CombatMoveDetailDebug = FString::Printf(TEXT("PendingPress:%s"),
+				*Entry.AttackName.ToString());
+		}
+	}
+}
+
+bool AEnemy::IsPendingAttackExpired() const
+{
+	const UWorld* World = GetWorld();
+	if (!World)
+	{
+		return false;
+	}
+	return HasPendingAttack() && World->GetTimeSeconds() - PendingAttackStartTime >= PendingAttackTimeout;
+}
+
+void AEnemy::BlockPendingAttackRetry(int32 AttackIndex)
+{
+	if (AttackIndex == INDEX_NONE || PendingAttackRetryBlockDuration <= 0.f)
+	{
+		return;
+	}
+
+	LastBlockedPendingAttackIndex = AttackIndex;
+	PendingAttackRetryBlockUntil = GetWorld()
+		                               ? GetWorld()->GetTimeSeconds() + PendingAttackRetryBlockDuration
+		                               : PendingAttackRetryBlockDuration;
+}
+
+int32 AEnemy::GetBlockedPendingAttackIndex() const
+{
+	const UWorld* World = GetWorld();
+	if (!World || LastBlockedPendingAttackIndex == INDEX_NONE)
+	{
+		return INDEX_NONE;
+	}
+
+	return World->GetTimeSeconds() < PendingAttackRetryBlockUntil
+		       ? LastBlockedPendingAttackIndex
+		       : INDEX_NONE;
+}
+
+void AEnemy::StartCurrentAttackCooldownIfNeeded()
+{
+	if (bCurrentAttackCooldownStarted || !EnemyAttackConfig || !EnemyAttackConfig->Attacks.IsValidIndex(CurrentAttackIndex))
+	{
+		return;
+	}
+
+	const FEnemyAttackEntry& Entry = EnemyAttackConfig->Attacks[CurrentAttackIndex];
+	bCurrentAttackCooldownStarted = true;
+	StartAttackCooldown(Entry.MinCooldown, Entry.MaxCooldown);
+}
+
+FString AEnemy::GetPendingAttackDebugString() const
+{
+	const UWorld* World = GetWorld();
+	const float Now = World ? World->GetTimeSeconds() : 0.f;
+	const int32 BlockedIndex = GetBlockedPendingAttackIndex();
+	FString RetryText;
+	if (EnemyAttackConfig && EnemyAttackConfig->Attacks.IsValidIndex(BlockedIndex))
+	{
+		const FEnemyAttackEntry& BlockedEntry = EnemyAttackConfig->Attacks[BlockedIndex];
+		RetryText = FString::Printf(TEXT(" Blocked:%s %.1fs"),
+			*BlockedEntry.AttackName.ToString(),
+			FMath::Max(0.f, PendingAttackRetryBlockUntil - Now));
+	}
+
+	if (!EnemyAttackConfig || !EnemyAttackConfig->Attacks.IsValidIndex(PendingAttackIndex))
+	{
+		return RetryText.IsEmpty() ? TEXT("Pending:None") : FString::Printf(TEXT("Pending:None%s"), *RetryText);
+	}
+
+	const FEnemyAttackEntry& Entry = EnemyAttackConfig->Attacks[PendingAttackIndex];
+	const float RemainingTime = World ? FMath::Max(0.f, PendingAttackTimeout - (Now - PendingAttackStartTime)) : 0.f;
+	return FString::Printf(TEXT("Pending:%s %.0f-%.0f Timeout:%.1fs%s"),
+		*Entry.AttackName.ToString(),
+		Entry.MinDistance,
+		Entry.MaxDistance,
+		RemainingTime,
+		*RetryText);
+}
+
+float AEnemy::GetAttackCooldownRemaining() const
+{
+	const UWorld* World = GetWorld();
+	return World ? FMath::Max(0.f, GetWorldTimerManager().GetTimerRemaining(AttackCooldownTimer)) : 0.f;
+}
+
 // ==================== 蒙太奇回调 ====================
 
 void AEnemy::OnHitReactEnd()
@@ -492,7 +710,6 @@ void AEnemy::OnAttackEnd()
 
 void AEnemy::OnAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted)
 {
-	if (bInterrupted) return;
 	if (EnemyState == EEnemyState::EES_Attacking)
 	{
 		CheckCombatTarget();
@@ -652,6 +869,7 @@ void AEnemy::CheckCombatTarget()
 {
 	if (!IsValidCombatTarget(ChasingTarget))
 	{
+		ClearPendingAttack();
 		ChasingTarget = nullptr;
 		if (EnemyState != EEnemyState::EES_Patrolling && EnemyState != EEnemyState::EES_Searching)
 		{
@@ -703,7 +921,16 @@ void AEnemy::SetEnemyState(EEnemyState NewState)
 	}
 	if (OldState == EEnemyState::EES_Attacking && NewState != EEnemyState::EES_Attacking)
 	{
-		ClearCurrentAttackConfig();
+		ClearCurrentAttackConfig(NewState != EEnemyState::EES_Dead);
+	}
+	if (NewState != EEnemyState::EES_Combating && NewState != EEnemyState::EES_Attacking)
+	{
+		ClearPendingAttack();
+		if (NewState == EEnemyState::EES_Dead)
+		{
+			LastBlockedPendingAttackIndex = INDEX_NONE;
+			PendingAttackRetryBlockUntil = 0.f;
+		}
 	}
 
 	// --- 切换状态 ---
@@ -799,44 +1026,11 @@ void AEnemy::Tick(float DeltaTime)
 	if (EnemyState == EEnemyState::EES_Dead || EnemyState == EEnemyState::EES_Stunned || EnemyState ==
 		EEnemyState::EES_Attacking || EnemyState == EEnemyState::EES_StanceBreak)
 	{
-		// [调试] 破防硬直标识（硬停早退前，确保可见）
-		if (FDebugDrawHelper::IsEnemyEnabled() && EnemyState == EEnemyState::EES_StanceBreak)
-		{
-			FDebugDrawHelper::Add(TEXT("BREAK"), FColor::Red);
-		}
+		DrawDebugInfo();
 		return;
 	}
 
-	// [调试] 敌人状态 + 距离 + 韧性 + 范围球体
-	// TODO: 多敌人时调试文字会混在一起，加 GetName() 或编号区分
-	if (FDebugDrawHelper::IsEnemyEnabled())
-	{
-		FDebugDrawHelper::Add(FString::Printf(TEXT("EnemyState: %s | Speed: %.0f"),
-			*UEnum::GetValueAsString(EnemyState), GroundSpeed),
-			EnemyState == EEnemyState::EES_Dead ? FColor::Red : FColor::White);
-
-		// 韧性显示
-		FDebugDrawHelper::Add(FString::Printf(TEXT("Poise: %.1f/%.1f"), CurrentPoise, MaxPoise), FColor::Cyan);
-
-		if (ChasingTarget)
-		{
-			float Dist = FVector::Dist2D(GetActorLocation(), ChasingTarget->GetActorLocation());
-			FDebugDrawHelper::Add(FString::Printf(TEXT("Dist: %.0f / %.0f"), Dist, ChasingRadius),
-				Dist <= CombatingRadius ? FColor::Red : Dist <= ChasingRadius ? FColor::Yellow : FColor::White);
-		}
-
-		if (EnemyState == EEnemyState::EES_Combating)
-		{
-			FDebugDrawHelper::Add(FString::Printf(TEXT("CombatMove: %s"), *GetCombatSubStateDebugText()), FColor::Cyan);
-		}
-	}
-
-	if (ChasingTarget)
-	{
-		FDebugDrawHelper::AddSphere(GetWorld(), GetActorLocation(), ChasingRadius, FColor::Yellow);
-		FDebugDrawHelper::AddSphere(GetWorld(), GetActorLocation(), CombatingRadius, FColor(255, 165, 0), 16);
-		FDebugDrawHelper::AddSphere(GetWorld(), GetActorLocation(), CombatAttackMaxRadius, FColor::Red, 16);
-	}
+	DrawDebugInfo();
 
 	// 1. 初步判断
 	CheckCombatTarget();
@@ -861,6 +1055,51 @@ void AEnemy::Tick(float DeltaTime)
 		break;
 	default:
 		break;
+	}
+}
+
+void AEnemy::DrawDebugInfo() const
+{
+	// 保持 Tick 早退状态的调试契约：只显示破防 BREAK，不显示完整敌人面板。
+	const bool bTickBlockedState = EnemyState == EEnemyState::EES_Dead || EnemyState == EEnemyState::EES_Stunned
+		|| EnemyState == EEnemyState::EES_Attacking || EnemyState == EEnemyState::EES_StanceBreak;
+	if (bTickBlockedState)
+	{
+		if (FDebugDrawHelper::IsEnemyEnabled() && EnemyState == EEnemyState::EES_StanceBreak)
+		{
+			FDebugDrawHelper::Add(TEXT("BREAK"), FColor::Red);
+		}
+		return;
+	}
+
+	if (FDebugDrawHelper::IsEnemyEnabled())
+	{
+		// TODO: 多敌人时调试文字会混在一起，加 GetName() 或编号区分。
+		FDebugDrawHelper::Add(FString::Printf(TEXT("EnemyState: %s | Speed: %.0f"),
+			*UEnum::GetValueAsString(EnemyState), GroundSpeed), FColor::White);
+
+		FDebugDrawHelper::Add(FString::Printf(TEXT("Poise: %.1f/%.1f"), CurrentPoise, MaxPoise), FColor::Cyan);
+
+		if (ChasingTarget)
+		{
+			const float Dist = FVector::Dist2D(GetActorLocation(), ChasingTarget->GetActorLocation());
+			FDebugDrawHelper::Add(FString::Printf(TEXT("Dist: %.0f / %.0f"), Dist, ChasingRadius),
+				Dist <= CombatingRadius ? FColor::Red : Dist <= ChasingRadius ? FColor::Yellow : FColor::White);
+		}
+
+		if (EnemyState == EEnemyState::EES_Combating)
+		{
+			FDebugDrawHelper::Add(FString::Printf(TEXT("CombatMove: %s"), *GetCombatSubStateDebugText()), FColor::Cyan);
+			FDebugDrawHelper::Add(FString::Printf(TEXT("AttackPlan: %s | CD: %.1f"),
+				*GetPendingAttackDebugString(), GetAttackCooldownRemaining()), FColor::Orange);
+		}
+	}
+
+	if (ChasingTarget)
+	{
+		FDebugDrawHelper::AddSphere(GetWorld(), GetActorLocation(), ChasingRadius, FColor::Yellow);
+		FDebugDrawHelper::AddSphere(GetWorld(), GetActorLocation(), CombatingRadius, FColor(255, 165, 0), 16);
+		FDebugDrawHelper::AddSphere(GetWorld(), GetActorLocation(), CombatAttackMaxRadius, FColor::Red, 16);
 	}
 }
 
@@ -960,6 +1199,47 @@ void AEnemy::OnCombating(float DeltaTime)
 
 	float AllyWaitTime = 0.f;
 	EEnemyCombatSubState NewSubState = EvaluateCombatSubState(DistanceToTarget, Dot, AllyWaitTime);
+
+	if (NewSubState == EEnemyCombatSubState::CooldownSpacing
+		|| NewSubState == EEnemyCombatSubState::CoordinatedWaiting)
+	{
+		ClearPendingAttack();
+		SetCombatSubState(NewSubState, AllyWaitTime);
+		TickCombatSubState(DeltaTime, CombatSubState, DistanceToTarget, ToTarget, AllyWaitTime);
+		return;
+	}
+
+	if (HasPendingAttack())
+	{
+		SetCombatSubState(EEnemyCombatSubState::None, 0.f);
+		if (TryExecutePendingAttack(DistanceToTarget, Dot, ToTarget))
+		{
+			return;
+		}
+	}
+
+	RollPendingAttackIntent();
+	if (HasPendingAttack())
+	{
+		SetCombatSubState(EEnemyCombatSubState::None, 0.f);
+		if (TryExecutePendingAttack(DistanceToTarget, Dot, ToTarget))
+		{
+			return;
+		}
+	}
+
+	if (GetBlockedPendingAttackIndex() != INDEX_NONE)
+	{
+		if (NewSubState == EEnemyCombatSubState::None)
+		{
+			StopEnemyMovementIfPossible();
+			CombatMoveDetailDebug = TEXT("IntentBlocked");
+			return;
+		}
+		SetCombatSubState(NewSubState, AllyWaitTime);
+		TickCombatSubState(DeltaTime, CombatSubState, DistanceToTarget, ToTarget, AllyWaitTime);
+		return;
+	}
 
 	if (NewSubState == EEnemyCombatSubState::None)
 	{
@@ -1134,13 +1414,16 @@ bool AEnemy::MoveToCombatLocation(const FVector& Location)
 	return false;
 }
 
-bool AEnemy::MoveToCombatTarget()
+bool AEnemy::MoveToCombatTarget(float AcceptanceRadiusOverride)
 {
 	if (!EnemyController || !ChasingTarget) return false;
 
 	FAIMoveRequest MoveRequest;
 	MoveRequest.SetGoalActor(ChasingTarget);
-	MoveRequest.SetAcceptanceRadius(FMath::Max(15.f, CombatAttackMaxRadius - CombatPressMargin));
+	const float AcceptanceRadius = AcceptanceRadiusOverride >= 0.f
+		                               ? AcceptanceRadiusOverride
+		                               : FMath::Max(15.f, CombatAttackMaxRadius - CombatPressMargin);
+	MoveRequest.SetAcceptanceRadius(AcceptanceRadius);
 	MoveRequest.SetReachTestIncludesAgentRadius(false);
 	MoveRequest.SetReachTestIncludesGoalRadius(false);
 	MoveRequest.SetUsePathfinding(true);

@@ -29,10 +29,10 @@ struct FEnemyAttackEntry
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Block", meta = (ClampMin = "0.0", ToolTip = "玩家成功格挡该招式时的体力消耗倍率。最终耗体 = 盾牌基础格挡耗体 × 此倍率。"))
 	float BlockStaminaDamageMultiplier = 1.f;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Cooldown", meta = (ClampMin = "0.0", ToolTip = "攻击冷却最短间隔（秒），从攻击开始计算，包含动画播放时间。"))
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Cooldown", meta = (ClampMin = "0.0", ToolTip = "攻击结束或被打断后的最短冷却（秒），不包含蒙太奇播放时间。"))
 	float MinCooldown = 3.f;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Cooldown", meta = (ClampMin = "0.0", ToolTip = "攻击冷却最长间隔（秒），从攻击开始计算，包含动画播放时间。"))
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Cooldown", meta = (ClampMin = "0.0", ToolTip = "攻击结束或被打断后的最长冷却（秒），不包含蒙太奇播放时间。"))
 	float MaxCooldown = 5.f;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Range", meta = (ClampMin = "0.0", ToolTip = "可选择该攻击的最小目标距离。"))
@@ -55,6 +55,7 @@ public:
 	TArray<FEnemyAttackEntry> Attacks;
 
 	int32 ChooseAttackIndex(float DistanceToTarget) const;
+	int32 ChooseAttackIntentIndex(int32 ExcludedAttackIndex = INDEX_NONE) const;
 
 	virtual void PostInitProperties() override;
 
