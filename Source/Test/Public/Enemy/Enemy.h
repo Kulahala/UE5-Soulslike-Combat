@@ -9,6 +9,8 @@
 
 struct FAIStimulus;
 struct FAIRequestID;
+struct FEnemyAttackEntry;
+struct FPropertyChangedEvent;
 
 namespace EPathFollowingResult
 {
@@ -20,6 +22,7 @@ class UAIPerceptionComponent;
 class AAIController;
 class UHealthBarComponent;
 class UWidgetComponent;
+class UEnemyAttackConfigDataAsset;
 
 UCLASS()
 class TEST_API AEnemy : public ABaseCharacter
@@ -32,6 +35,10 @@ public:
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaTime) override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
+#if WITH_EDITOR
+	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
+#endif
 
 	/* 初始化 */
 	void SpawnPointInit();
@@ -200,13 +207,8 @@ private:
 	UPROPERTY(EditAnywhere, Category = "Combat", meta = (ToolTip = "死亡后尸体销毁延迟（秒）。"))
 	float CorpseLifespan = 5.f;
 
-	// 攻击最小间隔（秒，从攻击开始算）
-	UPROPERTY(EditAnywhere, Category = "Combat", meta = (ToolTip = "攻击冷却最短间隔（秒），从攻击开始计算。"))
-	float MinAttackInterval = 3.f;
-
-	// 攻击最大间隔（秒，从攻击开始算）
-	UPROPERTY(EditAnywhere, Category = "Combat", meta = (ToolTip = "攻击冷却最长间隔（秒），从攻击开始计算。实际间隔在 Min~Max 之间随机。"))
-	float MaxAttackInterval = 5.f;
+	UPROPERTY(EditDefaultsOnly, Category = "Combat|Attack", meta = (ToolTip = "敌人攻击配置。为空时不会攻击，并会输出配置警告。"))
+	UEnemyAttackConfigDataAsset* EnemyAttackConfig = nullptr;
 
 	/* 攻击协调 */
 	UPROPERTY(EditAnywhere, Category = "Combat|Attack Coordination", meta = (ClampMin = "100.0", ToolTip = "攻击协调检测范围（cm）"))
@@ -325,6 +327,15 @@ private:
 	};
 
 	EEnemyCombatSubState CombatSubState = EEnemyCombatSubState::None;
+	void PerformConfiguredAttack(float DistanceToTarget);
+	void StartAttackCooldown(float MinCooldown, float MaxCooldown);
+	bool PlayEnemyAttackMontage(const FEnemyAttackEntry& Entry);
+	void ClearCurrentAttackConfig();
+	void ValidateEnemyAttackConfig() const;
+	void WarnNoEnemyAttackCandidate(float DistanceToTarget);
+	int32 CurrentAttackIndex = INDEX_NONE;
+	float LastAttackConfigWarningTime = -1000.f;
+
 	void SetCombatSubState(EEnemyCombatSubState NewSubState, float AllySuggestedWaitTime = 0.f);
 	EEnemyCombatSubState EvaluateCombatSubState(float DistanceToTarget, float ForwardDot, float& OutAllySuggestedWaitTime) const;
 	void TickCombatFacing(float DeltaTime, const FVector& ToTarget);

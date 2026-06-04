@@ -671,7 +671,11 @@ FBlockResult AMyCharacter::TryBlockHit(const FVector& ImpactPoint, float Incomin
 	float CosHalf = FMath::Cos(FMath::DegreesToRadians(EquippedShield->GetBlockHalfAngleDegrees()));
 	if (Dot < CosHalf) return Result;
 
-	float StaminaCost = IncomingDamage * EquippedShield->GetBlockStaminaCostPerDamage();
+	const ABaseCharacter* AttackerCharacter = Cast<ABaseCharacter>(Attacker);
+	const float BlockStaminaDamageMultiplier = AttackerCharacter
+		                                           ? AttackerCharacter->GetBlockStaminaDamageMultiplier()
+		                                           : 1.f;
+	float StaminaCost = EquippedShield->GetBlockStaminaCost() * BlockStaminaDamageMultiplier;
 	if (Attributes->GetCurrentStamina() < StaminaCost) return Result;
 
 	Attributes->UseStamina(StaminaCost);

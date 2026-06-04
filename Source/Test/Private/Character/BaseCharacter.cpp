@@ -20,6 +20,7 @@ ABaseCharacter::ABaseCharacter()
 	Attributes = CreateDefaultSubobject<UAttributeComponent>(TEXT("Attributes"));
 
 	CurrentAttackDamageMultiplier = 1.f;
+	CurrentBlockStaminaDamageMultiplier = 1.f;
 }
 
 void ABaseCharacter::BeginPlay()

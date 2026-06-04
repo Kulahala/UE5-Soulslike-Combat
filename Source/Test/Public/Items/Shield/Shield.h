@@ -20,7 +20,7 @@ public:
 	/* Getters */
 	FORCEINLINE float GetBlockHalfAngleDegrees() const { return BlockHalfAngleDegrees; }
 	FORCEINLINE float GetBlockedDamageMultiplier() const { return BlockedDamageMultiplier; }
-	FORCEINLINE float GetBlockStaminaCostPerDamage() const { return BlockStaminaCostPerDamage; }
+	FORCEINLINE float GetBlockStaminaCost() const { return BlockStaminaCost; }
 	FORCEINLINE float GetBlockMoveSpeedMultiplier() const { return BlockMoveSpeedMultiplier; }
 	FORCEINLINE USoundBase* GetBlockSound() const { return BlockSound; }
 	FORCEINLINE UNiagaraSystem* GetBlockParticle() const { return BlockParticle; }
@@ -40,9 +40,9 @@ private:
 	UPROPERTY(EditAnywhere, Category = "Block", meta = (AllowPrivateAccess = "true", ToolTip = "格挡后伤害倍率。0.05=减伤95%，0=完全免伤。"))
 	float BlockedDamageMultiplier = 0.05f;
 
-	// 每点原始伤害消耗的体力（体力不足时格挡自动失败）
-	UPROPERTY(EditAnywhere, Category = "Block", meta = (AllowPrivateAccess = "true", ToolTip = "每点原始伤害消耗的体力。体力不足时格挡自动失败。"))
-	float BlockStaminaCostPerDamage = 0.7f;
+	// 每次成功格挡的基础体力消耗（体力不足时格挡自动失败）
+	UPROPERTY(EditAnywhere, Category = "Block", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", ToolTip = "每次成功格挡的基础体力消耗。最终耗体 = 此值 × 攻击方格挡耗体倍率。体力不足时格挡自动失败。"))
+	float BlockStaminaCost = 12.f;
 
 	// 格挡中的移速倍率（1.0 = 不减速）
 	UPROPERTY(EditAnywhere, Category = "Block", meta = (AllowPrivateAccess = "true", ToolTip = "格挡中的移速倍率。1.0=不减速。"))

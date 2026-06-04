@@ -4,8 +4,10 @@
 #include "Enemy/Enemy.h"
 
 #include "AIController.h"
+#include "Animation/AnimInstance.h"
 #include "AttributeComponent/AttributeComponent.h"
 #include "Combat/CombatTeamHelper.h"
+#include "Combat/EnemyAttackConfigDataAsset.h"
 #include "components/CapsuleComponent.h"
 #include "Components/WidgetComponent.h"
 #include "Engine/TargetPoint.h"
@@ -19,6 +21,7 @@
 #include "Perception/AIPerceptionComponent.h"
 #include "Perception/AISenseConfig_Sight.h"
 #include "Perception/AISenseConfig_Hearing.h"
+#include "UObject/UnrealType.h"
 #include "Utils/DebugDrawHelper.h"
 
 // ==================== 生命周期 ====================
@@ -139,7 +142,17 @@ void AEnemy::BeginPlay()
 	}
 
 	WeaponInit();
+	ValidateEnemyAttackConfig();
 }
+
+#if WITH_EDITOR
+void AEnemy::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
+{
+	Super::PostEditChangeProperty(PropertyChangedEvent);
+
+	ValidateEnemyAttackConfig();
+}
+#endif
 
 void AEnemy::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
@@ -329,18 +342,132 @@ void AEnemy::Attack()
 		return;
 	}
 
-	bAttackOnCooldown = true;
-	const float Cooldown = FMath::RandRange(MinAttackInterval, MaxAttackInterval);
-	GetWorldTimerManager().SetTimer(AttackCooldownTimer, this,
-	                                &AEnemy::OnAttackCooldownEnd, Cooldown, false);
+	if (!EnemyAttackConfig)
+	{
+		WarnNoEnemyAttackCandidate(0.f);
+		return;
+	}
 
-	SetEnemyState(EEnemyState::EES_Attacking);
-	PlayAttackMontage(FName("Attack1"));
+	const float DistanceToTarget = FVector::Dist2D(GetActorLocation(), ChasingTarget->GetActorLocation());
+	PerformConfiguredAttack(DistanceToTarget);
 }
 
 bool AEnemy::CanAttack() const
 {
 	return EnemyState == EEnemyState::EES_Combating && !bAttackOnCooldown && IsValidCombatTarget(ChasingTarget);
+}
+
+void AEnemy::PerformConfiguredAttack(float DistanceToTarget)
+{
+	const int32 AttackIndex = EnemyAttackConfig->ChooseAttackIndex(DistanceToTarget);
+	if (!EnemyAttackConfig->Attacks.IsValidIndex(AttackIndex))
+	{
+		WarnNoEnemyAttackCandidate(DistanceToTarget);
+		return;
+	}
+
+	const FEnemyAttackEntry& Entry = EnemyAttackConfig->Attacks[AttackIndex];
+	CurrentAttackIndex = AttackIndex;
+	SetAttackDamageMultiplier(Entry.DamageMultiplier);
+	SetBlockStaminaDamageMultiplier(Entry.BlockStaminaDamageMultiplier);
+	SetEnemyState(EEnemyState::EES_Attacking);
+
+	if (!PlayEnemyAttackMontage(Entry))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s failed to play enemy attack montage for entry '%s'."),
+		       *GetName(), *Entry.AttackName.ToString());
+		CheckCombatTarget();
+		return;
+	}
+
+	StartAttackCooldown(Entry.MinCooldown, Entry.MaxCooldown);
+}
+
+void AEnemy::StartAttackCooldown(float MinCooldown, float MaxCooldown)
+{
+	const float Cooldown = FMath::RandRange(MinCooldown, FMath::Max(MinCooldown, MaxCooldown));
+	if (Cooldown <= 0.f)
+	{
+		bAttackOnCooldown = false;
+		GetWorldTimerManager().ClearTimer(AttackCooldownTimer);
+		return;
+	}
+
+	bAttackOnCooldown = true;
+	GetWorldTimerManager().SetTimer(AttackCooldownTimer, this,
+	                                &AEnemy::OnAttackCooldownEnd, Cooldown, false);
+}
+
+bool AEnemy::PlayEnemyAttackMontage(const FEnemyAttackEntry& Entry)
+{
+	UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
+	if (!AnimInstance || !Entry.Montage)
+	{
+		return false;
+	}
+
+	const float PlayResult = AnimInstance->Montage_Play(Entry.Montage);
+	if (PlayResult <= 0.f)
+	{
+		return false;
+	}
+
+	if (Entry.StartSection != NAME_None)
+	{
+		AnimInstance->Montage_JumpToSection(Entry.StartSection, Entry.Montage);
+	}
+
+	FOnMontageEnded EndDelegate;
+	EndDelegate.BindUObject(this, &AEnemy::OnAttackMontageEnded);
+	AnimInstance->Montage_SetEndDelegate(EndDelegate, Entry.Montage);
+
+	return true;
+}
+
+void AEnemy::ClearCurrentAttackConfig()
+{
+	CurrentAttackIndex = INDEX_NONE;
+	SetAttackDamageMultiplier(1.f);
+	SetBlockStaminaDamageMultiplier(1.f);
+}
+
+void AEnemy::ValidateEnemyAttackConfig() const
+{
+	if (!EnemyAttackConfig)
+	{
+		return;
+	}
+
+	for (const FEnemyAttackEntry& Entry : EnemyAttackConfig->Attacks)
+	{
+		if (Entry.MaxDistance > CombatAttackMaxRadius)
+		{
+			UE_LOG(LogTemp, Warning,
+			       TEXT("%s: Enemy attack entry '%s' MaxDistance %.1f is greater than CombatAttackMaxRadius %.1f and will not be reachable in v1."),
+			       *GetName(), *Entry.AttackName.ToString(), Entry.MaxDistance, CombatAttackMaxRadius);
+		}
+	}
+}
+
+void AEnemy::WarnNoEnemyAttackCandidate(float DistanceToTarget)
+{
+	const UWorld* World = GetWorld();
+	const float CurrentTime = World ? World->GetTimeSeconds() : 0.f;
+	if (CurrentTime - LastAttackConfigWarningTime < 1.f)
+	{
+		return;
+	}
+
+	LastAttackConfigWarningTime = CurrentTime;
+	if (!EnemyAttackConfig)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s has no EnemyAttackConfig; enemy attacks are DataAsset-only now."),
+		       *GetName());
+		return;
+	}
+
+	UE_LOG(LogTemp, Warning, TEXT("%s has no valid enemy attack candidate at distance %.1f."),
+	       *GetName(), DistanceToTarget);
 }
 
 // ==================== 蒙太奇回调 ====================
@@ -566,15 +693,20 @@ void AEnemy::SetEnemyState(EEnemyState NewState)
 		return;
 	}
 
+	const EEnemyState OldState = EnemyState;
+
 	// --- 退出旧状态的逻辑 ---
 	if (EnemyState == EEnemyState::EES_Patrolling || EnemyState == EEnemyState::EES_Searching)
 	{
 		ClearPatrolTimers();
 		bSearchingLostTarget = false;
 	}
+	if (OldState == EEnemyState::EES_Attacking && NewState != EEnemyState::EES_Attacking)
+	{
+		ClearCurrentAttackConfig();
+	}
 
 	// --- 切换状态 ---
-	EEnemyState OldState = EnemyState;
 	EnemyState = NewState;
 	ClearCombatRetreatSpeedEase();
 

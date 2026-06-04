@@ -1,0 +1,99 @@
+// Fill out your copyright notice in the Description page of Project Settings.
+
+#include "Combat/EnemyAttackConfigDataAsset.h"
+
+#include "UObject/UnrealType.h"
+
+int32 UEnemyAttackConfigDataAsset::ChooseAttackIndex(float DistanceToTarget) const
+{
+	float TotalWeight = 0.f;
+	TArray<int32> CandidateIndices;
+	CandidateIndices.Reserve(Attacks.Num());
+
+	for (int32 Index = 0; Index < Attacks.Num(); ++Index)
+	{
+		const FEnemyAttackEntry& Entry = Attacks[Index];
+		if (!Entry.Montage || Entry.Weight <= 0.f)
+		{
+			continue;
+		}
+
+		if (DistanceToTarget < Entry.MinDistance || DistanceToTarget > Entry.MaxDistance)
+		{
+			continue;
+		}
+
+		TotalWeight += Entry.Weight;
+		CandidateIndices.Add(Index);
+	}
+
+	if (CandidateIndices.IsEmpty() || TotalWeight <= 0.f)
+	{
+		return INDEX_NONE;
+	}
+
+	// Weighted random: choose a point on the accumulated weight line.
+	float Pick = FMath::FRandRange(0.f, TotalWeight);
+	for (const int32 Index : CandidateIndices)
+	{
+		Pick -= Attacks[Index].Weight;
+		if (Pick <= 0.f)
+		{
+			return Index;
+		}
+	}
+
+	return CandidateIndices.Last();
+}
+
+void UEnemyAttackConfigDataAsset::PostInitProperties()
+{
+	Super::PostInitProperties();
+
+	NormalizeEntries();
+	LogConfigWarnings();
+}
+
+#if WITH_EDITOR
+void UEnemyAttackConfigDataAsset::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
+{
+	Super::PostEditChangeProperty(PropertyChangedEvent);
+
+	NormalizeEntries();
+	LogConfigWarnings();
+}
+#endif
+
+void UEnemyAttackConfigDataAsset::NormalizeEntries()
+{
+	for (FEnemyAttackEntry& Entry : Attacks)
+	{
+		Entry.MinDistance = FMath::Max(0.f, Entry.MinDistance);
+		Entry.MaxDistance = FMath::Max(Entry.MinDistance, Entry.MaxDistance);
+		Entry.MinCooldown = FMath::Max(0.f, Entry.MinCooldown);
+		Entry.MaxCooldown = FMath::Max(Entry.MinCooldown, Entry.MaxCooldown);
+		Entry.DamageMultiplier = FMath::Max(0.f, Entry.DamageMultiplier);
+		Entry.BlockStaminaDamageMultiplier = FMath::Max(0.f, Entry.BlockStaminaDamageMultiplier);
+		Entry.Weight = FMath::Max(0.f, Entry.Weight);
+	}
+}
+
+void UEnemyAttackConfigDataAsset::LogConfigWarnings() const
+{
+#if WITH_EDITOR
+	for (const FEnemyAttackEntry& Entry : Attacks)
+	{
+		if (!Entry.Montage)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("%s: Enemy attack entry '%s' has no Montage."),
+			       *GetName(), *Entry.AttackName.ToString());
+		}
+
+		if (Entry.Weight <= 0.f)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("%s: Enemy attack entry '%s' has zero weight and will not be selected."),
+			       *GetName(), *Entry.AttackName.ToString());
+		}
+	}
+#endif
+}

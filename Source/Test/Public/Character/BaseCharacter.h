@@ -44,6 +44,8 @@ public:
 
 	FORCEINLINE float GetAttackDamageMultiplier() const { return CurrentAttackDamageMultiplier; }
 	FORCEINLINE void SetAttackDamageMultiplier(float Multiplier) { CurrentAttackDamageMultiplier = Multiplier; }
+	FORCEINLINE float GetBlockStaminaDamageMultiplier() const { return CurrentBlockStaminaDamageMultiplier; }
+	FORCEINLINE void SetBlockStaminaDamageMultiplier(float Multiplier) { CurrentBlockStaminaDamageMultiplier = Multiplier; }
 	FORCEINLINE float GetCurrentPoiseDamage() const { return CurrentPoiseDamage; }
 
 	/* 命中上下文 + 后退 */
@@ -115,6 +117,9 @@ protected:
 
 	// 当前攻击伤害倍率（连招系统使用）
 	float CurrentAttackDamageMultiplier = 1.0f;
+
+	// 当前攻击对格挡体力消耗的倍率（敌人招式使用）
+	float CurrentBlockStaminaDamageMultiplier = 1.0f;
 
 	// 当前攻击韧性伤害（连招系统使用）
 	float CurrentPoiseDamage = 1.f;
