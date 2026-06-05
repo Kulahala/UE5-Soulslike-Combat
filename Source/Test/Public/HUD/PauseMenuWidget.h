@@ -7,6 +7,7 @@
 #include "PauseMenuWidget.generated.h"
 
 class UButton;
+class UCheckBox;
 class UOverlay;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnResumeRequested);
@@ -27,6 +28,7 @@ public:
 
 protected:
 	virtual void NativeConstruct() override;
+	virtual void NativeDestruct() override;
 	virtual FReply NativeOnKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent) override;
 
 	/* Widget Components */
@@ -36,9 +38,27 @@ protected:
 	UPROPERTY(meta = (BindWidget))
 	UOverlay* Overlay_Background;
 
+	UPROPERTY(meta = (BindWidgetOptional))
+	UCheckBox* CB_DebugEnabled;
+
+	UPROPERTY(meta = (BindWidgetOptional))
+	UCheckBox* CB_DebugEnemy;
+
+	UPROPERTY(meta = (BindWidgetOptional))
+	UCheckBox* CB_DebugShapes;
+
 	/* Button Callbacks */
 	UFUNCTION()
 	void OnResumeClicked();
+
+	UFUNCTION()
+	void OnDebugEnabledChanged(bool bIsChecked);
+
+	UFUNCTION()
+	void OnDebugEnemyChanged(bool bIsChecked);
+
+	UFUNCTION()
+	void OnDebugShapesChanged(bool bIsChecked);
 
 	/* 音效接口（第一版空实现，后续扩展） */
 	virtual void PlayPauseSound();

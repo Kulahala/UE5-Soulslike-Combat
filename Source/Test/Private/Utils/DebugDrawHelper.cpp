@@ -18,17 +18,47 @@ static TAutoConsoleVariable<int32> CVarDebugShapes(
 
 bool FDebugDrawHelper::IsDebugEnabled()
 {
-	return CVarDebugEnable.GetValueOnGameThread() != 0;
+	return GetDebugEnabledRaw();
 }
 
 bool FDebugDrawHelper::IsEnemyEnabled()
 {
-	return IsDebugEnabled() && CVarDebugEnemy.GetValueOnGameThread() != 0;
+	return IsDebugEnabled() && GetEnemyEnabledRaw();
 }
 
 bool FDebugDrawHelper::IsShapesEnabled()
 {
-	return IsDebugEnabled() && CVarDebugShapes.GetValueOnGameThread() != 0;
+	return IsDebugEnabled() && GetShapesEnabledRaw();
+}
+
+bool FDebugDrawHelper::GetDebugEnabledRaw()
+{
+	return CVarDebugEnable.GetValueOnGameThread() != 0;
+}
+
+bool FDebugDrawHelper::GetEnemyEnabledRaw()
+{
+	return CVarDebugEnemy.GetValueOnGameThread() != 0;
+}
+
+bool FDebugDrawHelper::GetShapesEnabledRaw()
+{
+	return CVarDebugShapes.GetValueOnGameThread() != 0;
+}
+
+void FDebugDrawHelper::SetDebugEnabled(bool bEnabled)
+{
+	CVarDebugEnable->Set(bEnabled ? 1 : 0, ECVF_SetByCode);
+}
+
+void FDebugDrawHelper::SetEnemyEnabled(bool bEnabled)
+{
+	CVarDebugEnemy->Set(bEnabled ? 1 : 0, ECVF_SetByCode);
+}
+
+void FDebugDrawHelper::SetShapesEnabled(bool bEnabled)
+{
+	CVarDebugShapes->Set(bEnabled ? 1 : 0, ECVF_SetByCode);
 }
 
 void FDebugDrawHelper::Add(const FString& Text, const FColor& Color)

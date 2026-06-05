@@ -30,4 +30,12 @@ public:
 	static bool IsDebugEnabled();
 	static bool IsEnemyEnabled();
 	static bool IsShapesEnabled();
+
+	static bool GetDebugEnabledRaw();
+	static bool GetEnemyEnabledRaw();
+	static bool GetShapesEnabledRaw();
+
+	static void SetDebugEnabled(bool bEnabled);
+	static void SetEnemyEnabled(bool bEnabled);
+	static void SetShapesEnabled(bool bEnabled);
 };
