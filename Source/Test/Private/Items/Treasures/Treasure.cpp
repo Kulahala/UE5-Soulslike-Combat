@@ -34,7 +34,7 @@ void ATreasure::InitializeFromData(UTreasureData* Data)
 	}
 	TreasureName = Data->TreasureName;
 	GoldValue = Data->GoldValue;
-	if (Data->PickUpSound && PickSound)
+	if (Data->PickUpSound)
 	{
 		PickSound = Data->PickUpSound;
 	}

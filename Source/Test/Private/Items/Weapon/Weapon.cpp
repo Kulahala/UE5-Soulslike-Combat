@@ -10,6 +10,7 @@
 #include "Kismet/KismetSystemLibrary.h"
 #include "Interfaces/HitInterface.h"
 #include "Interfaces/BlockableInterface.h"
+#include "Utils/DebugDrawHelper.h"
 #include "NiagaraComponent.h"
 #include "GameFramework/PlayerController.h"
 #include "TimerManager.h"
@@ -92,11 +93,14 @@ void AWeapon::ExecuteWeaponTrace()
 	BuildIgnoreList(ActorsToIgnore);
 
 	FHitResult HitPoint;
+	const EDrawDebugTrace::Type DrawDebugTrace = FDebugDrawHelper::IsRangesEnabled()
+		? EDrawDebugTrace::ForOneFrame
+		: EDrawDebugTrace::None;
 
 	// 盒体扫掠：连接相邻两帧路径，防止高速挥砍漏判
 	bool bHit = UKismetSystemLibrary::BoxTraceSingle(
 		this, TraceCenterOld, CurrentCenter, BoxHalfExtent, TraceRotation,
-		UEngineTypes::ConvertToTraceType(ECC_WorldDynamic), false, ActorsToIgnore, EDrawDebugTrace::ForOneFrame,
+		UEngineTypes::ConvertToTraceType(ECC_WorldDynamic), false, ActorsToIgnore, DrawDebugTrace,
 		HitPoint, true, FLinearColor::Red, FLinearColor::Green, 3.f);
 
 	// 记录本帧位置，留给下帧做参考

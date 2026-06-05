@@ -31,6 +31,7 @@ public:
 	static bool IsPlayerEnabled();
 	static bool IsEnemyEnabled();
 	static bool IsRangesEnabled();
+	// Shapes 是旧控件/代码命名，当前等价于 Ranges。
 	static FORCEINLINE bool IsShapesEnabled() { return IsRangesEnabled(); }
 
 	static bool GetDebugEnabledRaw();

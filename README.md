@@ -22,6 +22,7 @@ This README is a project overview. For implementation details, state machines, c
 - **Enemy combat AI**: enemies patrol, search, chase, fight, stagger, and die through an outer FSM. Combat behavior inside `EES_Combating` is organized by a private local substate layer.
 - **Attack coordination**: nearby enemies chasing the same target avoid attacking simultaneously by entering a coordinated waiting substate.
 - **Hit feedback**: health buffers, camera shake, hit knockback, and player damage vignette provide readable combat response.
+- **In-game debug controls**: the pause menu exposes a Debug Settings page for toggling project debug panel, player, enemy, and range output without touching console commands.
 - **UE systems integration**: Enhanced Input, UMG HUD, Niagara feedback, Chaos destruction, PCG arena generation, and AI navigation are used across the prototype.
 
 ### Gameplay Systems
@@ -34,6 +35,7 @@ This README is a project overview. For implementation details, state machines, c
 | Enemies | Patrol, search, chase, combat local HFSM, cooldown spacing, attack coordination |
 | Defense | Directional shield block, timed parry, stamina cost, stance break integration |
 | Feedback | Health bars, delayed buffer bars, hit knockback, camera shake, damage vignette |
+| Debug & UI | Pause menu, debug settings page, HUD-rendered debug text, range/debug panel toggles |
 | Environment | Breakable actors and PCG-supported arena generation |
 
 ### Architecture Deep Dives
@@ -50,6 +52,7 @@ This README is a project overview. For implementation details, state machines, c
 - [Combo System](ARCHITECTURE.md#combo-system)
 - [Charged Attack System](ARCHITECTURE.md#charged-attack-system)
 - [Lock-On System](ARCHITECTURE.md#lock-on-system)
+- [Debug Output System](ARCHITECTURE.md#debug-output-system)
 
 ### Current Architecture Files
 
@@ -92,6 +95,7 @@ This README is a project overview. For implementation details, state machines, c
 - **敌人战斗 AI**：敌人通过外层 FSM 管理巡逻、搜索、追击、战斗、硬直和死亡，`EES_Combating` 内部再用私有局部子状态组织战斗行为。
 - **敌人攻击协调**：追击同一目标的附近敌人不会同时出手，会进入协调等待子状态。
 - **受击反馈**：血条缓冲、相机晃动、短距离击退和玩家受击红晕让战斗反馈更清晰。
+- **游戏内调试开关**：暂停菜单提供 Debug Settings 子页，可直接切换项目调试面板、主角、敌人和范围输出，不需要手动输入控制台命令。
 - **UE 系统整合**：项目使用 Enhanced Input、UMG HUD、Niagara 反馈、Chaos 破碎、PCG 竞技场生成和 AI 导航等 UE 系统。
 
 ### 玩法系统概览
@@ -104,6 +108,7 @@ This README is a project overview. For implementation details, state machines, c
 | 敌人 | 巡逻、搜索、追击、战斗局部 HFSM、冷却拉扯、攻击协调 |
 | 防御 | 方向性盾牌格挡、时机弹反、体力消耗、破防集成 |
 | 反馈 | 血条、缓冲血条、受击后退、相机晃动、伤害红晕 |
+| 调试与 UI | 暂停菜单、调试设置页、HUD 调试文本、范围/调试面板开关 |
 | 环境 | 可破坏物和 PCG 辅助竞技场生成 |
 
 ### 架构细节入口
@@ -120,6 +125,7 @@ This README is a project overview. For implementation details, state machines, c
 - [连招系统](ARCHITECTURE.md#combo-system)
 - [蓄力攻击系统](ARCHITECTURE.md#charged-attack-system)
 - [锁定系统](ARCHITECTURE.md#lock-on-system)
+- [调试输出系统](ARCHITECTURE.md#debug-output-system)
 
 ### 当前文档职责
 

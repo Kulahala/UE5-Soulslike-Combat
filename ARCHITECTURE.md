@@ -25,14 +25,15 @@ Language policy: keep stable section titles and HTML anchors in English; use Chi
 ## Project Overview
 
 - **Unreal Engine 5.7** project, **Windows only**, **Visual Studio 2022** required
-- Modules: `Test` (Runtime), `SmartBPCreator` (Editor plugin)
+- Runtime module: `Test`
+- Local editor plugins in this checkout: `SmartBPCreator`, `UnrealBridge`
 - Targets: `TestEditor` (Editor), `Test` (Game)
 - Build.cs dependencies: `Core`, `CoreUObject`, `Engine`, `InputCore`, `EnhancedInput`, `AnimGraphRuntime`, `Niagara`, `GeometryCollectionEngine`, `PCG`, `UMG`, `AIModule`, `Slate`, `SlateCore`
 
 <a name="state-machine-system"></a>
 ## State Machine System (`CharacterTypes.h`)
 
-All gameplay states are defined as `UENUM` enums in `CharacterTypes.h`. This is the single source of truth for state flow:
+Core character/combat state-machine enums are defined as `UENUM` enums in `CharacterTypes.h`. This is the single source of truth for player, weapon, and enemy outer state flow. System-local enums such as `EItemState` (`Items/item.h`) and `ESpecialAttackType` (`AttackConfigDataAsset.h`) stay near their owning systems.
 
 | Enum | States | Used By |
 |------|--------|---------|
@@ -264,14 +265,19 @@ ACharacter
 ├── AMyCharacter (UAttributeComponent, spring arm + camera, weapon equipping, lock-on targeting)
 └── AEnemy + IHitInterface (AI patrol/search/chase/combat state machine, directional hit react)
 
-APlayerController → ACharacterController (Enhanced Input: 10 bound actions, incl. LockOn)
+APlayerController → ACharacterController (Enhanced Input actions for movement, combat, lock-on, pause, and potion)
 UActorComponent → UAttributeComponent (health, gold, OnHealthChanged delegate)
 UActorComponent → UPlayerLockOnComponent (lock-on state, target search/scoring, lock-on parameters)
 UWidgetComponent → UHealthBarComponent
 UUserWidget → UBaseHealthBarWidget (PB_Health + PB_Buffer progress bars, buffer delay logic)
+UUserWidget → UPlayerHUDWidget (health/stamina/potion HUD, damage vignette, debug text paint)
+UUserWidget → UPauseMenuWidget (resume delegate, pause keyboard handling, debug checkbox controls)
 UAnimInstance → USlashAnimInstance (exposes GroundSpeed, Direction, bIsBlocking, bIsStunning, state enums to anim graph)
 UAnimNotifyState → UAnimNotifyState_ParryActive (marks parry active window in animation)
 UAnimNotifyState → UAnimNotifyState_ComboWindow (marks combo input window in animation)
+UAnimNotifyState → UAnimNotifyState_DodgeInvulnerable (marks dodge invulnerability window)
+UAnimNotifyState → UAnimNotifyState_WeaponCollision (drives weapon trace window + player attack hyper armor)
+UAnimNotify → UAnimNotify_PotionHeal (montage-driven partial potion healing)
 UDataAsset → UTreasureData (static mesh, gold value, pickup sound, scale)
 UDataAsset → UComboDataAsset (combo chain: SectionName, DamageMultiplier, StaminaCost, PoiseDamageMultiplier per segment)
 UDataAsset → UAttackConfigDataAsset (LightAttackCombo + SpecialAttacks for sprint/jump-style specials + ChargedAttack)
@@ -282,12 +288,12 @@ UDataAsset → UEnemyAttackConfigDataAsset (Enemy attacks: montage, section, pos
 ## Debug Output System
 
 - `FDebugDrawHelper` is the shared debug output channel for runtime text entries and simple world shapes. It owns collection/gating, not gameplay state.
-- CVar gates: `test.Debug.Enable` controls all debug output; `test.Debug.Player` controls player text; `test.Debug.Enemy` controls enemy text; `test.Debug.Ranges` controls range/world shapes. `IsShapesEnabled()` remains a C++ compatibility wrapper for `IsRangesEnabled()`.
+- CVar gates: `test.Debug.Enable` controls project debug output routed through `FDebugDrawHelper`; `test.Debug.Player` controls player text; `test.Debug.Enemy` controls enemy text; `test.Debug.Ranges` controls range/world shapes. `IsShapesEnabled()` remains a C++ compatibility wrapper for `IsRangesEnabled()`.
 - `UPauseMenuWidget` exposes a Debug Settings subpage that controls those CVars through `FDebugDrawHelper` raw getters/setters. UI checkbox state reads raw CVar values, while actual output still uses effective gated checks such as `IsPlayerEnabled()`, `IsEnemyEnabled()`, and `IsRangesEnabled()`.
 - `UPlayerHUDWidget::NativePaint()` renders `FDebugDrawEntry` text from `FDebugDrawHelper::GetEntries()`.
 - Actor/system classes own debug content assembly: current examples are `AMyCharacter::DrawDebugInfo()` and `AEnemy::DrawDebugInfo()`. Keep gameplay-specific strings and field choices in the owning class, then emit through `FDebugDrawHelper`.
 - Do not move gameplay knowledge into `FDebugDrawHelper`; it should not depend on `AEnemy`, `AMyCharacter`, combat state enums, or asset classes.
-- Direct `DrawDebug*` / `GEngine->AddOnScreenDebugMessage(...)` calls should remain temporary diagnosis code or be wrapped by the helper when they become persistent project debug output.
+- Temporary direct `DrawDebug*` / `GEngine->AddOnScreenDebugMessage(...)` calls are outside the CVar gate until promoted into UI or wrapped by the helper.
 
 <a name="combat-pipeline"></a>
 ## Combat Pipeline
@@ -465,7 +471,7 @@ UDataAsset → UEnemyAttackConfigDataAsset (Enemy attacks: montage, section, pos
 <a name="potion-system"></a>
 ## Potion System (药瓶系统)
 
-- **恢复机制**：`UAnimNotify_PotionHeal` 在蒙太奇中触发两段式恢复（开头 25% + 中间 25%），被打断只保留已触发部分
+- **恢复机制**：`UAnimNotify_PotionHeal` 从蒙太奇 notify 触发分段恢复，默认单次 `HealPercent = 0.25`。当前蒙太奇可通过放置多个 notify 形成分段回血；被打断只保留已触发部分。
 - **状态管理**：新增 `EAS_UsingPotion` 状态，体力耗尽时可喝药，喝药期间可移动但速度降低到步行速度
 - **体力恢复**：喝药期间不暂停体力恢复（魂类设计：喝药是防御动作）
 - **打断机制**：`GetHit()` 打断喝药，`HandleExhausted()` 不打断
