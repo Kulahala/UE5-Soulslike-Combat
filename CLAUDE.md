@@ -33,9 +33,30 @@ For general agent guidelines, see **[AGENTS.md](AGENTS.md)**.
 - For code review and closeout passes, ignore tracked `.uasset` changes under `Content/` by default unless the user explicitly asks to inspect or include asset changes.
 
 ### Debug System
-- `FDebugDrawHelper` — 静态工具类，集中管理屏幕调试文字 + 世界调试图形
-- CVar 开关（默认全开）：`test.Debug.Enable`、`test.Debug.Enemy`、`test.Debug.Shapes`
-- 绘制宿主：`UPlayerHUDWidget::NativePaint()` 在左侧中部绘制调试信息
+
+**架构概览** → 见 [ARCHITECTURE.md § Debug Output System](ARCHITECTURE.md#debug-output-system)
+
+**Claude 协作规则：**
+
+- **API 使用约定**：
+  - UI checkbox 初始化必须读 **Raw Getter**（`GetPlayerEnabledRaw()`），显示子开关自身状态
+  - 实际调试输出必须用 **Effective Getter**（`IsPlayerEnabled()`），尊重总开关压制
+  - Setter 使用 `ECVF_SetByCode` 标记代码设置
+
+- **守卫位置规则**：
+  - ✅ 优先在函数入口：`if (!IsPlayerEnabled()) return;`
+  - ✅ 次选 block 入口：`if (IsPlayerEnabled()) { ... }`
+  - ❌ 避免每行判断：不要在每个 `Add()` 前重复塞判断
+
+- **兼容策略**：
+  - 旧 API（`IsShapesEnabled()`）用 `FORCEINLINE` 转发到新 API（`IsRangesEnabled()`）
+  - 保留旧控件（`CB_DebugShapes`）和新控件（`CB_DebugRanges`）共存，支持渐进迁移
+  - 新代码推荐使用 `Ranges` 命名
+
+- **不做事项**：
+  - 不要把 `FDebugDrawHelper::Add()` 改成带 category 参数的复杂接口
+  - 不要让 `FDebugDrawHelper` 依赖 gameplay 类（`AEnemy`、`AMyCharacter`、战斗状态枚举）
+  - 不要在 `FDebugDrawHelper` 中持有 gameplay 状态
 
 ### AI Collaboration (`plan.md`)
 - 项目根目录 `plan.md` 用于多 AI agent 间通信（Claude Code、Codex 等），已 gitignore。

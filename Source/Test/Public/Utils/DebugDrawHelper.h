@@ -19,7 +19,7 @@ public:
 	// 噪音范围可视化（橙色球体，0.5s 持续）
 	static void AddNoiseRange(UWorld* World, const FVector& Location, float Range)
 	{
-		if (IsShapesEnabled() && World)
+		if (IsRangesEnabled() && World)
 		{
 			DrawDebugSphere(World, Location, Range, 16, FColor::Orange, false, 0.5f);
 		}
@@ -28,14 +28,20 @@ public:
 	static const TArray<FDebugDrawEntry>& GetEntries();
 
 	static bool IsDebugEnabled();
+	static bool IsPlayerEnabled();
 	static bool IsEnemyEnabled();
-	static bool IsShapesEnabled();
+	static bool IsRangesEnabled();
+	static FORCEINLINE bool IsShapesEnabled() { return IsRangesEnabled(); }
 
 	static bool GetDebugEnabledRaw();
+	static bool GetPlayerEnabledRaw();
 	static bool GetEnemyEnabledRaw();
-	static bool GetShapesEnabledRaw();
+	static bool GetRangesEnabledRaw();
+	static FORCEINLINE bool GetShapesEnabledRaw() { return GetRangesEnabledRaw(); }
 
 	static void SetDebugEnabled(bool bEnabled);
+	static void SetPlayerEnabled(bool bEnabled);
 	static void SetEnemyEnabled(bool bEnabled);
-	static void SetShapesEnabled(bool bEnabled);
+	static void SetRangesEnabled(bool bEnabled);
+	static FORCEINLINE void SetShapesEnabled(bool bEnabled) { SetRangesEnabled(bEnabled); }
 };

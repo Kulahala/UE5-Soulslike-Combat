@@ -42,7 +42,13 @@ protected:
 	UCheckBox* CB_DebugEnabled;
 
 	UPROPERTY(meta = (BindWidgetOptional))
+	UCheckBox* CB_DebugPlayer;
+
+	UPROPERTY(meta = (BindWidgetOptional))
 	UCheckBox* CB_DebugEnemy;
+
+	UPROPERTY(meta = (BindWidgetOptional))
+	UCheckBox* CB_DebugRanges;
 
 	UPROPERTY(meta = (BindWidgetOptional))
 	UCheckBox* CB_DebugShapes;
@@ -55,7 +61,13 @@ protected:
 	void OnDebugEnabledChanged(bool bIsChecked);
 
 	UFUNCTION()
+	void OnDebugPlayerChanged(bool bIsChecked);
+
+	UFUNCTION()
 	void OnDebugEnemyChanged(bool bIsChecked);
+
+	UFUNCTION()
+	void OnDebugRangesChanged(bool bIsChecked);
 
 	UFUNCTION()
 	void OnDebugShapesChanged(bool bIsChecked);

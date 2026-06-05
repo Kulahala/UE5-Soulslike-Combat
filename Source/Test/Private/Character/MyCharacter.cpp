@@ -81,7 +81,7 @@ void AMyCharacter::Tick(float DeltaTime)
 	if (CC)
 	{
 		const FString InputText = CC->GetDebugInputText();
-		if (!InputText.IsEmpty())
+		if (!InputText.IsEmpty() && FDebugDrawHelper::IsPlayerEnabled())
 		{
 			FDebugDrawHelper::Add(FString::Printf(TEXT("Input: %s"), *InputText), FColor::White);
 		}
@@ -1098,7 +1098,10 @@ void AMyCharacter::UpdateMovementSpeed()
 		GetCharacterMovement()->MaxWalkSpeed = RunSpeed * SpeedMultiplier;
 	}
 
-	FDebugDrawHelper::Add(FString::Printf(TEXT("Speed: %.0f"), GetCharacterMovement()->MaxWalkSpeed), FColor::Cyan);  // [调试]
+	if (FDebugDrawHelper::IsPlayerEnabled())
+	{
+		FDebugDrawHelper::Add(FString::Printf(TEXT("Speed: %.0f"), GetCharacterMovement()->MaxWalkSpeed), FColor::Cyan);  // [调试]
+	}
 }
 
 void AMyCharacter::TickSprintStamina()
@@ -1261,9 +1264,12 @@ void AMyCharacter::UpdateLockOn(float DeltaTime)
 	UpdateLockOnControlRotation(DeltaTime);
 
 	// [调试]
-	if (const AEnemy* LockedTarget = GetLockedTarget())
+	if (FDebugDrawHelper::IsPlayerEnabled())
 	{
-		FDebugDrawHelper::Add(FString::Printf(TEXT("LockOn: %s"), *LockedTarget->GetName()), FColor::Yellow);
+		if (const AEnemy* LockedTarget = GetLockedTarget())
+		{
+			FDebugDrawHelper::Add(FString::Printf(TEXT("LockOn: %s"), *LockedTarget->GetName()), FColor::Yellow);
+		}
 	}
 }
 
@@ -1549,6 +1555,7 @@ void AMyCharacter::InitializePlayerHUD()
 
 void AMyCharacter::DrawDebugInfo() const
 {
+	if (!FDebugDrawHelper::IsPlayerEnabled()) return;
 	if (!Attributes) return;
 
 	// [调试] 角色状态面板

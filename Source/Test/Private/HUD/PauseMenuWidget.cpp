@@ -23,11 +23,25 @@ void UPauseMenuWidget::NativeConstruct()
 		CB_DebugEnabled->OnCheckStateChanged.AddDynamic(this, &UPauseMenuWidget::OnDebugEnabledChanged);
 	}
 
+	if (CB_DebugPlayer)
+	{
+		CB_DebugPlayer->OnCheckStateChanged.RemoveDynamic(this, &UPauseMenuWidget::OnDebugPlayerChanged);
+		CB_DebugPlayer->SetIsChecked(FDebugDrawHelper::GetPlayerEnabledRaw());
+		CB_DebugPlayer->OnCheckStateChanged.AddDynamic(this, &UPauseMenuWidget::OnDebugPlayerChanged);
+	}
+
 	if (CB_DebugEnemy)
 	{
 		CB_DebugEnemy->OnCheckStateChanged.RemoveDynamic(this, &UPauseMenuWidget::OnDebugEnemyChanged);
 		CB_DebugEnemy->SetIsChecked(FDebugDrawHelper::GetEnemyEnabledRaw());
 		CB_DebugEnemy->OnCheckStateChanged.AddDynamic(this, &UPauseMenuWidget::OnDebugEnemyChanged);
+	}
+
+	if (CB_DebugRanges)
+	{
+		CB_DebugRanges->OnCheckStateChanged.RemoveDynamic(this, &UPauseMenuWidget::OnDebugRangesChanged);
+		CB_DebugRanges->SetIsChecked(FDebugDrawHelper::GetRangesEnabledRaw());
+		CB_DebugRanges->OnCheckStateChanged.AddDynamic(this, &UPauseMenuWidget::OnDebugRangesChanged);
 	}
 
 	if (CB_DebugShapes)
@@ -54,9 +68,19 @@ void UPauseMenuWidget::NativeDestruct()
 		CB_DebugEnabled->OnCheckStateChanged.RemoveDynamic(this, &UPauseMenuWidget::OnDebugEnabledChanged);
 	}
 
+	if (CB_DebugPlayer)
+	{
+		CB_DebugPlayer->OnCheckStateChanged.RemoveDynamic(this, &UPauseMenuWidget::OnDebugPlayerChanged);
+	}
+
 	if (CB_DebugEnemy)
 	{
 		CB_DebugEnemy->OnCheckStateChanged.RemoveDynamic(this, &UPauseMenuWidget::OnDebugEnemyChanged);
+	}
+
+	if (CB_DebugRanges)
+	{
+		CB_DebugRanges->OnCheckStateChanged.RemoveDynamic(this, &UPauseMenuWidget::OnDebugRangesChanged);
 	}
 
 	if (CB_DebugShapes)
@@ -90,9 +114,19 @@ void UPauseMenuWidget::OnDebugEnabledChanged(bool bIsChecked)
 	FDebugDrawHelper::SetDebugEnabled(bIsChecked);
 }
 
+void UPauseMenuWidget::OnDebugPlayerChanged(bool bIsChecked)
+{
+	FDebugDrawHelper::SetPlayerEnabled(bIsChecked);
+}
+
 void UPauseMenuWidget::OnDebugEnemyChanged(bool bIsChecked)
 {
 	FDebugDrawHelper::SetEnemyEnabled(bIsChecked);
+}
+
+void UPauseMenuWidget::OnDebugRangesChanged(bool bIsChecked)
+{
+	FDebugDrawHelper::SetRangesEnabled(bIsChecked);
 }
 
 void UPauseMenuWidget::OnDebugShapesChanged(bool bIsChecked)
