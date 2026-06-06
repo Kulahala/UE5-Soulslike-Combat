@@ -23,6 +23,7 @@ class AAIController;
 class UHealthBarComponent;
 class UWidgetComponent;
 class UEnemyAttackConfigDataAsset;
+class UMotionWarpingComponent;
 
 UCLASS()
 class TEST_API AEnemy : public ABaseCharacter
@@ -128,6 +129,9 @@ private:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true", ToolTip = "头顶血条组件。"))
 	UHealthBarComponent* HealthBarWidgetComp;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true", ToolTip = "Motion Warping 组件，用于跃进类攻击在蒙太奇窗口内修正 root motion 目标。"))
+	UMotionWarpingComponent* MotionWarpingComponent;
 
 	/* 状态 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "State", meta = (AllowPrivateAccess = "true", ToolTip = "当前敌人状态。"))
@@ -332,6 +336,8 @@ private:
 	void StartAttackCooldown(float MinCooldown, float MaxCooldown);
 	bool PlayEnemyAttackMontage(const FEnemyAttackEntry& Entry);
 	void ClearCurrentAttackConfig(bool bStartCooldown = false);
+	void UpdateAttackMotionWarpTarget(const FEnemyAttackEntry& Entry);
+	void ClearAttackMotionWarpTarget(const FEnemyAttackEntry& Entry);
 	void ValidateEnemyAttackConfig() const;
 	void WarnNoEnemyAttackCandidate(float DistanceToTarget);
 	bool HasPendingAttack() const;

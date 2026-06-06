@@ -43,6 +43,18 @@ struct FEnemyAttackEntry
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Selection", meta = (ClampMin = "0.0", ToolTip = "满足距离条件时的加权随机权重。0 表示不参与选择。"))
 	float Weight = 1.f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Motion Warping", meta = (ToolTip = "是否为该招式启用 Motion Warping。v1 只建议用于跳劈/跃进类 root motion 攻击。"))
+	bool bUseMotionWarping = false;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Motion Warping", meta = (EditCondition = "bUseMotionWarping", ToolTip = "蒙太奇 Motion Warping NotifyState 使用的 Warp Target 名称。必须与蒙太奇中配置一致。"))
+	FName WarpTargetName = FName("AttackTarget");
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Motion Warping", meta = (EditCondition = "bUseMotionWarping", ClampMin = "0.0", ToolTip = "落点距离目标保留的前方距离（cm），避免跳到玩家身体中心。"))
+	float WarpStopDistance = 80.f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Motion Warping", meta = (EditCondition = "bUseMotionWarping", ClampMin = "0.0", ToolTip = "从敌人当前位置到 WarpLocation 的最大允许修正距离（cm）。这是 root motion 保险，不参与攻击选择。"))
+	float MaxWarpDistance = 200.f;
 };
 
 UCLASS(BlueprintType)

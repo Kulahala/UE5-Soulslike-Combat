@@ -16,6 +16,7 @@
 #include "HUD/HealthBarComponent.h"
 #include "Items/Weapon/Weapon.h"
 #include "Kismet/GameplayStatics.h"
+#include "MotionWarpingComponent.h"
 #include "Navigation/PathFollowingComponent.h"
 #include "NiagaraFunctionLibrary.h"
 #include "Perception/AIPerceptionComponent.h"
@@ -47,6 +48,9 @@ AEnemy::AEnemy()
 
 	// AI感知
 	AIPerceptionComp = CreateDefaultSubobject<UAIPerceptionComponent>(TEXT("AIPerceptionComp"));
+
+	// Motion Warping：跳劈/跃进类攻击按 DataAsset 写入一次性 WarpTarget
+	MotionWarpingComponent = CreateDefaultSubobject<UMotionWarpingComponent>(TEXT("MotionWarpingComponent"));
 
 	// 视觉配置
 	UAISenseConfig_Sight* SightConfig = CreateDefaultSubobject<UAISenseConfig_Sight>(TEXT("SightConfig"));
@@ -386,6 +390,7 @@ bool AEnemy::PerformConfiguredAttackByIndex(int32 AttackIndex)
 	SetAttackDamageMultiplier(Entry.DamageMultiplier);
 	SetBlockStaminaDamageMultiplier(Entry.BlockStaminaDamageMultiplier);
 	SetEnemyState(EEnemyState::EES_Attacking);
+	UpdateAttackMotionWarpTarget(Entry);
 
 	if (!PlayEnemyAttackMontage(Entry))
 	{
@@ -443,6 +448,11 @@ bool AEnemy::PlayEnemyAttackMontage(const FEnemyAttackEntry& Entry)
 
 void AEnemy::ClearCurrentAttackConfig(bool bStartCooldown)
 {
+	if (EnemyAttackConfig && EnemyAttackConfig->Attacks.IsValidIndex(CurrentAttackIndex))
+	{
+		ClearAttackMotionWarpTarget(EnemyAttackConfig->Attacks[CurrentAttackIndex]);
+	}
+
 	if (bStartCooldown)
 	{
 		StartCurrentAttackCooldownIfNeeded();
@@ -452,6 +462,64 @@ void AEnemy::ClearCurrentAttackConfig(bool bStartCooldown)
 	bCurrentAttackCooldownStarted = false;
 	SetAttackDamageMultiplier(1.f);
 	SetBlockStaminaDamageMultiplier(1.f);
+}
+
+void AEnemy::UpdateAttackMotionWarpTarget(const FEnemyAttackEntry& Entry)
+{
+	if (!Entry.bUseMotionWarping)
+	{
+		return;
+	}
+
+	if (!MotionWarpingComponent || Entry.WarpTargetName == NAME_None)
+	{
+		ClearAttackMotionWarpTarget(Entry);
+		return;
+	}
+
+	if (Entry.MaxWarpDistance <= 0.f)
+	{
+		ClearAttackMotionWarpTarget(Entry);
+		return;
+	}
+
+	if (!IsValidCombatTarget(ChasingTarget))
+	{
+		ClearAttackMotionWarpTarget(Entry);
+		return;
+	}
+
+	const FVector EnemyLocation = GetActorLocation();
+	const FVector TargetLocation = ChasingTarget->GetActorLocation();
+	const FVector ToTarget = (TargetLocation - EnemyLocation).GetSafeNormal2D();
+	if (ToTarget.IsNearlyZero())
+	{
+		ClearAttackMotionWarpTarget(Entry);
+		return;
+	}
+
+	const FVector WarpLocation = TargetLocation - ToTarget * Entry.WarpStopDistance;
+	const float WarpDistance = FVector::Dist2D(EnemyLocation, WarpLocation);
+	if (WarpDistance > Entry.MaxWarpDistance)
+	{
+		ClearAttackMotionWarpTarget(Entry);
+		return;
+	}
+
+	const FRotator WarpRotation = ToTarget.Rotation();
+	MotionWarpingComponent->AddOrUpdateWarpTargetFromTransform(
+		Entry.WarpTargetName,
+		FTransform(WarpRotation, WarpLocation));
+}
+
+void AEnemy::ClearAttackMotionWarpTarget(const FEnemyAttackEntry& Entry)
+{
+	if (!Entry.bUseMotionWarping || !MotionWarpingComponent || Entry.WarpTargetName == NAME_None)
+	{
+		return;
+	}
+
+	MotionWarpingComponent->RemoveWarpTarget(Entry.WarpTargetName);
 }
 
 void AEnemy::ValidateEnemyAttackConfig() const

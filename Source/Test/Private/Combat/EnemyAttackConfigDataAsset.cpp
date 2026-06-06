@@ -116,6 +116,8 @@ void UEnemyAttackConfigDataAsset::NormalizeEntries()
 		Entry.DamageMultiplier = FMath::Max(0.f, Entry.DamageMultiplier);
 		Entry.BlockStaminaDamageMultiplier = FMath::Max(0.f, Entry.BlockStaminaDamageMultiplier);
 		Entry.Weight = FMath::Max(0.f, Entry.Weight);
+		Entry.WarpStopDistance = FMath::Max(0.f, Entry.WarpStopDistance);
+		Entry.MaxWarpDistance = FMath::Max(0.f, Entry.MaxWarpDistance);
 	}
 }
 
@@ -134,6 +136,30 @@ void UEnemyAttackConfigDataAsset::LogConfigWarnings() const
 		{
 			UE_LOG(LogTemp, Warning, TEXT("%s: Enemy attack entry '%s' has zero weight and will not be selected."),
 			       *GetName(), *Entry.AttackName.ToString());
+		}
+
+		if (Entry.bUseMotionWarping)
+		{
+			if (Entry.WarpTargetName == NAME_None)
+			{
+				UE_LOG(LogTemp, Warning,
+				       TEXT("%s: Enemy attack entry '%s' enables Motion Warping but has no WarpTargetName."),
+				       *GetName(), *Entry.AttackName.ToString());
+			}
+
+			if (Entry.MaxWarpDistance <= 0.f)
+			{
+				UE_LOG(LogTemp, Warning,
+				       TEXT("%s: Enemy attack entry '%s' enables Motion Warping but MaxWarpDistance is <= 0."),
+				       *GetName(), *Entry.AttackName.ToString());
+			}
+
+			if (Entry.WarpStopDistance >= Entry.MaxDistance)
+			{
+				UE_LOG(LogTemp, Warning,
+				       TEXT("%s: Enemy attack entry '%s' has WarpStopDistance %.1f >= MaxDistance %.1f; warp landing may be behind or too close to the enemy."),
+				       *GetName(), *Entry.AttackName.ToString(), Entry.WarpStopDistance, Entry.MaxDistance);
+			}
 		}
 	}
 #endif
