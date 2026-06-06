@@ -22,6 +22,7 @@ plugins/
 .playwright-mcp/
 .learnings/
 plan.md
+todo.md
 .geminiignore
 .claude/
 .claudeignore

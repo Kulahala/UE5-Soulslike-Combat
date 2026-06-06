@@ -857,21 +857,37 @@ FName AMyCharacter::SelectDodgeSection(const FVector& WorldDirection) const
 		return FName("Dodge_F");
 	}
 
-	// 锁定 + 有输入：根据方向判断
-	FVector LocalDir = GetActorRotation().UnrotateVector(WorldDirection);
-	float X = LocalDir.X;
-	float Y = LocalDir.Y;
+	// 锁定 + 有输入：按角色本地朝向切成 8 个 45 度扇区
+	const FVector LocalDir = GetActorRotation().UnrotateVector(WorldDirection).GetSafeNormal2D();
+	const float AngleDegrees = FMath::RadiansToDegrees(FMath::Atan2(LocalDir.Y, LocalDir.X));
 
-	const float Threshold = 0.3f;
-
-	if (FMath::Abs(Y) > FMath::Abs(X) && FMath::Abs(Y) > Threshold)
-	{
-		return Y > 0.f ? FName("Dodge_R") : FName("Dodge_L");
-	}
-
-	if (X > Threshold)
+	if (AngleDegrees >= -22.5f && AngleDegrees < 22.5f)
 	{
 		return FName("Dodge_F");
+	}
+	if (AngleDegrees >= 22.5f && AngleDegrees < 67.5f)
+	{
+		return FName("Dodge_FR");
+	}
+	if (AngleDegrees >= 67.5f && AngleDegrees < 112.5f)
+	{
+		return FName("Dodge_R");
+	}
+	if (AngleDegrees >= 112.5f && AngleDegrees < 157.5f)
+	{
+		return FName("Dodge_BR");
+	}
+	if (AngleDegrees >= -67.5f && AngleDegrees < -22.5f)
+	{
+		return FName("Dodge_FL");
+	}
+	if (AngleDegrees >= -112.5f && AngleDegrees < -67.5f)
+	{
+		return FName("Dodge_L");
+	}
+	if (AngleDegrees >= -157.5f && AngleDegrees < -112.5f)
+	{
+		return FName("Dodge_BL");
 	}
 
 	return FName("Dodge_B");
