@@ -27,6 +27,19 @@ enum class EComboPlaybackMode : uint8
 	Continuation
 };
 
+UENUM(BlueprintType)
+enum class EPlayerActionType : uint8
+{
+	None UMETA(DisplayName = "None"),
+	Attack UMETA(DisplayName = "Attack"),
+	Dodge UMETA(DisplayName = "Dodge"),
+	Block UMETA(DisplayName = "Block"),
+	Parry UMETA(DisplayName = "Parry"),
+	Potion UMETA(DisplayName = "Potion"),
+	HitReact UMETA(DisplayName = "HitReact"),
+	Death UMETA(DisplayName = "Death")
+};
+
 UENUM()
 enum class EEnemyState : uint8 {
 	EES_UnOccupied UMETA(DisplayName = "UnOccupied"), // 初始态

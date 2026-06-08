@@ -730,11 +730,7 @@ void AMyCharacter::InterruptBlock(bool bClearHeld)
 
 void AMyCharacter::TryResumeBlock()
 {
-	if (bBlockInputHeld && !bIsBlocking && CanStartBlock())
-	{
-		bIsBlocking = true;
-		PlayBlockMontage(FName("BlockRaise"));
-	}
+	TryStartAction(EPlayerActionType::Block);
 }
 
 FBlockResult AMyCharacter::TryBlockHit(const FVector& ImpactPoint, float IncomingDamage,
@@ -836,24 +832,7 @@ bool AMyCharacter::CanStartParry() const
 
 void AMyCharacter::Input_Parry()
 {
-	if (!CanStartParry()) return;
-
-	// 先确认蒙太奇可播放，再扣体力和进入状态（防止卡在 EAS_Parrying）
-	UAnimMontage* ParryMontage = GetParryMontage();
-	if (!ParryMontage || !GetMesh() || !GetMesh()->GetAnimInstance()) return;
-
-	Attributes->UseStamina(EquippedShield->GetParryStaminaCost());
-	Attributes->ResetStaminaRegenCooldown();
-
-	bIsParrying = true;
-	bParryActive = false;
-	ActionState = EActionState::EAS_Parrying;
-	PlayMontageSection(ParryMontage, FName("Parry"));
-
-	UAnimInstance* Anim = GetMesh()->GetAnimInstance();
-	FOnMontageEnded EndDelegate;
-	EndDelegate.BindUObject(this, &AMyCharacter::OnParryMontageEnded);
-	Anim->Montage_SetEndDelegate(EndDelegate, ParryMontage);
+	TryStartAction(EPlayerActionType::Parry);
 }
 
 void AMyCharacter::SetParryActive(bool bActive)
@@ -926,37 +905,7 @@ bool AMyCharacter::CanDodge() const
 
 void AMyCharacter::Dodge()
 {
-	if (!CanDodge()) return;
-	UAnimMontage* DodgeMontage = GetDodgeMontage();
-	if (!DodgeMontage || !GetMesh() || !GetMesh()->GetAnimInstance()) return;
-
-	ResetCombo();
-
-	if (bIsBlocking) InterruptBlock(true);
-	if (bIsParrying) InterruptParry();
-
-	FVector DodgeDir = ComputeDodgeDirection();
-	FName Section = SelectDodgeSection(DodgeDir);
-
-	SetMovementRotationMode(false, false);
-
-	Attributes->UseStamina(DodgeStaminaCost);
-	Attributes->PauseStaminaRegen();
-
-	ActionState = EActionState::EAS_Dodging;
-
-	PlayMontageSection(DodgeMontage, Section);
-
-	// 翻滚发出单次噪音
-	EmitNoise(DodgeNoiseLoudness, DodgeNoiseRange);
-
-	// 停止移动噪音定时器（翻滚期间不持续发声）
-	StopMovementNoiseTimer();
-
-	UAnimInstance* Anim = GetMesh()->GetAnimInstance();
-	FOnMontageEnded EndDelegate;
-	EndDelegate.BindUObject(this, &AMyCharacter::OnDodgeMontageEnded);
-	Anim->Montage_SetEndDelegate(EndDelegate, DodgeMontage);
+	TryStartAction(EPlayerActionType::Dodge);
 }
 
 FVector AMyCharacter::ComputeDodgeDirection() const
@@ -1085,20 +1034,137 @@ bool AMyCharacter::CanUsePotion() const
 
 void AMyCharacter::UsePotion()
 {
-	if (!CanUsePotion()) return;
+	TryStartAction(EPlayerActionType::Potion);
+}
 
+bool AMyCharacter::TryStartAction(EPlayerActionType Action)
+{
+	switch (Action)
+	{
+	case EPlayerActionType::Dodge:
+		return CanDodge() && StartDodgeAction();
+	case EPlayerActionType::Block:
+		if (bIsBlocking)
+		{
+			return true;
+		}
+		if (!bBlockInputHeld)
+		{
+			return false;
+		}
+		return CanStartBlock() && StartBlockAction();
+	case EPlayerActionType::Parry:
+		return CanStartParry() && StartParryAction();
+	case EPlayerActionType::Potion:
+		return CanUsePotion() && StartPotionAction();
+	case EPlayerActionType::Attack:
+	case EPlayerActionType::HitReact:
+	case EPlayerActionType::Death:
+	case EPlayerActionType::None:
+	default:
+		return false;
+	}
+}
+
+bool AMyCharacter::StartDodgeAction()
+{
+	UAnimMontage* DodgeMontage = GetDodgeMontage();
+	UAnimInstance* Anim = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
+	if (!DodgeMontage || !Anim)
+	{
+		return false;
+	}
+
+	ResetCombo();
+
+	if (bIsBlocking) InterruptBlock(true);
+	if (bIsParrying) InterruptParry();
+
+	FVector DodgeDir = ComputeDodgeDirection();
+	FName Section = SelectDodgeSection(DodgeDir);
+
+	SetMovementRotationMode(false, false);
+
+	Attributes->UseStamina(DodgeStaminaCost);
+	Attributes->PauseStaminaRegen();
+
+	ActionState = EActionState::EAS_Dodging;
+
+	PlayMontageSection(DodgeMontage, Section);
+
+	// 翻滚发出单次噪音
+	EmitNoise(DodgeNoiseLoudness, DodgeNoiseRange);
+
+	// 停止移动噪音定时器（翻滚期间不持续发声）
+	StopMovementNoiseTimer();
+
+	FOnMontageEnded EndDelegate;
+	EndDelegate.BindUObject(this, &AMyCharacter::OnDodgeMontageEnded);
+	Anim->Montage_SetEndDelegate(EndDelegate, DodgeMontage);
+
+	return true;
+}
+
+bool AMyCharacter::StartBlockAction()
+{
+	UAnimMontage* BlockMontage = GetBlockMontage();
+	UAnimInstance* Anim = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
+	if (!BlockMontage || !Anim)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s: StartBlockAction failed, BlockMontage or AnimInstance is not available."), *GetName());
+		return false;
+	}
+
+	bIsBlocking = true;
+	PlayBlockMontage(FName("BlockRaise"));
+	return true;
+}
+
+bool AMyCharacter::StartParryAction()
+{
+	// 先确认蒙太奇可播放，再扣体力和进入状态（防止卡在 EAS_Parrying）
+	UAnimMontage* ParryMontage = GetParryMontage();
+	UAnimInstance* Anim = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
+	if (!ParryMontage || !Anim)
+	{
+		return false;
+	}
+
+	Attributes->UseStamina(EquippedShield->GetParryStaminaCost());
+	Attributes->ResetStaminaRegenCooldown();
+
+	bIsParrying = true;
+	bParryActive = false;
+	ActionState = EActionState::EAS_Parrying;
+	PlayMontageSection(ParryMontage, FName("Parry"));
+
+	FOnMontageEnded EndDelegate;
+	EndDelegate.BindUObject(this, &AMyCharacter::OnParryMontageEnded);
+	Anim->Montage_SetEndDelegate(EndDelegate, ParryMontage);
+
+	return true;
+}
+
+bool AMyCharacter::StartPotionAction()
+{
 	const UPlayerActionConfigDataAsset* ActionConfig = GetActionConfig();
 	if (!ActionConfig)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("%s: UsePotion failed, PlayerProfile->ActionConfig is not configured."), *GetName());
-		return;
+		return false;
+	}
+
+	UAnimMontage* PotionMontage = GetPotionMontage();
+	if (PotionMontage && (!GetMesh() || !GetMesh()->GetAnimInstance()))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s: UsePotion failed, PotionMontage is configured but AnimInstance is not available."), *GetName());
+		return false;
 	}
 
 	if (Attributes->UsePotion())
 	{
 		if (bIsSprinting) StopSprinting();
 
-		UAnimMontage* PotionMontage = GetPotionMontage();
 		if (PotionMontage)
 		{
 			ActionState = EActionState::EAS_UsingPotion;
@@ -1110,7 +1176,10 @@ void AMyCharacter::UsePotion()
 			HealFromPotion(0.5f);
 			StartPotionCooldown();
 		}
+		return true;
 	}
+
+	return false;
 }
 
 void AMyCharacter::PlayPotionMontage()
@@ -1146,7 +1215,7 @@ void AMyCharacter::HealFromPotion(float Percent)
 		return;
 	}
 
-	const bool bUsesPotionMontage = ActionConfig && ActionConfig->PotionMontage;
+	const bool bUsesPotionMontage = ActionConfig->PotionMontage != nullptr;
 	if (bUsesPotionMontage && ActionState != EActionState::EAS_UsingPotion)
 	{
 		return;

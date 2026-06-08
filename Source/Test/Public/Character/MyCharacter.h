@@ -155,6 +155,19 @@ private:
 	EActionState RecoverActionStateAfterMontage(EActionState ExpectedState, bool bResumeStaminaRegen);
 	void CleanupInterruptedAttack();
 	bool StartComboSegment(int32 SegmentIndex, EComboPlaybackMode PlaybackMode);
+	/**
+	 * 尝试启动指定动作。
+	 * 返回 true 表示“当前处于或刚启动该动作”，不区分“新启动”和“已在执行”。
+	 * 返回 false 表示“不能进入该动作”（条件不满足、资源缺失、占位类型）。
+	 *
+	 * 注意：Block 的幂等 return true 不代表播放了新的 BlockRaise，仅代表举盾态成立。
+	 * 阶段 3 若需要区分“触发新动作 vs 已在执行”，再扩展返回类型。
+	 */
+	bool TryStartAction(EPlayerActionType Action);
+	bool StartDodgeAction();
+	bool StartBlockAction();
+	bool StartParryAction();
+	bool StartPotionAction();
 
 	/* 提取方法 */
 	void InitializePlayerHUD();
