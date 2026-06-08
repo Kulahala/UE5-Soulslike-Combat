@@ -8,6 +8,7 @@ class UProgressBar;
 class UAttributeComponent;
 class UTexture2D;
 class UTextBlock;
+class UImage;
 
 UCLASS()
 class TEST_API UPlayerHUDWidget : public UUserWidget
@@ -21,6 +22,7 @@ public:
 	void SetStaminaPercent(float Percent);
 	UFUNCTION()
 	void SetPotionCount(int32 CurrentCount, int32 MaxCount);
+	void SetPotionCooldown(float RemainingTime, float TotalTime);
 	void BindToAttributes(UAttributeComponent* Attributes);
 	void SetPendingDamageFlashScale(float Scale);
 
@@ -35,6 +37,18 @@ public:
 
 	UPROPERTY(meta = (BindWidget))
 	UTextBlock* Text_PotionCount;
+
+	UPROPERTY(meta = (BindWidgetOptional))
+	UImage* Image_PotionIcon;
+
+	UPROPERTY(meta = (BindWidgetOptional))
+	UImage* Image_PotionCooldownOverlay;
+
+	UPROPERTY(meta = (BindWidgetOptional))
+	UProgressBar* PB_PotionCooldown;
+
+	UPROPERTY(meta = (BindWidgetOptional))
+	UTextBlock* Text_PotionCooldown;
 
 protected:
 	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
@@ -59,6 +73,23 @@ private:
 
 	float TargetHealthPercent = 1.0f;  // 目标血量百分比
 	float CurrentHealthPercent = 1.0f; // 当前显示的血量百分比
+
+	int32 CurrentPotionCount = 0;
+	int32 MaxPotionCount = 0;
+	float PotionCooldownRemaining = 0.f;
+	float PotionCooldownDuration = 0.f;
+	bool bPotionCooldownActive = false;
+
+	UPROPERTY(EditAnywhere, Category = "Potion UI", meta = (ClampMin = "0.0", ClampMax = "1.0", ToolTip = "药瓶冷却遮罩的不透明度。"))
+	float PotionCooldownOverlayOpacity = 0.65f;
+
+	UPROPERTY(EditAnywhere, Category = "Potion UI", meta = (ClampMin = "0.0", ClampMax = "1.0", ToolTip = "药瓶为空时图标的不透明度。"))
+	float EmptyPotionIconOpacity = 0.35f;
+
+	UPROPERTY(EditAnywhere, Category = "Potion UI", meta = (ToolTip = "药瓶冷却剩余时间小于该值时隐藏倒计时数字。"))
+	float PotionCooldownTextHideThreshold = 0.05f;
+
+	void RefreshPotionVisuals();
 
 	// 本次掉血前由角色推送；SetHealthPercent 消费后归位到 1
 	float PendingDamageFlashScale = 1.0f;

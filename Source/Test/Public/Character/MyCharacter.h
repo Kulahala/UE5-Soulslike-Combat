@@ -162,6 +162,7 @@ private:
 
 	/* 提取方法 */
 	void InitializePlayerHUD();
+	void UpdatePotionCooldownHUD() const;
 	void DrawDebugInfo() const;
 	void StopBlockMontage(float BlendOutTime);
 	bool ShouldInterruptBlock() const;

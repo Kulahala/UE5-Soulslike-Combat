@@ -34,7 +34,8 @@ AMyCharacter::AMyCharacter()
 	// 相机组件
 	SpringArm = CreateDefaultSubobject<USpringArmComponent>(TEXT("SpringArm"));
 	SpringArm->SetupAttachment(GetRootComponent());
-	SpringArm->TargetArmLength = 300.f;
+	SpringArm->TargetArmLength = 285.f;
+	SpringArm->SocketOffset = FVector(0.f, 65.f, 60.f);
 	SpringArm->bUsePawnControlRotation = true;
 
 	Camera = CreateDefaultSubobject<UCameraComponent>(TEXT("Camera"));
@@ -96,6 +97,11 @@ void AMyCharacter::Tick(float DeltaTime)
 	if (bRecenteringCamera)
 	{
 		UpdateCameraRecenter(DeltaTime);
+	}
+
+	if (bPotionOnCooldown)
+	{
+		UpdatePotionCooldownHUD();
 	}
 
 	if (ActionState == EActionState::EAS_Stunning || ActionState == EActionState::EAS_Dead) return;
@@ -1015,11 +1021,21 @@ void AMyCharacter::HealFromPotion(float Percent)
 
 void AMyCharacter::InterruptPotion()
 {
+	const bool bWasUsingPotion = ActionState == EActionState::EAS_UsingPotion;
+	bool bWasPotionMontagePlaying = false;
+
 	if (UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
 		AnimInstance && PotionMontage && AnimInstance->Montage_IsPlaying(PotionMontage))
 	{
+		bWasPotionMontagePlaying = true;
 		AnimInstance->Montage_Stop(0.1f, PotionMontage);
 	}
+
+	if (!bWasUsingPotion && !bWasPotionMontagePlaying)
+	{
+		return;
+	}
+
 	ActionState = EActionState::EAS_UnOccupied;
 	StartPotionCooldown();
 }
@@ -1029,16 +1045,19 @@ void AMyCharacter::StartPotionCooldown()
 	if (PotionCooldown <= 0.f)
 	{
 		bPotionOnCooldown = false;
+		UpdatePotionCooldownHUD();
 		return;
 	}
 	bPotionOnCooldown = true;
 	GetWorldTimerManager().SetTimer(
 		PotionCooldownTimer, this, &AMyCharacter::ResetPotionCooldown, PotionCooldown, false);
+	UpdatePotionCooldownHUD();
 }
 
 void AMyCharacter::ResetPotionCooldown()
 {
 	bPotionOnCooldown = false;
+	UpdatePotionCooldownHUD();
 }
 
 // ==================== 移动 ====================
@@ -1565,8 +1584,22 @@ void AMyCharacter::InitializePlayerHUD()
 		{
 			PlayerHUDWidget->AddToViewport();
 			PlayerHUDWidget->BindToAttributes(Attributes);
+			UpdatePotionCooldownHUD();
 		}
 	}
+}
+
+void AMyCharacter::UpdatePotionCooldownHUD() const
+{
+	if (!PlayerHUDWidget)
+	{
+		return;
+	}
+
+	const float Remaining = bPotionOnCooldown
+		                        ? GetWorldTimerManager().GetTimerRemaining(PotionCooldownTimer)
+		                        : 0.f;
+	PlayerHUDWidget->SetPotionCooldown(Remaining, bPotionOnCooldown ? PotionCooldown : 0.f);
 }
 
 void AMyCharacter::DrawDebugInfo() const

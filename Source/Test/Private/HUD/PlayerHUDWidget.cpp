@@ -6,6 +6,7 @@
 #include "Styling/CoreStyle.h"
 #include "Rendering/DrawElements.h"
 #include "Engine/Texture2D.h"
+#include "Components/Image.h"
 #include "Components/TextBlock.h"
 
 void UPlayerHUDWidget::SetHealthPercent(float Percent)
@@ -40,10 +41,24 @@ void UPlayerHUDWidget::SetStaminaPercent(float Percent)
 
 void UPlayerHUDWidget::SetPotionCount(int32 CurrentCount, int32 MaxCount)
 {
+	CurrentPotionCount = CurrentCount;
+	MaxPotionCount = MaxCount;
+
 	if (Text_PotionCount)
 	{
 		Text_PotionCount->SetText(FText::Format(INVTEXT("{0}/{1}"), CurrentCount, MaxCount));
 	}
+
+	RefreshPotionVisuals();
+}
+
+void UPlayerHUDWidget::SetPotionCooldown(float RemainingTime, float TotalTime)
+{
+	PotionCooldownDuration = FMath::Max(0.f, TotalTime);
+	PotionCooldownRemaining = FMath::Clamp(RemainingTime, 0.f, PotionCooldownDuration);
+	bPotionCooldownActive = PotionCooldownDuration > 0.f && PotionCooldownRemaining > PotionCooldownTextHideThreshold;
+
+	RefreshPotionVisuals();
 }
 
 void UPlayerHUDWidget::BindToAttributes(UAttributeComponent* Attributes)
@@ -72,6 +87,43 @@ void UPlayerHUDWidget::BindToAttributes(UAttributeComponent* Attributes)
 void UPlayerHUDWidget::SetPendingDamageFlashScale(float Scale)
 {
 	PendingDamageFlashScale = FMath::Max(0.f, Scale);
+}
+
+void UPlayerHUDWidget::RefreshPotionVisuals()
+{
+	const bool bHasPotion = CurrentPotionCount > 0;
+	const ESlateVisibility CooldownVisibility = bPotionCooldownActive
+		                                            ? ESlateVisibility::HitTestInvisible
+		                                            : ESlateVisibility::Hidden;
+
+	if (Image_PotionIcon)
+	{
+		Image_PotionIcon->SetRenderOpacity(bHasPotion ? 1.f : EmptyPotionIconOpacity);
+	}
+
+	if (Image_PotionCooldownOverlay)
+	{
+		Image_PotionCooldownOverlay->SetVisibility(CooldownVisibility);
+		Image_PotionCooldownOverlay->SetRenderOpacity(PotionCooldownOverlayOpacity);
+	}
+
+	if (PB_PotionCooldown)
+	{
+		const float CooldownPercent = PotionCooldownDuration > 0.f
+			                              ? PotionCooldownRemaining / PotionCooldownDuration
+			                              : 0.f;
+		PB_PotionCooldown->SetVisibility(CooldownVisibility);
+		PB_PotionCooldown->SetPercent(CooldownPercent);
+	}
+
+	if (Text_PotionCooldown)
+	{
+		Text_PotionCooldown->SetVisibility(CooldownVisibility);
+		if (bPotionCooldownActive)
+		{
+			Text_PotionCooldown->SetText(FText::FromString(FString::Printf(TEXT("%.1f"), PotionCooldownRemaining)));
+		}
+	}
 }
 
 void UPlayerHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
