@@ -283,7 +283,7 @@ UAnimNotify → UAnimNotify_ComboBranchPoint (consumes buffered combo input and 
 UAnimNotify → UAnimNotify_PotionHeal (montage-driven partial potion healing)
 UDataAsset → UTreasureData (static mesh, gold value, pickup sound, scale)
 UDataAsset → UPlayerCharacterProfileDataAsset (single player character config entry: AttackConfig + ActionConfig)
-UDataAsset → UPlayerActionConfigDataAsset (player-only non-attack action montages: dodge, block, parry, optional potion)
+UDataAsset → UPlayerActionConfigDataAsset (player-only non-attack action montages and priority config: dodge, block, parry, optional potion)
 UDataAsset → UComboDataAsset (combo chain: SectionName, DamageMultiplier, StaminaCost, PoiseDamageMultiplier per segment)
 UDataAsset → UAttackConfigDataAsset (LightAttackCombo + SpecialAttacks for sprint/jump-style specials + ChargedAttack)
 UDataAsset → UEnemyAttackConfigDataAsset (Enemy attacks: montage, section, post-attack cooldown (v1.5: excludes montage duration and starts after attack end/interruption), MinDistance/MaxDistance, weight, damage/block-stamina multipliers, optional Motion Warping target config)
@@ -345,11 +345,13 @@ UDataAsset → UEnemyAttackConfigDataAsset (Enemy attacks: montage, section, pos
 ## Player Action Start Entry
 
 - **统一入口**：`AMyCharacter::TryStartAction(EPlayerActionType)` 是 Dodge / Block / Parry / Potion 的统一启动入口；公开输入函数 `Dodge()`、`Input_Parry()`、`UsePotion()` 只转发到该入口，`TryResumeBlock()` 也通过该入口恢复举盾。
-- **当前范围**：阶段 1.5 只做入口收敛，行为保持等价；不接入普通攻击 / 蓄力 / 冲刺攻击，不实现 Priority，不实现 CancelWindow，不允许 Dodge / Block 取消攻击后摇。
+- **当前范围**：阶段 2 已加入动作优先级数据和只读查询，行为保持等价；不接入普通攻击 / 蓄力 / 冲刺攻击，不实现 CancelWindow，不允许 Dodge / Block 取消攻击后摇。
 - **分发结构**：`TryStartAction()` 调用现有 `CanDodge()` / `CanStartBlock()` / `CanStartParry()` / `CanUsePotion()`，再分发到 `StartDodgeAction()`、`StartBlockAction()`、`StartParryAction()`、`StartPotionAction()`。这些 `Start*Action()` 返回 `bool`，资源缺失或配置缺失时必须在副作用前失败。
 - **Block 语义**：Block 是按住型动作。`TryStartAction(Block)` 内部同时检查 `bIsBlocking` 幂等和 `bBlockInputHeld` 输入意图；`ReleaseBlockInput()` 保持独立，负责松开、清理 `bIsBlocking` 和停止防御蒙太奇。
 - **副作用顺序**：消耗体力、消耗药瓶、设置状态、绑定 montage delegate 都必须发生在资源检查之后。`StartPotionAction()` 在 `Attributes->UsePotion()` 后没有失败返回路径；`StartBlockAction()` 先确认 `BlockMontage` / `AnimInstance` 可用，再设置 `bIsBlocking = true`。
-- **占位类型**：`Attack` / `HitReact` / `Death` 已在 `EPlayerActionType` 中占位，但 `TryStartAction()` 当前明确返回 `false`，等待后续 Priority / CancelWindow 阶段决定是否接入。
+- **优先级数据**：`UPlayerActionConfigDataAsset::PriorityConfig` 保存 `Attack` / `Dodge` / `Block` / `Parry` / `Potion` / `HitReact` / `Death` 的动作优先级，数值越大优先级越高；`None` 不在 struct 字段中，由 `GetActionPriority(None)` 返回 `MIN_int32`。
+- **优先级查询**：`GetActionPriority()` 是唯一 priority switch 源，故意不写 `default` 以保留枚举新增时的 `-Wswitch` 漂移提示；`IsStrictlyHigherPriority()` 使用 `>`，`IsAtLeastSamePriority()` 使用 `>=`。`AMyCharacter` 只 forward 到 `ActionConfig`，不复制 switch。
+- **占位类型**：`Attack` / `HitReact` / `Death` 已在 `EPlayerActionType` 中占位，但 `TryStartAction()` 当前明确返回 `false`，等待后续 CancelWindow 阶段决定是否接入。`ActionConfig == nullptr` 时 player-side priority helper 返回安全 fallback（`MIN_int32` / false）。
 
 ## Hit Knockback（受击后退）
 
@@ -475,7 +477,7 @@ UDataAsset → UEnemyAttackConfigDataAsset (Enemy attacks: montage, section, pos
 
 - **入口职责**：`UPlayerCharacterProfileDataAsset` 是主角 Blueprint 的单一配置入口，只引用子 DataAsset，不复制所有字段，不持有 runtime state。
 - **当前子配置**：`AttackConfig` 指向现有 `UAttackConfigDataAsset`；`ActionConfig` 指向 `UPlayerActionConfigDataAsset`。
-- **ActionConfig 范围**：`UPlayerActionConfigDataAsset` 只保存主角专属非攻击动作 Montage：`DodgeMontage`、`BlockMontage`、`ParryMontage`、可选 `PotionMontage`。`HitReactMontage` / `DeathMontage` 仍留在 `ABaseCharacter`，因为玩家和敌人共用。
+- **ActionConfig 范围**：`UPlayerActionConfigDataAsset` 保存主角专属非攻击动作 Montage：`DodgeMontage`、`BlockMontage`、`ParryMontage`、可选 `PotionMontage`，并保存玩家动作优先级配置。`HitReactMontage` / `DeathMontage` 仍留在 `ABaseCharacter`，因为玩家和敌人共用。
 - **行为所有权**：`AMyCharacter` 仍负责状态切换、Montage 播放、打断清理和恢复；DataAsset 只提供配置。
 - **配置失败语义**：未设置 `PlayerProfile`、`AttackConfig` 或 `ActionConfig` 时输出 warning 并让对应动作失败。`PotionMontage` 为空不是错误配置，喝药会立即回血并进入冷却。
 

@@ -168,6 +168,9 @@ private:
 	bool StartBlockAction();
 	bool StartParryAction();
 	bool StartPotionAction();
+	int32 GetActionPriority(EPlayerActionType Action) const;
+	bool IsStrictlyHigherPriority(EPlayerActionType NewAction, EPlayerActionType CurrentAction) const;
+	bool IsAtLeastSamePriority(EPlayerActionType NewAction, EPlayerActionType CurrentAction) const;
 
 	/* 提取方法 */
 	void InitializePlayerHUD();

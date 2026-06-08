@@ -1070,7 +1070,7 @@ bool AMyCharacter::StartDodgeAction()
 {
 	UAnimMontage* DodgeMontage = GetDodgeMontage();
 	UAnimInstance* Anim = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
-	if (!DodgeMontage || !Anim)
+	if (!DodgeMontage || !Anim || !Attributes)
 	{
 		return false;
 	}
@@ -1125,7 +1125,7 @@ bool AMyCharacter::StartParryAction()
 	// 先确认蒙太奇可播放，再扣体力和进入状态（防止卡在 EAS_Parrying）
 	UAnimMontage* ParryMontage = GetParryMontage();
 	UAnimInstance* Anim = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
-	if (!ParryMontage || !Anim)
+	if (!ParryMontage || !Anim || !Attributes || !EquippedShield)
 	{
 		return false;
 	}
@@ -1143,6 +1143,24 @@ bool AMyCharacter::StartParryAction()
 	Anim->Montage_SetEndDelegate(EndDelegate, ParryMontage);
 
 	return true;
+}
+
+int32 AMyCharacter::GetActionPriority(EPlayerActionType Action) const
+{
+	const UPlayerActionConfigDataAsset* ActionConfig = GetActionConfig();
+	return ActionConfig ? ActionConfig->GetActionPriority(Action) : MIN_int32;
+}
+
+bool AMyCharacter::IsStrictlyHigherPriority(EPlayerActionType NewAction, EPlayerActionType CurrentAction) const
+{
+	const UPlayerActionConfigDataAsset* ActionConfig = GetActionConfig();
+	return ActionConfig && ActionConfig->IsStrictlyHigherPriority(NewAction, CurrentAction);
+}
+
+bool AMyCharacter::IsAtLeastSamePriority(EPlayerActionType NewAction, EPlayerActionType CurrentAction) const
+{
+	const UPlayerActionConfigDataAsset* ActionConfig = GetActionConfig();
+	return ActionConfig && ActionConfig->IsAtLeastSamePriority(NewAction, CurrentAction);
 }
 
 bool AMyCharacter::StartPotionAction()
