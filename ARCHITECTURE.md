@@ -345,13 +345,15 @@ UDataAsset → UEnemyAttackConfigDataAsset (Enemy attacks: montage, section, pos
 ## Player Action Start Entry
 
 - **统一入口**：`AMyCharacter::TryStartAction(EPlayerActionType)` 是 Dodge / Block / Parry / Potion 的统一启动入口；公开输入函数 `Dodge()`、`Input_Parry()`、`UsePotion()` 只转发到该入口，`TryResumeBlock()` 也通过该入口恢复举盾。
-- **当前范围**：阶段 2 已加入动作优先级数据和只读查询，行为保持等价；不接入普通攻击 / 蓄力 / 冲刺攻击，不实现 CancelWindow，不允许 Dodge / Block 取消攻击后摇。
+- **当前范围**：`TryStartAction()` 启动 Dodge / Block / Parry / Potion，并支持普通轻攻击后摇的 CancelWindow。`Attack` / `HitReact` / `Death` 仍不通过该入口真实启动；蓄力攻击 / 冲刺攻击第一版不挂 CancelWindow。
 - **分发结构**：`TryStartAction()` 调用现有 `CanDodge()` / `CanStartBlock()` / `CanStartParry()` / `CanUsePotion()`，再分发到 `StartDodgeAction()`、`StartBlockAction()`、`StartParryAction()`、`StartPotionAction()`。这些 `Start*Action()` 返回 `bool`，资源缺失或配置缺失时必须在副作用前失败。
 - **Block 语义**：Block 是按住型动作。`TryStartAction(Block)` 内部同时检查 `bIsBlocking` 幂等和 `bBlockInputHeld` 输入意图；`ReleaseBlockInput()` 保持独立，负责松开、清理 `bIsBlocking` 和停止防御蒙太奇。
 - **副作用顺序**：消耗体力、消耗药瓶、设置状态、绑定 montage delegate 都必须发生在资源检查之后。`StartPotionAction()` 在 `Attributes->UsePotion()` 后没有失败返回路径；`StartBlockAction()` 先确认 `BlockMontage` / `AnimInstance` 可用，再设置 `bIsBlocking = true`。
 - **优先级数据**：`UPlayerActionConfigDataAsset::PriorityConfig` 保存 `Attack` / `Dodge` / `Block` / `Parry` / `Potion` / `HitReact` / `Death` 的动作优先级，数值越大优先级越高；`None` 不在 struct 字段中，由 `GetActionPriority(None)` 返回 `MIN_int32`。
 - **优先级查询**：`GetActionPriority()` 是唯一 priority switch 源，故意不写 `default` 以保留枚举新增时的 `-Wswitch` 漂移提示；`IsStrictlyHigherPriority()` 使用 `>`，`IsAtLeastSamePriority()` 使用 `>=`。`AMyCharacter` 只 forward 到 `ActionConfig`，不复制 switch。
-- **占位类型**：`Attack` / `HitReact` / `Death` 已在 `EPlayerActionType` 中占位，但 `TryStartAction()` 当前明确返回 `false`，等待后续 CancelWindow 阶段决定是否接入。`ActionConfig == nullptr` 时 player-side priority helper 返回安全 fallback（`MIN_int32` / false）。
+- **CancelWindow**：`UAnimNotifyState_PlayerActionCancelWindow` 只负责开关 `AMyCharacter::bActionCancelWindowOpen`；取消决策集中在 `CanCancelCurrentActionWith()`，要求当前状态是 `EAS_Attacking`、窗口开启、目标动作是 Dodge / Block / Parry / Potion、且目标动作 priority 严格高于 `Attack`。成功取消时 `TryStartAction()` 先调用 `CleanupInterruptedAttack()`，再启动新动作。
+- **CancelWindow 清理**：`ResetCombo()` 会清 `bActionCancelWindowOpen`；受击进入 `EAS_Stunning` 前也会主动关闭 CancelWindow。按住 Block 时，`OpenActionCancelWindow()` 会在窗口开启瞬间主动尝试 `TryStartAction(Block)`，因为按住型输入不会产生新的 Started 事件。
+- **占位类型**：`Attack` / `HitReact` / `Death` 已在 `EPlayerActionType` 中占位，但 `TryStartAction()` 当前明确返回 `false`。`ActionConfig == nullptr` 时 player-side priority helper 返回安全 fallback（`MIN_int32` / false）。
 
 ## Hit Knockback（受击后退）
 
@@ -497,6 +499,8 @@ UDataAsset → UEnemyAttackConfigDataAsset (Enemy attacks: montage, section, pos
 
 - **状态**：`EAS_Dodging`，无敌帧由 `AnimNotifyState_DodgeInvulnerable` 覆盖全程
 - **方向判定**：无输入时播 `Dodge_B`；非锁定 + 有输入时转向输入方向并播 `Dodge_F`；锁定 + 有输入时保持面向敌人，按角色本地输入方向切 8 个 45° 扇区（`Dodge_F` / `Dodge_FR` / `Dodge_R` / `Dodge_BR` / `Dodge_B` / `Dodge_BL` / `Dodge_L` / `Dodge_FL`）
+- **输入缓存 fallback**：`ACharacterController::CachedMoveInput` 先于 gameplay gate 采样移动输入。攻击 CancelWindow 等状态会阻止 `AddMovementInput()`，导致 Pawn 的 `GetLastMovementInputVector()` 为空；此时 `ComputeDodgeDirection()` 会用 controller 缓存按 `ControlRotation` 转成 world direction，仅用于翻滚 section 判定，不放开攻击中的实际移动。
+- **无输入语义**：`ComputeDodgeDirection()` 只在有 Pawn 输入或 controller 缓存输入时返回方向；真无输入返回 `FVector::ZeroVector`，由 `SelectDodgeSection()` 统一判空并返回 `Dodge_B`。
 - **蒙太奇契约**：`DodgeMontage` 必须提供上述 section；每个 section 都需要覆盖 `AnimNotifyState_DodgeInvulnerable`，否则该方向会缺失无敌帧
 - **⚠️ 执行顺序约束**：`SelectDodgeSection()` 必须在 `FaceDirection2D()` 之前调用，否则 `UnrotateVector()` 参考系错误
 

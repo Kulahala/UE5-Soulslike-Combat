@@ -62,6 +62,9 @@ public:
 	FORCEINLINE void SetComboInputReceived(bool bReceived) { bComboInputReceived = bReceived; }
 	UFUNCTION(BlueprintCallable, Category = "Combat")
 	FORCEINLINE int32 GetComboCounter() const { return ComboCounter; }
+	void OpenActionCancelWindow();
+	void CloseActionCancelWindow();
+	FORCEINLINE bool IsActionCancelWindowOpen() const { return bActionCancelWindowOpen; }
 
 	/* 翻滚 */
 	void Dodge();
@@ -168,6 +171,7 @@ private:
 	bool StartBlockAction();
 	bool StartParryAction();
 	bool StartPotionAction();
+	bool CanCancelCurrentActionWith(EPlayerActionType NewAction) const;
 	int32 GetActionPriority(EPlayerActionType Action) const;
 	bool IsStrictlyHigherPriority(EPlayerActionType NewAction, EPlayerActionType CurrentAction) const;
 	bool IsAtLeastSamePriority(EPlayerActionType NewAction, EPlayerActionType CurrentAction) const;
@@ -326,6 +330,7 @@ private:
 	int32 ComboCounter = 0;
 	bool bComboWindowOpen = false;
 	bool bComboInputReceived = false;
+	bool bActionCancelWindowOpen = false;
 
 	/* 锁定 */
 	// 锁定开启前缓存的状态（ClearLockOn 时恢复）

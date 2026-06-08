@@ -40,8 +40,8 @@ void ACharacterController::SetupInputComponent()
 	if (UEnhancedInputComponent* EnhancedInputComponent = CastChecked<UEnhancedInputComponent>(InputComponent))
 	{
 		EnhancedInputComponent->BindAction(MoveAction, ETriggerEvent::Triggered, this, &ACharacterController::Input_Move);
-		EnhancedInputComponent->BindAction(MoveAction, ETriggerEvent::Completed, this, &ACharacterController::Input_MoveEnd);  // [调试] 松开清零
-		EnhancedInputComponent->BindAction(MoveAction, ETriggerEvent::Canceled, this, &ACharacterController::Input_MoveEnd);  // [调试] 取消清零
+		EnhancedInputComponent->BindAction(MoveAction, ETriggerEvent::Completed, this, &ACharacterController::Input_MoveEnd);  // 松开清零移动输入缓存
+		EnhancedInputComponent->BindAction(MoveAction, ETriggerEvent::Canceled, this, &ACharacterController::Input_MoveEnd);  // 取消清零移动输入缓存
 		EnhancedInputComponent->BindAction(LookAction, ETriggerEvent::Triggered, this, &ACharacterController::Input_Look);
 
 		EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Started, this, &ACharacterController::Input_Jump);
@@ -91,7 +91,7 @@ void ACharacterController::SetupInputComponent()
 void ACharacterController::Input_Move(const FInputActionValue& Value)
 {
 	FVector2D MovementVector = Value.Get<FVector2D>();
-	DebugMoveInput = MovementVector;  // [调试] 先采样，不受 gameplay gate 限制
+	CachedMoveInput = MovementVector;  // 先采样，不受 gameplay gate 限制
 
 	AMyCharacter* MyCharacter = GetMyCharacter();
 	if (!MyCharacter) return;
@@ -122,7 +122,7 @@ void ACharacterController::Input_Move(const FInputActionValue& Value)
 
 void ACharacterController::Input_MoveEnd()
 {
-	DebugMoveInput = FVector2D::ZeroVector;
+	CachedMoveInput = FVector2D::ZeroVector;
 
 	// 松开移动键时停止噪音定时器
 	if (AMyCharacter* MyCharacter = GetMyCharacter())
@@ -402,8 +402,9 @@ FString ACharacterController::GetDebugInputText() const
 	if (Now < DebugDodgeExpireTime) Result += TEXT("Dodge ");
 	if (Now < DebugPotionExpireTime) Result += TEXT("Potion ");
 
-	if (!DebugMoveInput.IsNearlyZero())
-		Result += FString::Printf(TEXT("Move(%.1f, %.1f) "), DebugMoveInput.X, DebugMoveInput.Y);
+	// HUD 与 Dodge fallback 共用同一份缓存，避免维护两份移动输入状态。
+	if (!CachedMoveInput.IsNearlyZero())
+		Result += FString::Printf(TEXT("Move(%.1f, %.1f) "), CachedMoveInput.X, CachedMoveInput.Y);
 
 	return Result;
 }

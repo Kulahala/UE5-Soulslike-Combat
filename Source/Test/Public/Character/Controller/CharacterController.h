@@ -20,6 +20,7 @@ class TEST_API ACharacterController : public APlayerController
 	GENERATED_BODY()
 
 public:
+	FORCEINLINE FVector2D GetCachedMoveInput() const { return CachedMoveInput; }
 
 protected:
 	virtual void BeginPlay() override;
@@ -27,7 +28,7 @@ protected:
 
 	/* ================= 输入回调函数 ================= */
 	void Input_Move(const FInputActionValue& Value);
-	void Input_MoveEnd();  // [调试] 松开清零方向
+	void Input_MoveEnd();  // 松开时清零移动输入缓存
 	void Input_Look(const FInputActionValue& Value);
 	void Input_Jump();
 	void Input_StopJumping();
@@ -90,8 +91,10 @@ protected:
 	UInputAction* UsePotionAction;
 
 private:
+	// 最近一次移动输入轴；攻击等状态会拦截实际移动，但翻滚方向仍需要这份输入。
+	FVector2D CachedMoveInput = FVector2D::ZeroVector;
+
 	// 输入调试状态
-	FVector2D DebugMoveInput = FVector2D::ZeroVector;
 	bool bDebugSprintHeld = false;
 	bool bDebugWalkHeld = false;
 	bool bDebugBlockHeld = false;

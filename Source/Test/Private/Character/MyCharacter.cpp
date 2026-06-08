@@ -475,6 +475,7 @@ void AMyCharacter::ResetCombo()
 	ComboCounter = 0;
 	bComboWindowOpen = false;
 	bComboInputReceived = false;
+	bActionCancelWindowOpen = false;
 	SetAttackDamageMultiplier(1.0f);
 	CurrentPoiseDamage = EquippedWeapon ? EquippedWeapon->GetBasePoiseDamage() : 1.f;
 
@@ -523,6 +524,32 @@ bool AMyCharacter::TryConsumeComboInputAtBranchPoint()
 
 	ComboCounter = PreviousComboIndex;
 	return false;
+}
+
+void AMyCharacter::OpenActionCancelWindow()
+{
+	if (bActionCancelWindowOpen)
+	{
+		return;
+	}
+
+	bActionCancelWindowOpen = true;
+
+	// 攻击开始会先退出举盾，正常情况下 bIsBlocking 与 EAS_Attacking 不并存。
+	if (bBlockInputHeld)
+	{
+		TryStartAction(EPlayerActionType::Block);
+	}
+}
+
+void AMyCharacter::CloseActionCancelWindow()
+{
+	if (!bActionCancelWindowOpen)
+	{
+		return;
+	}
+
+	bActionCancelWindowOpen = false;
 }
 
 void AMyCharacter::Jump()
@@ -588,6 +615,7 @@ void AMyCharacter::GetHit_Implementation(const FVector& ImpactPoint, AActor* Hit
 	if (Attributes->IsAlive() && PendingHitContext.bApplyStun)
 	{
 		ResetCombo();
+		CloseActionCancelWindow();
 		InterruptBlock(false);
 		if (bIsParrying) InterruptParry();
 		ActionState = EActionState::EAS_Stunning;
@@ -913,17 +941,26 @@ FVector AMyCharacter::ComputeDodgeDirection() const
 	FVector InputDir = GetLastMovementInputVector().GetSafeNormal2D();
 	if (!InputDir.IsNearlyZero()) return InputDir;
 
-	if (IsLockingOn())
+	if (const ACharacterController* PC = Cast<ACharacterController>(GetController()))
 	{
-		return -GetControlRotation().Vector().GetSafeNormal2D();
+		const FVector2D Cached = PC->GetCachedMoveInput();
+		if (!Cached.IsNearlyZero())
+		{
+			const FRotator YawRot(0.f, GetControlRotation().Yaw, 0.f);
+			const FVector Forward = FRotationMatrix(YawRot).GetUnitAxis(EAxis::X);
+			const FVector Right = FRotationMatrix(YawRot).GetUnitAxis(EAxis::Y);
+			const FVector World = (Forward * Cached.Y + Right * Cached.X).GetSafeNormal2D();
+			if (!World.IsNearlyZero()) return World;
+		}
 	}
-	return -GetActorForwardVector().GetSafeNormal2D();
+
+	return FVector::ZeroVector;
 }
 
 FName AMyCharacter::SelectDodgeSection(const FVector& WorldDirection) const
 {
 	// 无移动输入：直接后跳（不转身）
-	if (GetLastMovementInputVector().IsNearlyZero())
+	if (WorldDirection.IsNearlyZero())
 	{
 		return FName("Dodge_B");
 	}
@@ -1039,31 +1076,60 @@ void AMyCharacter::UsePotion()
 
 bool AMyCharacter::TryStartAction(EPlayerActionType Action)
 {
+	const bool bShouldCancel = CanCancelCurrentActionWith(Action);
+	if (ActionState == EActionState::EAS_Attacking && !bShouldCancel)
+	{
+		return false;
+	}
+
+	if (bShouldCancel)
+	{
+		CleanupInterruptedAttack();
+	}
+
+	bool bStarted = false;
+
 	switch (Action)
 	{
 	case EPlayerActionType::Dodge:
-		return CanDodge() && StartDodgeAction();
+		bStarted = CanDodge() && StartDodgeAction();
+		break;
 	case EPlayerActionType::Block:
 		if (bIsBlocking)
 		{
-			return true;
+			bStarted = true;
+			break;
 		}
 		if (!bBlockInputHeld)
 		{
-			return false;
+			bStarted = false;
+			break;
 		}
-		return CanStartBlock() && StartBlockAction();
+		bStarted = CanStartBlock() && StartBlockAction();
+		break;
 	case EPlayerActionType::Parry:
-		return CanStartParry() && StartParryAction();
+		bStarted = CanStartParry() && StartParryAction();
+		break;
 	case EPlayerActionType::Potion:
-		return CanUsePotion() && StartPotionAction();
+		bStarted = CanUsePotion() && StartPotionAction();
+		break;
 	case EPlayerActionType::Attack:
 	case EPlayerActionType::HitReact:
 	case EPlayerActionType::Death:
 	case EPlayerActionType::None:
 	default:
-		return false;
+		bStarted = false;
+		break;
 	}
+
+	if (bShouldCancel && !bStarted)
+	{
+		UE_LOG(LogTemp, Warning,
+		       TEXT("%s: Attack cancelled but %s failed to start. Check that the action montage asset is bound on PlayerActionConfigDataAsset."),
+		       *GetName(), *UEnum::GetValueAsString(Action));
+	}
+
+	return bStarted;
 }
 
 bool AMyCharacter::StartDodgeAction()
@@ -1161,6 +1227,51 @@ bool AMyCharacter::IsAtLeastSamePriority(EPlayerActionType NewAction, EPlayerAct
 {
 	const UPlayerActionConfigDataAsset* ActionConfig = GetActionConfig();
 	return ActionConfig && ActionConfig->IsAtLeastSamePriority(NewAction, CurrentAction);
+}
+
+bool AMyCharacter::CanCancelCurrentActionWith(EPlayerActionType NewAction) const
+{
+	if (!bActionCancelWindowOpen)
+	{
+		return false;
+	}
+
+	if (ActionState != EActionState::EAS_Attacking)
+	{
+		return false;
+	}
+
+	switch (NewAction)
+	{
+	case EPlayerActionType::Dodge:
+	case EPlayerActionType::Block:
+	case EPlayerActionType::Parry:
+	case EPlayerActionType::Potion:
+		break;
+	case EPlayerActionType::Attack:
+	case EPlayerActionType::HitReact:
+	case EPlayerActionType::Death:
+	case EPlayerActionType::None:
+	default:
+		return false;
+	}
+
+	if (!IsStrictlyHigherPriority(NewAction, EPlayerActionType::Attack))
+	{
+		return false;
+	}
+
+	if (NewAction == EPlayerActionType::Block && !bBlockInputHeld)
+	{
+		return false;
+	}
+
+	if (NewAction != EPlayerActionType::Potion && ShouldRecoverToExhausted_Attack())
+	{
+		return false;
+	}
+
+	return true;
 }
 
 bool AMyCharacter::StartPotionAction()
