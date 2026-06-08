@@ -61,6 +61,16 @@ No CI pipeline, no lint/test commands configured.
 - After a task is complete, the review agent checks whether documentation needs to be supplemented.
 - Do not sync every markdown file by default; update only the document layer affected by the task to avoid duplication, conflicts, and doc drift.
 
+## Commit Message Policy
+
+- Feature commits use `[Feature] 中文标题（English Title）`; keep the English title concise and descriptive.
+- Non-trivial gameplay changes should include a factual multi-section body, following prior detailed commits such as `60e33a5ee14320561f1e3aad7016f5c671d98316`:
+  - `## 核心改动`
+  - domain sections as needed, for example `## 输入与战斗流程`, `## 动画与资产`, `## 蒙太奇约束`
+  - `## 文档更新`
+  - `## 验证`
+- The body must describe actual changed files, asset/editor work, documentation updates, and verified results. Do not claim compile, PIE, or asset validation unless the user or tool output confirmed it.
+
 ## Working Rules
 
 ### Communication

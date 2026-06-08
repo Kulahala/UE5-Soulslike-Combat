@@ -5,6 +5,8 @@
 #include "CoreMinimal.h"
 #include "BaseCharacter.h"
 #include "Character/CharacterTypes.h"
+#include "Combat/PlayerActionConfigDataAsset.h"
+#include "Combat/PlayerCharacterProfileDataAsset.h"
 #include "Interfaces/BlockableInterface.h"
 #include "MyCharacter.generated.h"
 
@@ -127,14 +129,6 @@ protected:
 	virtual void OnAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted) override;
 	void OnPotionMontageEnded(UAnimMontage* Montage, bool bInterrupted);
 
-	// 防御蒙太奇（Section: BlockRaise, BlockIdle）
-	UPROPERTY(EditDefaultsOnly, Category = "Montages", meta = (ToolTip = "防御蒙太奇，含 Section：BlockRaise, BlockIdle。"))
-	UAnimMontage* BlockMontage;
-
-	// 翻滚蒙太奇（需含根运动）
-	UPROPERTY(EditDefaultsOnly, Category = "Montages", meta = (ToolTip = "翻滚蒙太奇，需含根运动。"))
-	UAnimMontage* DodgeMontage;
-
 	/* 动作状态 */
 	UPROPERTY(BlueprintReadOnly, Category = "State")
 	EActionState ActionState = EActionState::EAS_UnOccupied;
@@ -243,8 +237,6 @@ private:
 	bool bParryActive = false;
 	bool bParryOnCooldown = false;
 	FTimerHandle ParryCooldownTimer;
-	UPROPERTY(EditDefaultsOnly, Category = "Montages", meta = (ToolTip = "弹反蒙太奇。"))
-	UAnimMontage* ParryMontage;
 
 	/* 翻滚 */
 	UPROPERTY(EditDefaultsOnly, Category = "Combat|Dodge", meta = (ToolTip = "翻滚体力消耗。"))
@@ -256,9 +248,6 @@ private:
 	FTimerHandle PotionCooldownTimer;
 	UPROPERTY(EditDefaultsOnly, Category = "Combat|Potion")
 	float PotionCooldown = 2.f;
-
-	UPROPERTY(EditDefaultsOnly, Category = "Montages")
-	UAnimMontage* PotionMontage;
 
 	void StartPotionCooldown();
 	void ResetPotionCooldown();
@@ -275,9 +264,9 @@ private:
 	// 受击染红缩放系数（TryBlockHit 设置，TakeDamage 推送给 HUD 后归位）
 	float LastDamageFlashScale = 1.f;
 
-	/* 攻击配置 */
-	UPROPERTY(EditDefaultsOnly, Category = "Combat", meta = (AllowPrivateAccess = "true", ToolTip = "攻击配置资产，管理所有攻击类型"))
-	TObjectPtr<UAttackConfigDataAsset> AttackConfig;
+	/* 玩家配置入口 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Profile", meta = (AllowPrivateAccess = "true", ToolTip = "玩家角色配置入口，引用攻击配置和玩家动作配置。"))
+	TObjectPtr<UPlayerCharacterProfileDataAsset> PlayerProfile;
 
 	/* 听觉感知 */
 	FTimerHandle MovementNoiseTimerHandle;
@@ -356,4 +345,39 @@ public:
 	FORCEINLINE EActionState GetActionState() const { return ActionState; }
 	FORCEINLINE bool IsBlocking() const { return bIsBlocking; }
 	FORCEINLINE AShield* GetEquippedShield() const { return EquippedShield; }
+
+private:
+	FORCEINLINE UAttackConfigDataAsset* GetAttackConfig() const
+	{
+		return PlayerProfile ? PlayerProfile->GetAttackConfig() : nullptr;
+	}
+
+	FORCEINLINE UPlayerActionConfigDataAsset* GetActionConfig() const
+	{
+		return PlayerProfile ? PlayerProfile->GetActionConfig() : nullptr;
+	}
+
+	FORCEINLINE UAnimMontage* GetDodgeMontage() const
+	{
+		const UPlayerActionConfigDataAsset* ActionConfig = GetActionConfig();
+		return ActionConfig ? ActionConfig->DodgeMontage.Get() : nullptr;
+	}
+
+	FORCEINLINE UAnimMontage* GetBlockMontage() const
+	{
+		const UPlayerActionConfigDataAsset* ActionConfig = GetActionConfig();
+		return ActionConfig ? ActionConfig->BlockMontage.Get() : nullptr;
+	}
+
+	FORCEINLINE UAnimMontage* GetParryMontage() const
+	{
+		const UPlayerActionConfigDataAsset* ActionConfig = GetActionConfig();
+		return ActionConfig ? ActionConfig->ParryMontage.Get() : nullptr;
+	}
+
+	FORCEINLINE UAnimMontage* GetPotionMontage() const
+	{
+		const UPlayerActionConfigDataAsset* ActionConfig = GetActionConfig();
+		return ActionConfig ? ActionConfig->PotionMontage.Get() : nullptr;
+	}
 };

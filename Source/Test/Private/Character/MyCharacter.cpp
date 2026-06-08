@@ -49,8 +49,26 @@ void AMyCharacter::BeginPlay()
 	Super::BeginPlay();
 	Tags.Add(FName("Player"));
 
-	// 校验 AttackConfig
-	ensureMsgf(AttackConfig, TEXT("AttackConfig is not set on %s — all attacks will fail"), *GetName());
+	// 校验玩家配置入口
+	ensureMsgf(PlayerProfile, TEXT("PlayerProfile is not set on %s - player profile driven actions may fail"), *GetName());
+	if (!PlayerProfile)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s: PlayerProfile is not set. Assign it before using player action montages."), *GetName());
+	}
+	else
+	{
+		if (!PlayerProfile->GetAttackConfig())
+		{
+			UE_LOG(LogTemp, Warning, TEXT("%s: PlayerProfile '%s' has no AttackConfig."),
+			       *GetName(), *PlayerProfile->GetName());
+		}
+
+		if (!PlayerProfile->GetActionConfig())
+		{
+			UE_LOG(LogTemp, Warning, TEXT("%s: PlayerProfile '%s' has no ActionConfig."),
+			       *GetName(), *PlayerProfile->GetName());
+		}
+	}
 
 	// 初始化缓存为当前实际值（Blueprint 可能已覆盖）
 	CachedSocketOffset = SpringArm->SocketOffset;
@@ -129,6 +147,7 @@ bool AMyCharacter::ShouldUseSprintAttack() const
 
 void AMyCharacter::PerformSprintAttack()
 {
+	UAttackConfigDataAsset* AttackConfig = GetAttackConfig();
 	if (!AttackConfig)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("AttackConfig not configured"));
@@ -248,6 +267,7 @@ void AMyCharacter::EnterChargeMode()
 		return;
 	}
 
+	UAttackConfigDataAsset* AttackConfig = GetAttackConfig();
 	if (!AttackConfig || !AttackConfig->ChargedAttack.Montage)
 	{
 		CancelChargeInputState();
@@ -278,6 +298,7 @@ void AMyCharacter::EnterChargeMode()
 void AMyCharacter::PerformChargedRelease()
 {
 	bIsChargingAttack = false;
+	UAttackConfigDataAsset* AttackConfig = GetAttackConfig();
 	if (!AttackConfig || !AttackConfig->ChargedAttack.Montage)
 	{
 		CancelChargeInputState();
@@ -339,6 +360,7 @@ void AMyCharacter::Attack()
 
 bool AMyCharacter::StartComboSegment(int32 SegmentIndex, EComboPlaybackMode PlaybackMode)
 {
+	UAttackConfigDataAsset* AttackConfig = GetAttackConfig();
 	if (!AttackConfig || !AttackConfig->LightAttackCombo || !AttackConfig->LightAttackCombo->ComboMontage)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("AttackConfig or LightAttackCombo not configured"));
@@ -416,6 +438,7 @@ bool AMyCharacter::StartComboSegment(int32 SegmentIndex, EComboPlaybackMode Play
 
 void AMyCharacter::PlayAttackMontage(const FName& SectionName)
 {
+	UAttackConfigDataAsset* AttackConfig = GetAttackConfig();
 	UAnimMontage* MontageToPlay = (AttackConfig && AttackConfig->LightAttackCombo)
 		? AttackConfig->LightAttackCombo->ComboMontage.Get()
 		: nullptr;
@@ -474,6 +497,7 @@ bool AMyCharacter::TryConsumeComboInputAtBranchPoint()
 		return false;
 	}
 
+	UAttackConfigDataAsset* AttackConfig = GetAttackConfig();
 	if (!AttackConfig || !AttackConfig->LightAttackCombo)
 	{
 		return false;
@@ -815,6 +839,7 @@ void AMyCharacter::Input_Parry()
 	if (!CanStartParry()) return;
 
 	// 先确认蒙太奇可播放，再扣体力和进入状态（防止卡在 EAS_Parrying）
+	UAnimMontage* ParryMontage = GetParryMontage();
 	if (!ParryMontage || !GetMesh() || !GetMesh()->GetAnimInstance()) return;
 
 	Attributes->UseStamina(EquippedShield->GetParryStaminaCost());
@@ -902,6 +927,7 @@ bool AMyCharacter::CanDodge() const
 void AMyCharacter::Dodge()
 {
 	if (!CanDodge()) return;
+	UAnimMontage* DodgeMontage = GetDodgeMontage();
 	if (!DodgeMontage || !GetMesh() || !GetMesh()->GetAnimInstance()) return;
 
 	ResetCombo();
@@ -1061,10 +1087,18 @@ void AMyCharacter::UsePotion()
 {
 	if (!CanUsePotion()) return;
 
+	const UPlayerActionConfigDataAsset* ActionConfig = GetActionConfig();
+	if (!ActionConfig)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s: UsePotion failed, PlayerProfile->ActionConfig is not configured."), *GetName());
+		return;
+	}
+
 	if (Attributes->UsePotion())
 	{
 		if (bIsSprinting) StopSprinting();
 
+		UAnimMontage* PotionMontage = GetPotionMontage();
 		if (PotionMontage)
 		{
 			ActionState = EActionState::EAS_UsingPotion;
@@ -1082,6 +1116,7 @@ void AMyCharacter::UsePotion()
 void AMyCharacter::PlayPotionMontage()
 {
 	UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
+	UAnimMontage* PotionMontage = GetPotionMontage();
 	if (AnimInstance && PotionMontage)
 	{
 		AnimInstance->Montage_Play(PotionMontage);
@@ -1104,7 +1139,15 @@ void AMyCharacter::HealFromPotion(float Percent)
 {
 	// 状态守卫：防止蒙太奇被打断后，残留的AnimNotify仍然触发恢复
 	// 例外：没有蒙太奇时（fallback路径），允许在任何状态下恢复
-	if (PotionMontage != nullptr && ActionState != EActionState::EAS_UsingPotion)
+	const UPlayerActionConfigDataAsset* ActionConfig = GetActionConfig();
+	if (!ActionConfig)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s: HealFromPotion skipped, PlayerProfile->ActionConfig is not configured."), *GetName());
+		return;
+	}
+
+	const bool bUsesPotionMontage = ActionConfig && ActionConfig->PotionMontage;
+	if (bUsesPotionMontage && ActionState != EActionState::EAS_UsingPotion)
 	{
 		return;
 	}
@@ -1119,6 +1162,7 @@ void AMyCharacter::InterruptPotion()
 {
 	const bool bWasUsingPotion = ActionState == EActionState::EAS_UsingPotion;
 	bool bWasPotionMontagePlaying = false;
+	UAnimMontage* PotionMontage = GetPotionMontage();
 
 	if (UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
 		AnimInstance && PotionMontage && AnimInstance->Montage_IsPlaying(PotionMontage))
@@ -1273,6 +1317,14 @@ float AMyCharacter::CalcBaseSpeed(float DotProduct) const
 
 void AMyCharacter::PlayBlockMontage(const FName& SectionName)
 {
+	UAnimMontage* BlockMontage = GetBlockMontage();
+	if (!BlockMontage)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s: PlayBlockMontage(%s) skipped, BlockMontage is not configured."),
+		       *GetName(), *SectionName.ToString());
+		return;
+	}
+
 	PlayMontageSection(BlockMontage, SectionName);
 }
 
@@ -1743,6 +1795,7 @@ void AMyCharacter::DrawDebugInfo() const
 	}
 
 	// [调试] 防御蒙太奇 — 仅播放时显示
+	UAnimMontage* BlockMontage = GetBlockMontage();
 	if (AnimInstance && BlockMontage && AnimInstance->Montage_IsPlaying(BlockMontage))
 	{
 		const FName BlockSection = AnimInstance->Montage_GetCurrentSection(BlockMontage);
@@ -1753,6 +1806,7 @@ void AMyCharacter::DrawDebugInfo() const
 	}
 
 	// [调试] 连招信息 — 仅配置了连招且在连招过程中或连招窗口打开时显示
+	UAttackConfigDataAsset* AttackConfig = GetAttackConfig();
 	if (AttackConfig && AttackConfig->LightAttackCombo)
 	{
 		FString ComboInfo = FString::Printf(
@@ -1769,6 +1823,7 @@ void AMyCharacter::DrawDebugInfo() const
 
 void AMyCharacter::StopBlockMontage(float BlendOutTime)
 {
+	UAnimMontage* BlockMontage = GetBlockMontage();
 	if (UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
 		AnimInstance && BlockMontage && AnimInstance->Montage_IsPlaying(BlockMontage))
 	{

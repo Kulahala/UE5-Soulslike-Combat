@@ -71,6 +71,15 @@ For general agent guidelines, see **[AGENTS.md](AGENTS.md)**.
 - Temporary plans, cross-agent discussion, and review feedback → `plan.md`
 - Do not update every markdown file by default. Update only the document layer affected by the task, then let the review agent check for missing documentation.
 
+### Commit Message Policy
+- Feature commit title format: `[Feature] 中文标题（English Title）`.
+- For non-trivial gameplay changes, use a detailed body matching prior commit `60e33a5ee14320561f1e3aad7016f5c671d98316`:
+  - `## 核心改动`
+  - domain sections as needed, such as `## 输入与战斗流程`, `## 动画与资产`, `## 蒙太奇约束`
+  - `## 文档更新`
+  - `## 验证`
+- Keep the body grounded in real changes and confirmed validation. Do not invent compile, PIE, push, or asset-verification results.
+
 ### Implementation Notes
 - **Dodge Roll System**: `SelectDodgeSection()` 必须在 `FaceDirection2D()` 之前调用，否则 `UnrotateVector()` 参考系错误
 - **Combo System**: 续接判断必须在状态恢复之前，临时设 `ActionState = EAS_UnOccupied` 让 `CanAttack()` 通过
