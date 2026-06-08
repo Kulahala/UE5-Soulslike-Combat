@@ -29,6 +29,9 @@ struct FEnemyAttackEntry
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Block", meta = (ClampMin = "0.0", ToolTip = "玩家成功格挡该招式时的体力消耗倍率。最终耗体 = 盾牌基础格挡耗体 × 此倍率。"))
 	float BlockStaminaDamageMultiplier = 1.f;
 
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Parry", meta = (ToolTip = "勾选后，该招式命中玩家弹反窗口时不会被弹反；普通格挡不受影响。"))
+	bool bCannotBeParried = false;
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Cooldown", meta = (ClampMin = "0.0", ToolTip = "攻击结束或被打断后的最短冷却（秒），不包含蒙太奇播放时间。"))
 	float MinCooldown = 3.f;
 

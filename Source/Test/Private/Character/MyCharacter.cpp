@@ -653,6 +653,12 @@ FBlockResult AMyCharacter::TryBlockHit(const FVector& ImpactPoint, float Incomin
 				if (Dot < CosHalf) return Result; // 角度不匹配，弹反失败
 			}
 
+			const ABaseCharacter* AttackerCharacter = Cast<ABaseCharacter>(Attacker);
+			if (AttackerCharacter && !AttackerCharacter->CanCurrentAttackBeParried())
+			{
+				return Result; // 该招式不可弹反，按失败弹反处理
+			}
+
 			// 弹反成功！完全免伤 + 攻击方韧性清空
 			Result.bBlocked = true;
 			Result.bParried = true;

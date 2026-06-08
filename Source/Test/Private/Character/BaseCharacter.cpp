@@ -21,6 +21,7 @@ ABaseCharacter::ABaseCharacter()
 
 	CurrentAttackDamageMultiplier = 1.f;
 	CurrentBlockStaminaDamageMultiplier = 1.f;
+	bCurrentAttackCannotBeParried = false;
 }
 
 void ABaseCharacter::BeginPlay()

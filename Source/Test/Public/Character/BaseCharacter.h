@@ -46,6 +46,8 @@ public:
 	FORCEINLINE void SetAttackDamageMultiplier(float Multiplier) { CurrentAttackDamageMultiplier = Multiplier; }
 	FORCEINLINE float GetBlockStaminaDamageMultiplier() const { return CurrentBlockStaminaDamageMultiplier; }
 	FORCEINLINE void SetBlockStaminaDamageMultiplier(float Multiplier) { CurrentBlockStaminaDamageMultiplier = Multiplier; }
+	FORCEINLINE bool CanCurrentAttackBeParried() const { return !bCurrentAttackCannotBeParried; }
+	FORCEINLINE void SetCurrentAttackCannotBeParried(bool bCannotBeParried) { bCurrentAttackCannotBeParried = bCannotBeParried; }
 	FORCEINLINE float GetCurrentPoiseDamage() const { return CurrentPoiseDamage; }
 
 	/* 命中上下文 + 后退 */
@@ -116,6 +118,9 @@ protected:
 
 	// 当前攻击对格挡体力消耗的倍率（敌人招式使用）
 	float CurrentBlockStaminaDamageMultiplier = 1.0f;
+
+	// 当前攻击是否禁止玩家弹反（敌人招式使用）
+	bool bCurrentAttackCannotBeParried = false;
 
 	// 当前攻击韧性伤害（连招系统使用）
 	float CurrentPoiseDamage = 1.f;

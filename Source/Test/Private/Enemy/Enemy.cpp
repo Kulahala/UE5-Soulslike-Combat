@@ -389,6 +389,7 @@ bool AEnemy::PerformConfiguredAttackByIndex(int32 AttackIndex)
 	bCurrentAttackCooldownStarted = false;
 	SetAttackDamageMultiplier(Entry.DamageMultiplier);
 	SetBlockStaminaDamageMultiplier(Entry.BlockStaminaDamageMultiplier);
+	SetCurrentAttackCannotBeParried(Entry.bCannotBeParried);
 	SetEnemyState(EEnemyState::EES_Attacking);
 	UpdateAttackMotionWarpTarget(Entry);
 
@@ -462,6 +463,7 @@ void AEnemy::ClearCurrentAttackConfig(bool bStartCooldown)
 	bCurrentAttackCooldownStarted = false;
 	SetAttackDamageMultiplier(1.f);
 	SetBlockStaminaDamageMultiplier(1.f);
+	SetCurrentAttackCannotBeParried(false);
 }
 
 void AEnemy::UpdateAttackMotionWarpTarget(const FEnemyAttackEntry& Entry)
