@@ -375,9 +375,15 @@ void AMyCharacter::Attack()
 
 void AMyCharacter::PlayAttackMontage(const FName& SectionName)
 {
-	UAnimMontage* MontageToPlay = (AttackConfig && AttackConfig->LightAttackCombo && AttackConfig->LightAttackCombo->ComboMontage)
+	UAnimMontage* MontageToPlay = (AttackConfig && AttackConfig->LightAttackCombo)
 		? AttackConfig->LightAttackCombo->ComboMontage.Get()
-		: AttackMontage;
+		: nullptr;
+	if (!MontageToPlay)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s: PlayAttackMontage - no ComboMontage available"), *GetName());
+		return;
+	}
+
 	PlayMontageSection(MontageToPlay, SectionName);
 
 	if (UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance(); AnimInstance && MontageToPlay)

@@ -65,8 +65,8 @@ protected:
 	virtual void OnHitReactMontageEnded(UAnimMontage* Montage, bool bInterrupted);
 
 	/* 蒙太奇资源 */
-	// 攻击蒙太奇（含 Section：Attack1, Attack2 等）
-	UPROPERTY(EditDefaultsOnly, Category = "Montages", meta = (ToolTip = "攻击蒙太奇，含 Section：Attack1, Attack2 等。"))
+	// [Deprecated] Attack animations are configured by AttackConfig / EnemyAttackConfig DataAssets.
+	UPROPERTY()
 	UAnimMontage* AttackMontage;
 
 	// 受击反应蒙太奇（含 Section：FromFront, FromBack, FromLeft, FromRight）
