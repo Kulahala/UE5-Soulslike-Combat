@@ -69,7 +69,7 @@ public:
 	int32 ChooseAttackIndex(float DistanceToTarget) const;
 	int32 ChooseAttackIntentIndex(int32 ExcludedAttackIndex = INDEX_NONE) const;
 
-	virtual void PostInitProperties() override;
+	virtual void PostLoad() override;
 
 #if WITH_EDITOR
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;

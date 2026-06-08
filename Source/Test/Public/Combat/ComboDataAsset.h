@@ -4,6 +4,9 @@
 #include "Engine/DataAsset.h"
 #include "ComboDataAsset.generated.h"
 
+class UAnimMontage;
+struct FPropertyChangedEvent;
+
 USTRUCT(BlueprintType)
 struct FComboSegment
 {
@@ -52,4 +55,13 @@ public:
 	{
 		return ComboChain.IsValidIndex(Index) ? &ComboChain[Index] : nullptr;
 	}
+
+	virtual void PostLoad() override;
+
+#if WITH_EDITOR
+	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
+#endif
+
+private:
+	void LogConfigWarnings() const;
 };

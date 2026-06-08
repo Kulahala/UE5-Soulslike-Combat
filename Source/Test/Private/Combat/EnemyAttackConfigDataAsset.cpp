@@ -87,9 +87,9 @@ int32 UEnemyAttackConfigDataAsset::ChooseAttackIntentIndex(int32 ExcludedAttackI
 	return CandidateIndices.Last();
 }
 
-void UEnemyAttackConfigDataAsset::PostInitProperties()
+void UEnemyAttackConfigDataAsset::PostLoad()
 {
-	Super::PostInitProperties();
+	Super::PostLoad();
 
 	NormalizeEntries();
 	LogConfigWarnings();
@@ -124,18 +124,29 @@ void UEnemyAttackConfigDataAsset::NormalizeEntries()
 void UEnemyAttackConfigDataAsset::LogConfigWarnings() const
 {
 #if WITH_EDITOR
-	for (const FEnemyAttackEntry& Entry : Attacks)
+	if (HasAnyFlags(RF_ClassDefaultObject))
 	{
+		return;
+	}
+
+	if (Attacks.IsEmpty())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s: Attacks is empty; this enemy will have no DataAsset attack candidates."), *GetName());
+	}
+
+	for (int32 Index = 0; Index < Attacks.Num(); ++Index)
+	{
+		const FEnemyAttackEntry& Entry = Attacks[Index];
 		if (!Entry.Montage)
 		{
-			UE_LOG(LogTemp, Warning, TEXT("%s: Enemy attack entry '%s' has no Montage."),
-			       *GetName(), *Entry.AttackName.ToString());
+			UE_LOG(LogTemp, Warning, TEXT("%s: Attacks[%d] '%s' has no Montage."),
+			       *GetName(), Index, *Entry.AttackName.ToString());
 		}
 
 		if (Entry.Weight <= 0.f)
 		{
-			UE_LOG(LogTemp, Warning, TEXT("%s: Enemy attack entry '%s' has zero weight and will not be selected."),
-			       *GetName(), *Entry.AttackName.ToString());
+			UE_LOG(LogTemp, Warning, TEXT("%s: Attacks[%d] '%s' has zero weight and will not be selected."),
+			       *GetName(), Index, *Entry.AttackName.ToString());
 		}
 
 		if (Entry.bUseMotionWarping)
@@ -143,22 +154,22 @@ void UEnemyAttackConfigDataAsset::LogConfigWarnings() const
 			if (Entry.WarpTargetName == NAME_None)
 			{
 				UE_LOG(LogTemp, Warning,
-				       TEXT("%s: Enemy attack entry '%s' enables Motion Warping but has no WarpTargetName."),
-				       *GetName(), *Entry.AttackName.ToString());
+				       TEXT("%s: Attacks[%d] '%s' enables Motion Warping but has no WarpTargetName."),
+				       *GetName(), Index, *Entry.AttackName.ToString());
 			}
 
 			if (Entry.MaxWarpDistance <= 0.f)
 			{
 				UE_LOG(LogTemp, Warning,
-				       TEXT("%s: Enemy attack entry '%s' enables Motion Warping but MaxWarpDistance is <= 0."),
-				       *GetName(), *Entry.AttackName.ToString());
+				       TEXT("%s: Attacks[%d] '%s' enables Motion Warping but MaxWarpDistance is <= 0."),
+				       *GetName(), Index, *Entry.AttackName.ToString());
 			}
 
 			if (Entry.WarpStopDistance >= Entry.MaxDistance)
 			{
 				UE_LOG(LogTemp, Warning,
-				       TEXT("%s: Enemy attack entry '%s' has WarpStopDistance %.1f >= MaxDistance %.1f; warp landing may be behind or too close to the enemy."),
-				       *GetName(), *Entry.AttackName.ToString(), Entry.WarpStopDistance, Entry.MaxDistance);
+				       TEXT("%s: Attacks[%d] '%s' has WarpStopDistance %.1f >= MaxDistance %.1f; warp landing may be behind or too close to the enemy."),
+				       *GetName(), Index, *Entry.AttackName.ToString(), Entry.WarpStopDistance, Entry.MaxDistance);
 			}
 		}
 	}

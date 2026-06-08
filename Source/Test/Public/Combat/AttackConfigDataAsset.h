@@ -8,6 +8,7 @@
 
 class UComboDataAsset;
 class UAnimMontage;
+struct FPropertyChangedEvent;
 
 /* 特殊攻击类型枚举（编译期类型安全） */
 UENUM(BlueprintType)
@@ -101,5 +102,12 @@ public:
 	const FSpecialAttackConfig* FindSpecialAttack(ESpecialAttackType AttackType) const;
 
 	/* 验证配置完整性 */
-	virtual void PostInitProperties() override;
+	virtual void PostLoad() override;
+
+#if WITH_EDITOR
+	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
+#endif
+
+private:
+	void LogConfigWarnings() const;
 };
