@@ -21,6 +21,13 @@ enum class EActionState : uint8
 };
 
 UENUM()
+enum class EComboPlaybackMode : uint8
+{
+	NewPlayback,
+	Continuation
+};
+
+UENUM()
 enum class EEnemyState : uint8 {
 	EES_UnOccupied UMETA(DisplayName = "UnOccupied"), // 初始态
 	EES_Patrolling UMETA(DisplayName = "Patrolling"), // 巡逻中

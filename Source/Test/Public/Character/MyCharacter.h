@@ -55,6 +55,7 @@ public:
 	void OpenComboWindow();
 	void CloseComboWindow();
 	void ResetCombo();
+	bool TryConsumeComboInputAtBranchPoint();
 	FORCEINLINE bool IsComboWindowOpen() const { return bComboWindowOpen; }
 	FORCEINLINE void SetComboInputReceived(bool bReceived) { bComboInputReceived = bReceived; }
 	UFUNCTION(BlueprintCallable, Category = "Combat")
@@ -159,6 +160,7 @@ private:
 	void EnsureExhaustionRecoveryTimer();
 	EActionState RecoverActionStateAfterMontage(EActionState ExpectedState, bool bResumeStaminaRegen);
 	void CleanupInterruptedAttack();
+	bool StartComboSegment(int32 SegmentIndex, EComboPlaybackMode PlaybackMode);
 
 	/* 提取方法 */
 	void InitializePlayerHUD();

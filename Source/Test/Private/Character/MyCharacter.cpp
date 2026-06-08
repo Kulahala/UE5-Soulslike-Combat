@@ -331,46 +331,87 @@ void AMyCharacter::Attack()
 
 	if (!CanAttack()) return;
 
+	if (!StartComboSegment(ComboCounter, EComboPlaybackMode::NewPlayback))
+	{
+		ResetCombo();
+	}
+}
+
+bool AMyCharacter::StartComboSegment(int32 SegmentIndex, EComboPlaybackMode PlaybackMode)
+{
 	if (!AttackConfig || !AttackConfig->LightAttackCombo || !AttackConfig->LightAttackCombo->ComboMontage)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("AttackConfig or LightAttackCombo not configured"));
-		return;
+		return false;
 	}
 
-	// 获取当前段配置
-	const FComboSegment* Segment = AttackConfig->LightAttackCombo->GetSegment(ComboCounter);
+	const FComboSegment* Segment = AttackConfig->LightAttackCombo->GetSegment(SegmentIndex);
 	if (!Segment)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("Invalid combo segment: %d"), ComboCounter);
-		ResetCombo();
-		return;
+		UE_LOG(LogTemp, Warning, TEXT("Invalid combo segment: %d"), SegmentIndex);
+		return false;
 	}
 
-	// 体力检查（支持透支）
-	Attributes->UseStamina(Segment->StaminaCost);
+	UAnimMontage* MontageToPlay = (AttackConfig && AttackConfig->LightAttackCombo)
+		? AttackConfig->LightAttackCombo->ComboMontage.Get()
+		: nullptr;
+	if (!MontageToPlay)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s: StartComboSegment - no ComboMontage available"), *GetName());
+		return false;
+	}
 
-	// 设置伤害倍率和韧性伤害
+	UAnimInstance* ContinuationAnimInstance = nullptr;
+	if (PlaybackMode == EComboPlaybackMode::Continuation)
+	{
+		ContinuationAnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
+		if (!ContinuationAnimInstance)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("%s: StartComboSegment - no AnimInstance available"), *GetName());
+			return false;
+		}
+
+		if (!ContinuationAnimInstance->Montage_IsPlaying(MontageToPlay))
+		{
+			UE_LOG(LogTemp, Warning, TEXT("%s: StartComboSegment - continuation montage is not playing"), *GetName());
+			return false;
+		}
+	}
+
+	if (Attributes)
+	{
+		Attributes->UseStamina(Segment->StaminaCost);
+		Attributes->PauseStaminaRegen();
+	}
+
 	SetAttackDamageMultiplier(Segment->DamageMultiplier);
 	if (EquippedWeapon)
 	{
 		CurrentPoiseDamage = EquippedWeapon->GetBasePoiseDamage() * Segment->PoiseDamageMultiplier;
 	}
 
-	// 暂停体力恢复 + 设置状态（保持原有顺序）
-	Attributes->PauseStaminaRegen();
 	ActionState = EActionState::EAS_Attacking;
 
-	// 播放对应段的蒙太奇
-	PlayAttackMontage(Segment->SectionName);
+	if (PlaybackMode == EComboPlaybackMode::NewPlayback)
+	{
+		PlayAttackMontage(Segment->SectionName);
+	}
+	else
+	{
+		ContinuationAnimInstance->Montage_JumpToSection(Segment->SectionName, MontageToPlay);
 
-	// 普通攻击发出噪音
+		FOnMontageEnded EndDelegate;
+		EndDelegate.BindUObject(this, &AMyCharacter::OnAttackMontageEnded);
+		ContinuationAnimInstance->Montage_SetEndDelegate(EndDelegate, MontageToPlay);
+	}
+
 	EmitNoise(AttackNoiseLoudness, AttackNoiseRange);
-
-	// 清除旧的输入标记
 	bComboInputReceived = false;
 
 	UE_LOG(LogTemp, Log, TEXT("Attack Segment %d: %s (Damage x%.1f)"),
-	       ComboCounter, *Segment->SectionName.ToString(), Segment->DamageMultiplier);
+	       SegmentIndex, *Segment->SectionName.ToString(), Segment->DamageMultiplier);
+
+	return true;
 }
 
 void AMyCharacter::PlayAttackMontage(const FName& SectionName)
@@ -415,6 +456,49 @@ void AMyCharacter::ResetCombo()
 	CurrentPoiseDamage = EquippedWeapon ? EquippedWeapon->GetBasePoiseDamage() : 1.f;
 
 	UE_LOG(LogTemp, Log, TEXT("Combo reset"));
+}
+
+bool AMyCharacter::TryConsumeComboInputAtBranchPoint()
+{
+	bComboWindowOpen = false;
+
+	if (!bComboInputReceived)
+	{
+		return false;
+	}
+
+	bComboInputReceived = false;
+
+	if (ActionState != EActionState::EAS_Attacking)
+	{
+		return false;
+	}
+
+	if (!AttackConfig || !AttackConfig->LightAttackCombo)
+	{
+		return false;
+	}
+
+	const int32 NextComboIndex = ComboCounter + 1;
+	if (NextComboIndex >= AttackConfig->LightAttackCombo->GetComboCount())
+	{
+		return false;
+	}
+
+	if (ShouldRecoverToExhausted_Attack())
+	{
+		return false;
+	}
+
+	const int32 PreviousComboIndex = ComboCounter;
+	ComboCounter = NextComboIndex;
+	if (StartComboSegment(ComboCounter, EComboPlaybackMode::Continuation))
+	{
+		return true;
+	}
+
+	ComboCounter = PreviousComboIndex;
+	return false;
 }
 
 void AMyCharacter::Jump()
@@ -1205,23 +1289,6 @@ void AMyCharacter::OnAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted
 	CancelChargeInputState(); // 新增蓄力清理
 	RestoreRotationMode();
 
-	// 连招续接判断（在状态恢复之前）
-	const bool bShouldContinueCombo = bComboInputReceived &&
-	                                   AttackConfig &&
-	                                   AttackConfig->LightAttackCombo &&
-	                                   (ComboCounter + 1) < AttackConfig->LightAttackCombo->GetComboCount();
-
-	if (bShouldContinueCombo && !ShouldRecoverToExhausted_Attack())
-	{
-		// 连招续接：临时恢复 UnOccupied 让 CanAttack() 通过
-		ComboCounter++;
-		bComboInputReceived = false;
-		ActionState = EActionState::EAS_UnOccupied;  // 临时设置，Attack() 会立刻改回 EAS_Attacking
-		Attack();
-		return;  // 不执行后续状态恢复
-	}
-
-	// 连招结束，恢复状态
 	ResetCombo();
 
 	if (ActionState == EActionState::EAS_Attacking)
