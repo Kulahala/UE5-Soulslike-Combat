@@ -208,14 +208,9 @@ void ABaseCharacter::PlayMontageSection(UAnimMontage* Montage, const FName& Sect
 
 void ABaseCharacter::PlayAttackMontage(const FName& SectionName)
 {
-	PlayMontageSection(AttackMontage, SectionName);
-
-	if (UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance(); AnimInstance && AttackMontage)
-	{
-		FOnMontageEnded EndDelegate;
-		EndDelegate.BindUObject(this, &ABaseCharacter::OnAttackMontageEnded);
-		AnimInstance->Montage_SetEndDelegate(EndDelegate, AttackMontage);
-	}
+	UE_LOG(LogTemp, Warning, TEXT("%s: ABaseCharacter::PlayAttackMontage is deprecated. Use AttackConfig or EnemyAttackConfig DataAssets. Section: %s"),
+		*GetName(),
+		*SectionName.ToString());
 }
 
 void ABaseCharacter::PlayHitReactMontage(const FName& SectionName)
