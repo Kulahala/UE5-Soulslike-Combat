@@ -1,7 +1,6 @@
 #include "Combat/PlayerActionConfigDataAsset.h"
 
 #include "Animation/AnimMontage.h"
-#include "UObject/UnrealType.h"
 
 int32 UPlayerActionConfigDataAsset::GetActionPriority(EPlayerActionType Action) const
 {
@@ -45,7 +44,6 @@ void UPlayerActionConfigDataAsset::PostLoad()
 {
 	Super::PostLoad();
 
-	MigrateLegacyConfig();
 	LogConfigWarnings();
 }
 
@@ -54,59 +52,9 @@ void UPlayerActionConfigDataAsset::PostEditChangeProperty(FPropertyChangedEvent&
 {
 	Super::PostEditChangeProperty(PropertyChangedEvent);
 
-	const FName PropertyName = PropertyChangedEvent.GetPropertyName();
-	const FName MemberPropertyName = PropertyChangedEvent.GetMemberPropertyName();
-	if (PropertyName == GET_MEMBER_NAME_CHECKED(UPlayerActionConfigDataAsset, DodgeMontage) ||
-		PropertyName == GET_MEMBER_NAME_CHECKED(UPlayerActionConfigDataAsset, BlockMontage) ||
-		PropertyName == GET_MEMBER_NAME_CHECKED(UPlayerActionConfigDataAsset, ParryMontage) ||
-		PropertyName == GET_MEMBER_NAME_CHECKED(UPlayerActionConfigDataAsset, PotionMontage) ||
-		PropertyName == GET_MEMBER_NAME_CHECKED(UPlayerActionConfigDataAsset, PriorityConfig) ||
-		MemberPropertyName == GET_MEMBER_NAME_CHECKED(UPlayerActionConfigDataAsset, PriorityConfig))
-	{
-		MigrateLegacyConfig(true);
-	}
-
 	LogConfigWarnings();
 }
 #endif
-
-void UPlayerActionConfigDataAsset::MigrateLegacyConfig(bool bForce)
-{
-	if (bLegacyConfigMigrated && !bForce)
-	{
-		return;
-	}
-
-	if ((bForce || !Dodge.Montage) && DodgeMontage)
-	{
-		Dodge.Montage = DodgeMontage;
-	}
-
-	if ((bForce || !Block.Montage) && BlockMontage)
-	{
-		Block.Montage = BlockMontage;
-	}
-
-	if ((bForce || !Parry.Montage) && ParryMontage)
-	{
-		Parry.Montage = ParryMontage;
-	}
-
-	if ((bForce || !Potion.Montage) && PotionMontage)
-	{
-		Potion.Montage = PotionMontage;
-	}
-
-	SharedPriority.Attack = PriorityConfig.Attack;
-	Dodge.Priority = PriorityConfig.Dodge;
-	Block.Priority = PriorityConfig.Block;
-	Parry.Priority = PriorityConfig.Parry;
-	Potion.Priority = PriorityConfig.Potion;
-	SharedPriority.HitReact = PriorityConfig.HitReact;
-	SharedPriority.Death = PriorityConfig.Death;
-
-	bLegacyConfigMigrated = true;
-}
 
 void UPlayerActionConfigDataAsset::LogConfigWarnings() const
 {

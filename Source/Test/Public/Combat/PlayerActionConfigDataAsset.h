@@ -9,33 +9,6 @@ class UAnimMontage;
 struct FPropertyChangedEvent;
 
 USTRUCT(BlueprintType)
-struct FPlayerActionPriorityConfig
-{
-	GENERATED_BODY()
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Priority", meta = (ClampMin = "0", UIMin = "0", ToolTip = "普通攻击优先级。数值越大优先级越高。"))
-	int32 Attack = 50;
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Priority", meta = (ClampMin = "0", UIMin = "0", ToolTip = "翻滚优先级。数值越大优先级越高。"))
-	int32 Dodge = 80;
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Priority", meta = (ClampMin = "0", UIMin = "0", ToolTip = "防御优先级。数值越大优先级越高。"))
-	int32 Block = 70;
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Priority", meta = (ClampMin = "0", UIMin = "0", ToolTip = "弹反优先级。数值越大优先级越高。"))
-	int32 Parry = 90;
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Priority", meta = (ClampMin = "0", UIMin = "0", ToolTip = "喝药优先级。数值越大优先级越高。"))
-	int32 Potion = 60;
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Priority", meta = (ClampMin = "0", UIMin = "0", ToolTip = "受击优先级。数值越大优先级越高。"))
-	int32 HitReact = 99;
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Priority", meta = (ClampMin = "0", UIMin = "0", ToolTip = "死亡优先级。数值越大优先级越高。"))
-	int32 Death = 100;
-};
-
-USTRUCT(BlueprintType)
 struct FPlayerSharedActionPriorityConfig
 {
 	GENERATED_BODY()
@@ -103,7 +76,7 @@ struct FPlayerPotionActionConfig
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Potion", meta = (ClampMin = "0", UIMin = "0", ToolTip = "喝药优先级。数值越大优先级越高。"))
 	int32 Priority = 60;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Potion", meta = (ClampMin = "0.0", UIMin = "0.0", ClampMax = "1.0", UIMax = "1.0", ToolTip = "没有 PotionMontage 时的即时治疗比例。蒙太奇 Notify 路径继续使用 UAnimNotify_PotionHeal 自己的 HealPercent。"))
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Potion", meta = (ClampMin = "0.0", UIMin = "0.0", ClampMax = "1.0", UIMax = "1.0", ToolTip = "没有喝药蒙太奇时的即时治疗比例。蒙太奇 Notify 路径继续使用 UAnimNotify_PotionHeal 自己的 HealPercent。"))
 	float HealPercent = 0.5f;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Potion", meta = (ClampMin = "0.0", UIMin = "0.0", ToolTip = "喝药冷却时间。"))
@@ -137,21 +110,6 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Priority", meta = (ToolTip = "非玩家主动动作的共享优先级。数值越大优先级越高。运行时不应修改，DataAsset 是配置真相源。"))
 	FPlayerSharedActionPriorityConfig SharedPriority;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Legacy", meta = (ToolTip = "Legacy migration only. Use Dodge.Montage instead."))
-	TObjectPtr<UAnimMontage> DodgeMontage = nullptr;
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Legacy", meta = (ToolTip = "Legacy migration only. Use Block.Montage instead."))
-	TObjectPtr<UAnimMontage> BlockMontage = nullptr;
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Legacy", meta = (ToolTip = "Legacy migration only. Use Parry.Montage instead."))
-	TObjectPtr<UAnimMontage> ParryMontage = nullptr;
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Legacy", meta = (ToolTip = "Legacy migration only. Use Potion.Montage instead. Empty Potion.Montage remains valid."))
-	TObjectPtr<UAnimMontage> PotionMontage = nullptr;
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Legacy", meta = (ToolTip = "Legacy migration only. Use per-action Priority fields and SharedPriority instead."))
-	FPlayerActionPriorityConfig PriorityConfig;
-
 	UFUNCTION(BlueprintPure, Category = "Priority")
 	int32 GetActionPriority(EPlayerActionType Action) const;
 
@@ -168,9 +126,5 @@ public:
 #endif
 
 private:
-	UPROPERTY(VisibleAnywhere, Category = "Legacy", meta = (ToolTip = "Legacy migration marker. Do not edit manually."))
-	bool bLegacyConfigMigrated = false;
-
-	void MigrateLegacyConfig(bool bForce = false);
 	void LogConfigWarnings() const;
 };
