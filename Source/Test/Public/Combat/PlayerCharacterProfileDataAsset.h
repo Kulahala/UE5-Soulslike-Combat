@@ -5,6 +5,7 @@
 #include "PlayerCharacterProfileDataAsset.generated.h"
 
 class UAttackConfigDataAsset;
+class UHitReactionConfigDataAsset;
 class UPlayerActionConfigDataAsset;
 struct FPropertyChangedEvent;
 
@@ -26,9 +27,14 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Actions", meta = (ToolTip = "玩家角色的非攻击动作蒙太奇配置。"))
 	TObjectPtr<UPlayerActionConfigDataAsset> ActionConfig = nullptr;
 
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat", meta = (ToolTip = "玩家角色的受击反应和死亡蒙太奇配置。"))
+	TObjectPtr<UHitReactionConfigDataAsset> ReactionConfig = nullptr;
+
 	FORCEINLINE UAttackConfigDataAsset* GetAttackConfig() const { return AttackConfig.Get(); }
 
 	FORCEINLINE UPlayerActionConfigDataAsset* GetActionConfig() const { return ActionConfig.Get(); }
+
+	FORCEINLINE UHitReactionConfigDataAsset* GetReactionConfig() const { return ReactionConfig.Get(); }
 
 	virtual void PostLoad() override;
 

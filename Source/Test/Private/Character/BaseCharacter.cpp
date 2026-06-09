@@ -1,10 +1,13 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Character/BaseCharacter.h"
 #include "AttributeComponent/AttributeComponent.h"
+#include "Combat/HitReactionConfigDataAsset.h"
 #include "Kismet/GameplayStatics.h"
 #include "KismetAnimationLibrary.h"
 
 // ==================== 生命周期 ====================
+
+const TArray<FName> ABaseCharacter::EmptyDeathSections;
 
 ABaseCharacter::ABaseCharacter()
 {
@@ -117,7 +120,7 @@ void ABaseCharacter::DirectionalHitReact(const FVector& ImpactPoint, const AActo
 	{
 		SectionName = FName("FromBack");
 	}
-	PlayHitReactMontage(SectionName);
+	PlayHitReactMontage(GetHitReactSection(SectionName));
 }
 
 void ABaseCharacter::Attack()
@@ -216,14 +219,76 @@ void ABaseCharacter::PlayAttackMontage(const FName& SectionName)
 
 void ABaseCharacter::PlayHitReactMontage(const FName& SectionName)
 {
-	PlayMontageSection(HitReactMontage, SectionName);
+	UAnimMontage* MontageToPlay = GetHitReactMontage();
+	PlayMontageSection(MontageToPlay, SectionName);
 
-	if (UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance(); AnimInstance && HitReactMontage)
+	if (UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance(); AnimInstance && MontageToPlay)
 	{
 		FOnMontageEnded EndDelegate;
 		EndDelegate.BindUObject(this, &ABaseCharacter::OnHitReactMontageEnded);
-		AnimInstance->Montage_SetEndDelegate(EndDelegate, HitReactMontage);
+		AnimInstance->Montage_SetEndDelegate(EndDelegate, MontageToPlay);
 	}
+}
+
+UAnimMontage* ABaseCharacter::GetHitReactMontage() const
+{
+	const UHitReactionConfigDataAsset* ReactionConfig = GetReactionConfig();
+	return ReactionConfig && ReactionConfig->HitReact.Montage
+		? ReactionConfig->HitReact.Montage.Get()
+		: nullptr;
+}
+
+UAnimMontage* ABaseCharacter::GetDeathMontage() const
+{
+	const UHitReactionConfigDataAsset* ReactionConfig = GetReactionConfig();
+	return ReactionConfig && ReactionConfig->Death.Montage
+		? ReactionConfig->Death.Montage.Get()
+		: nullptr;
+}
+
+FName ABaseCharacter::GetHitReactSection(const FName& DefaultDirectionSectionName) const
+{
+	const UHitReactionConfigDataAsset* ReactionConfig = GetReactionConfig();
+	if (!ReactionConfig || !ReactionConfig->HitReact.Montage)
+	{
+		return DefaultDirectionSectionName;
+	}
+
+	if (DefaultDirectionSectionName == FName("FromFront"))
+	{
+		return ReactionConfig->HitReact.FrontSection;
+	}
+	if (DefaultDirectionSectionName == FName("FromBack"))
+	{
+		return ReactionConfig->HitReact.BackSection;
+	}
+	if (DefaultDirectionSectionName == FName("FromLeft"))
+	{
+		return ReactionConfig->HitReact.LeftSection;
+	}
+	if (DefaultDirectionSectionName == FName("FromRight"))
+	{
+		return ReactionConfig->HitReact.RightSection;
+	}
+
+	return DefaultDirectionSectionName;
+}
+
+const TArray<FName>& ABaseCharacter::GetDeathSections() const
+{
+	const UHitReactionConfigDataAsset* ReactionConfig = GetReactionConfig();
+	return ReactionConfig && ReactionConfig->Death.Montage ? ReactionConfig->Death.Sections : EmptyDeathSections;
+}
+
+bool ABaseCharacter::HasConfiguredDeathMontage() const
+{
+	const UHitReactionConfigDataAsset* ReactionConfig = GetReactionConfig();
+	return ReactionConfig && ReactionConfig->Death.Montage;
+}
+
+UHitReactionConfigDataAsset* ABaseCharacter::GetReactionConfig() const
+{
+	return nullptr;
 }
 
 bool ABaseCharacter::CanAttack() const

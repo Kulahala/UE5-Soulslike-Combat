@@ -81,6 +81,9 @@ public:
 	/* Getters */
 	FORCEINLINE EEnemyState GetEnemyState() const { return EnemyState; }
 
+	/* 受击/死亡配置 */
+	virtual UHitReactionConfigDataAsset* GetReactionConfig() const override;
+
 protected:
 	/* 攻击 */
 	virtual bool CanAttack() const override;
@@ -400,6 +403,10 @@ private:
 
 	UPROPERTY(EditAnywhere, Category = "Combat|Poise", meta = (AllowPrivateAccess = "true", ToolTip = "破防慢放速率（0.3 = 30%速度）。"))
 	float StanceBreakPlayRate = 0.3f;
+
+	/* 受击/死亡配置 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Reaction", meta = (AllowPrivateAccess = "true", ToolTip = "敌人受击反应和死亡蒙太奇配置。"))
+	TObjectPtr<UHitReactionConfigDataAsset> HitReactionConfig = nullptr;
 
 	void RecoverFromStanceBreak(); // 破防硬直恢复回调
 	void ClearPatrolTimers(); // 清理巡逻相关定时器

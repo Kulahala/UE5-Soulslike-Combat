@@ -3,6 +3,7 @@
 #include "Character/MyCharacter.h"
 #include "Combat/ComboDataAsset.h"
 #include "Combat/AttackConfigDataAsset.h"
+#include "Combat/HitReactionConfigDataAsset.h"
 #include "Character/Components/PlayerLockOnComponent.h"
 #include "Character/Controller/CharacterController.h"
 
@@ -66,6 +67,13 @@ void AMyCharacter::BeginPlay()
 		if (!PlayerProfile->GetActionConfig())
 		{
 			UE_LOG(LogTemp, Warning, TEXT("%s: PlayerProfile '%s' has no ActionConfig."),
+			       *GetName(), *PlayerProfile->GetName());
+		}
+
+		if (!PlayerProfile->GetReactionConfig())
+		{
+			UE_LOG(LogTemp, Warning,
+			       TEXT("%s: PlayerProfile '%s' has no ReactionConfig. Hit reactions and death montages will not play."),
 			       *GetName(), *PlayerProfile->GetName());
 		}
 	}
@@ -659,10 +667,22 @@ void AMyCharacter::Die()
 
 	// 播放死亡蒙太奇
 	UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
-	if (AnimInstance && DeathMontage)
+	UAnimMontage* DeathMontageToPlay = GetDeathMontage();
+	if (AnimInstance && DeathMontageToPlay)
 	{
 		AnimInstance->Montage_Stop(0.1f);
-		AnimInstance->Montage_Play(DeathMontage);
+		const TArray<FName>& ConfigSections = GetDeathSections();
+		FName SectionName = NAME_None;
+		if (!ConfigSections.IsEmpty())
+		{
+			SectionName = ConfigSections[FMath::RandRange(0, ConfigSections.Num() - 1)];
+		}
+
+		AnimInstance->Montage_Play(DeathMontageToPlay);
+		if (SectionName != NAME_None)
+		{
+			AnimInstance->Montage_JumpToSection(SectionName, DeathMontageToPlay);
+		}
 	}
 }
 

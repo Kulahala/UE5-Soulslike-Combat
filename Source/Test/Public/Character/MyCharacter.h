@@ -20,6 +20,7 @@ class UCameraShakeBase;
 class UPlayerLockOnComponent;
 class UComboDataAsset;
 class UAttackConfigDataAsset;
+class UHitReactionConfigDataAsset;
 class USoundBase;
 
 UCLASS()
@@ -372,6 +373,11 @@ public:
 	FORCEINLINE AShield* GetEquippedShield() const { return EquippedShield; }
 
 private:
+	virtual UHitReactionConfigDataAsset* GetReactionConfig() const override
+	{
+		return PlayerProfile ? PlayerProfile->GetReactionConfig() : nullptr;
+	}
+
 	FORCEINLINE UAttackConfigDataAsset* GetAttackConfig() const
 	{
 		return PlayerProfile ? PlayerProfile->GetAttackConfig() : nullptr;

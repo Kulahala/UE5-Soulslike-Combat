@@ -1,6 +1,7 @@
 #include "Combat/PlayerCharacterProfileDataAsset.h"
 
 #include "Combat/AttackConfigDataAsset.h"
+#include "Combat/HitReactionConfigDataAsset.h"
 #include "Combat/PlayerActionConfigDataAsset.h"
 #include "UObject/UnrealType.h"
 
@@ -36,6 +37,13 @@ void UPlayerCharacterProfileDataAsset::LogConfigWarnings() const
 	if (!ActionConfig)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("%s: ActionConfig is not set."), *GetName());
+	}
+
+	if (!ReactionConfig)
+	{
+		UE_LOG(LogTemp, Warning,
+		       TEXT("%s: ReactionConfig is not set. Player hit reactions and death montages will not play."),
+		       *GetName());
 	}
 #endif
 }

@@ -10,6 +10,7 @@
 
 class UAttributeComponent;
 class AWeapon;
+class UHitReactionConfigDataAsset;
 
 USTRUCT()
 struct FPendingHitContext
@@ -65,15 +66,13 @@ protected:
 	virtual bool CanAttack() const;
 	virtual void OnAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted);
 	virtual void OnHitReactMontageEnded(UAnimMontage* Montage, bool bInterrupted);
+	virtual UHitReactionConfigDataAsset* GetReactionConfig() const;
+	UAnimMontage* GetHitReactMontage() const;
+	UAnimMontage* GetDeathMontage() const;
+	FName GetHitReactSection(const FName& DefaultDirectionSectionName) const;
+	const TArray<FName>& GetDeathSections() const;
+	bool HasConfiguredDeathMontage() const;
 
-	/* 蒙太奇资源 */
-	// 受击反应蒙太奇（含 Section：FromFront, FromBack, FromLeft, FromRight）
-	UPROPERTY(EditDefaultsOnly, Category = "Montages", meta = (ToolTip = "受击反应蒙太奇，含 Section：FromFront, FromBack, FromLeft, FromRight。"))
-	UAnimMontage* HitReactMontage;
-
-	// 死亡蒙太奇
-	UPROPERTY(EditDefaultsOnly, Category = "Montages", meta = (ToolTip = "死亡蒙太奇。"))
-	UAnimMontage* DeathMontage;
 
 	/* 状态 */
 	UPROPERTY(BlueprintReadOnly, Category = "State", meta = (AllowPrivateAccess = "true"))
@@ -130,6 +129,8 @@ protected:
 	void ConsumePendingHitKnockback();
 
 private:
+	static const TArray<FName> EmptyDeathSections;
+
 	bool bKnockbackActive = false;
 	FVector KnockbackDirection = FVector::ZeroVector;
 	float KnockbackElapsed = 0.f;

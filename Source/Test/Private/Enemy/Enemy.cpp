@@ -147,6 +147,11 @@ void AEnemy::BeginPlay()
 
 	WeaponInit();
 	ValidateEnemyAttackConfig();
+	if (!HitReactionConfig)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s: HitReactionConfig is not set. Hit reactions and death montages will not play."),
+		       *GetName());
+	}
 }
 
 #if WITH_EDITOR
@@ -229,16 +234,24 @@ void AEnemy::Die()
 
 	// 播放死亡动画
 	UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
-	if (AnimInstance && DeathMontage)
+	UAnimMontage* DeathMontageToPlay = GetDeathMontage();
+	if (AnimInstance && DeathMontageToPlay)
 	{
 		//强制打断其他动画
 		AnimInstance->Montage_Stop(0.1f);
 
-		int32 RandomIndex = FMath::RandRange(1, 3);
-		FName SectionName = FName(FString::Printf(TEXT("Section%d"), RandomIndex));
+		const TArray<FName>& ConfigSections = GetDeathSections();
+		FName SectionName = NAME_None;
+		if (!ConfigSections.IsEmpty())
+		{
+			SectionName = ConfigSections[FMath::RandRange(0, ConfigSections.Num() - 1)];
+		}
 
-		AnimInstance->Montage_Play(DeathMontage);
-		AnimInstance->Montage_JumpToSection(SectionName, DeathMontage);
+		AnimInstance->Montage_Play(DeathMontageToPlay);
+		if (SectionName != NAME_None)
+		{
+			AnimInstance->Montage_JumpToSection(SectionName, DeathMontageToPlay);
+		}
 	}
 
 	// 设定销毁时间
@@ -333,6 +346,11 @@ void AEnemy::ResetPoise()
 {
 	CurrentPoise = MaxPoise;
 	GetWorldTimerManager().ClearTimer(PoiseResetTimer);
+}
+
+UHitReactionConfigDataAsset* AEnemy::GetReactionConfig() const
+{
+	return HitReactionConfig.Get();
 }
 
 // ==================== 弹反（已废弃，保留用于重构） ====================

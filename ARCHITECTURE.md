@@ -284,6 +284,7 @@ UAnimNotify → UAnimNotify_PotionHeal (montage-driven partial potion healing)
 UDataAsset → UTreasureData (static mesh, gold value, pickup sound, scale)
 UDataAsset → UPlayerCharacterProfileDataAsset (single player character config entry: AttackConfig + ActionConfig)
 UDataAsset → UPlayerActionConfigDataAsset (player-only non-attack action structs: Dodge, Block, Parry, Potion, plus SharedPriority)
+UDataAsset → UHitReactionConfigDataAsset (shared character HitReact / Death montage config with section names)
 UDataAsset → UComboDataAsset (combo chain: SectionName, DamageMultiplier, StaminaCost, PoiseDamageMultiplier per segment)
 UDataAsset → UAttackConfigDataAsset (LightAttackCombo + SpecialAttacks for sprint/jump-style specials + ChargedAttack)
 UDataAsset → UEnemyAttackConfigDataAsset (Enemy attacks: montage, section, post-attack cooldown (v1.5: excludes montage duration and starts after attack end/interruption), MinDistance/MaxDistance, weight, damage/block-stamina multipliers, optional Motion Warping target config)
@@ -364,6 +365,15 @@ UDataAsset → UEnemyAttackConfigDataAsset (Enemy attacks: montage, section, pos
 - 新命中覆盖旧击退；零缩放命中（如满格挡）清除进行中的击退。
 - 格挡成功按减伤比例缩放击退距离（`DamageAfterBlock / Damage`）。
 - 友方武器命中也触发击退和命中反馈，但不造成伤害。
+
+## Hit Reaction & Death Config
+
+- `UHitReactionConfigDataAsset` 保存共享角色受击反应和死亡蒙太奇配置：`HitReact.Montage`、四方向 section name、`Death.Montage`、可选 `Death.Sections`。
+- 入口分工：主角从 `PlayerProfile->ReactionConfig` 读取；敌人从 `AEnemy::HitReactionConfig` 读取。`ABaseCharacter::GetReactionConfig()` 是虚拟读取入口（默认返回 `nullptr`），`AMyCharacter` override 返回 `PlayerProfile->ReactionConfig`，`AEnemy` override 返回自身 `HitReactionConfig` 字段。
+- `ABaseCharacter::DirectionalHitReact()` 继续负责方向判定，再通过 `GetHitReactSection()` 将旧默认方向 section 映射到 config section。未配置有效 ReactionConfig 时返回默认方向 section name，但因 Montage 为 `nullptr` 不会实际播放。
+- `AMyCharacter::Die()` 使用 `GetDeathMontage()`；若 `PlayerProfile->ReactionConfig.Death.Sections` 非空，则随机选择数组 section；若 sections 为空，则直接播放死亡 montage。
+- `AEnemy::Die()` 使用 `GetDeathMontage()`；若 `HitReactionConfig.Death.Sections` 非空，则随机选择数组 section；若 sections 为空，则直接播放死亡 montage。
+- Legacy `HitReactMontage` / `DeathMontage` 字段和 fallback 已删除。未配置 ReactionConfig 时角色受击/死亡不播放蒙太奇。
 
 ## Attack Hyper Armor System（攻击霸体系统）
 
@@ -468,7 +478,7 @@ UDataAsset → UEnemyAttackConfigDataAsset (Enemy attacks: montage, section, pos
 ## Combo System（连招系统）
 
 - **架构**：数据驱动 + AnimNotifyState 驱动窗口。`UAttackConfigDataAsset` 统一管理 `LightAttackCombo`（连招链）、`SpecialAttacks`（冲刺/跳跃）、`ChargedAttack`（蓄力）
-- **配置入口**：主角 Blueprint 只配置 `PlayerProfile`；`AMyCharacter` 通过 `PlayerProfile->AttackConfig` 读取主角攻击配置，通过 `PlayerProfile->ActionConfig` 读取 Dodge / Block / Parry / Potion Montage。主角攻击 Montage 只走 `UAttackConfigDataAsset`；敌人攻击 Montage 只走 `UEnemyAttackConfigDataAsset`。旧 `ABaseCharacter::AttackMontage` 字段已删除；`ABaseCharacter::PlayAttackMontage()` 仅保留为 protected 旧路径报警，不再播放基类攻击 Montage。
+- **配置入口**：主角 Blueprint 只配置 `PlayerProfile`；`AMyCharacter` 通过 `PlayerProfile->AttackConfig` 读取主角攻击配置，通过 `PlayerProfile->ActionConfig` 读取 Dodge / Block / Parry / Potion Montage，通过 `PlayerProfile->ReactionConfig` 读取受击和死亡 Montage。主角攻击 Montage 只走 `UAttackConfigDataAsset`；敌人攻击 Montage 只走 `UEnemyAttackConfigDataAsset`。旧 `ABaseCharacter::AttackMontage` 字段已删除；`ABaseCharacter::PlayAttackMontage()` 仅保留为 protected 旧路径报警，不再播放基类攻击 Montage。
 - **配置校验**：`UAttackConfigDataAsset`、`UComboDataAsset`、`UEnemyAttackConfigDataAsset` 在资产加载后和编辑器属性变更后输出配置 warning，用于定位缺失 Montage、空连招段、无效权重、Motion Warping 配置缺口等问题；这些 warning 不改变主角攻击选择规则。敌人攻击配置仍会 normalize 距离、冷却、倍率和 Motion Warping 数值下限。
 - **续接时序关键**：`AnimNotifyState_ComboWindow` 只缓存输入；`UAnimNotify_ComboBranchPoint` 才消费输入并跳到下一段攻击 Section。续接时 montage 已经在播放，只能 `Montage_JumpToSection()`，不能重新 `Montage_Play()`。`OnAttackMontageEnded()` 不再负责正常连招续接，只负责最终恢复/疲惫处理。
 - **蒙太奇契约**：`ComboChain` 只配置攻击 Section（例如 `Attack1/Attack2/Attack3`）；`end1/end2/end3` 是 montage 内部不接招时的收招 Section，不进入 `ComboChain`。
@@ -478,10 +488,10 @@ UDataAsset → UEnemyAttackConfigDataAsset (Enemy attacks: montage, section, pos
 ## Player Character Profile
 
 - **入口职责**：`UPlayerCharacterProfileDataAsset` 是主角 Blueprint 的单一配置入口，只引用子 DataAsset，不复制所有字段，不持有 runtime state。
-- **当前子配置**：`AttackConfig` 指向现有 `UAttackConfigDataAsset`；`ActionConfig` 指向 `UPlayerActionConfigDataAsset`。
-- **ActionConfig 范围**：`UPlayerActionConfigDataAsset` 保存主角专属非攻击动作配置：`Dodge.Montage/Priority/StaminaCost`、`Block.Montage/Priority/BlockRaiseSection`、`Parry.Montage/Priority`、`Potion.Montage/Priority/HealPercent/Cooldown`，并通过 `SharedPriority` 保存 `Attack` / `HitReact` / `Death` 的共享优先级。`HitReactMontage` / `DeathMontage` 仍留在 `ABaseCharacter`，因为玩家和敌人共用。
+- **当前子配置**：`AttackConfig` 指向现有 `UAttackConfigDataAsset`；`ActionConfig` 指向 `UPlayerActionConfigDataAsset`；`ReactionConfig` 指向 `UHitReactionConfigDataAsset`。
+- **ActionConfig 范围**：`UPlayerActionConfigDataAsset` 保存主角专属非攻击动作配置：`Dodge.Montage/Priority/StaminaCost`、`Block.Montage/Priority/BlockRaiseSection`、`Parry.Montage/Priority`、`Potion.Montage/Priority/HealPercent/Cooldown`，并通过 `SharedPriority` 保存 `Attack` / `HitReact` / `Death` 的共享优先级。主角 `HitReact` / `Death` montage 配置归 `PlayerProfile->ReactionConfig`；敌人当前归 `AEnemy::HitReactionConfig`。
 - **行为所有权**：`AMyCharacter` 仍负责状态切换、Montage 播放、打断清理和恢复；DataAsset 只提供配置。
-- **配置失败语义**：未设置 `PlayerProfile`、`AttackConfig` 或 `ActionConfig` 时输出 warning 并让对应动作失败。`Potion.Montage` 为空不是错误配置，喝药会按 `Potion.HealPercent` 立即回血并按 `Potion.Cooldown` 进入冷却。
+- **配置失败语义**：未设置 `PlayerProfile`、`AttackConfig`、`ActionConfig` 或 `ReactionConfig` 时输出 warning；缺少 `ReactionConfig` 时主角受击/死亡不播放对应蒙太奇，也不读取角色本体 `HitReactionConfig`。`Potion.Montage` 为空不是错误配置，喝药会按 `Potion.HealPercent` 立即回血并按 `Potion.Cooldown` 进入冷却。
 
 <a name="charged-attack-system"></a>
 ## Charged Attack System（蓄力攻击系统）
