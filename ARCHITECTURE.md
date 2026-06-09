@@ -368,12 +368,14 @@ UDataAsset → UEnemyAttackConfigDataAsset (Enemy attacks: montage, section, pos
 
 ## Hit Reaction & Death Config
 
-- `UHitReactionConfigDataAsset` 保存共享角色受击反应和死亡蒙太奇配置：`HitReact.Montage`、四方向 section name、`Death.Montage`、可选 `Death.Sections`。
+- `UHitReactionConfigDataAsset` 保存共享角色受击反应和死亡蒙太奇配置：`HitReact.Montage`、四方向 section name、`HitReact.HitSound`、`HitReact.HitParticle`、`Death.Montage`、可选 `Death.Sections`。
 - 入口分工：主角从 `PlayerProfile->ReactionConfig` 读取；敌人从 `AEnemy::HitReactionConfig` 读取。`ABaseCharacter::GetReactionConfig()` 是虚拟读取入口（默认返回 `nullptr`），`AMyCharacter` override 返回 `PlayerProfile->ReactionConfig`，`AEnemy` override 返回自身 `HitReactionConfig` 字段。
 - `ABaseCharacter::DirectionalHitReact()` 继续负责方向判定，再通过 `GetHitReactSection()` 将旧默认方向 section 映射到 config section。未配置有效 ReactionConfig 时返回默认方向 section name，但因 Montage 为 `nullptr` 不会实际播放。
+- `ABaseCharacter::PlayHitEffects()` 从 `GetReactionConfig()->HitReact.HitSound / HitParticle` 读取普通受击音效和粒子。只在 `!PendingHitContext.bWasBlocked` 时调用（格挡成功不播放普通受击表现）。
+- 格挡成功时 `AMyCharacter::TryBlockHit()` 播放 `EquippedShield->GetBlockSound() / GetBlockParticle()`，格挡反馈由盾牌决定，不使用 ReactionConfig。
 - `AMyCharacter::Die()` 使用 `GetDeathMontage()`；若 `PlayerProfile->ReactionConfig.Death.Sections` 非空，则随机选择数组 section；若 sections 为空，则直接播放死亡 montage。
 - `AEnemy::Die()` 使用 `GetDeathMontage()`；若 `HitReactionConfig.Death.Sections` 非空，则随机选择数组 section；若 sections 为空，则直接播放死亡 montage。
-- Legacy `HitReactMontage` / `DeathMontage` 字段和 fallback 已删除。未配置 ReactionConfig 时角色受击/死亡不播放蒙太奇。
+- Legacy `HitReactMontage` / `DeathMontage` / `HitSound` / `HitParticle` 字段和 fallback 已删除。未配置 ReactionConfig 时角色受击/死亡不播放蒙太奇和音效/粒子。
 
 ## Attack Hyper Armor System（攻击霸体系统）
 

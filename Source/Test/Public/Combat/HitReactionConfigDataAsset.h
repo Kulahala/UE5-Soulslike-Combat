@@ -5,6 +5,8 @@
 #include "HitReactionConfigDataAsset.generated.h"
 
 class UAnimMontage;
+class USoundBase;
+class UParticleSystem;
 struct FPropertyChangedEvent;
 
 USTRUCT(BlueprintType)
@@ -26,6 +28,12 @@ struct FHitReactConfig
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "HitReact", meta = (ToolTip = "右侧受击 Section 名称。"))
 	FName RightSection = FName("FromRight");
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "HitReact", meta = (ToolTip = "普通受击音效。格挡成功不使用这里。"))
+	TObjectPtr<USoundBase> HitSound = nullptr;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "HitReact", meta = (ToolTip = "普通受击粒子。格挡成功不使用这里。"))
+	TObjectPtr<UParticleSystem> HitParticle = nullptr;
 };
 
 USTRUCT(BlueprintType)

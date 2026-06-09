@@ -90,15 +90,6 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true", ToolTip = "属性组件，管理血量、体力、金币。"))
 	UAttributeComponent* Attributes;
 
-	/* 受击效果 */
-	// 普通受击音效（格挡时不播放，由 Shield::BlockSound 替代）
-	UPROPERTY(EditAnywhere, Category = "Effect", meta = (ToolTip = "普通受击音效，格挡时不播放。"))
-	USoundBase* HitSound;
-
-	// 普通受击粒子（格挡时不播放，由 Shield::BlockParticle 替代）
-	UPROPERTY(EditAnywhere, Category = "Effect", meta = (ToolTip = "普通受击粒子，格挡时不播放。"))
-	UParticleSystem* HitParticle;
-
 	/* 武器 */
 	UPROPERTY()
 	AWeapon* EquippedWeapon; // 当前装备的武器

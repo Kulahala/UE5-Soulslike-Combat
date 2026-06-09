@@ -67,14 +67,20 @@ void ABaseCharacter::GetHit_Implementation(const FVector& ImpactPoint, AActor* H
 
 void ABaseCharacter::PlayHitEffects(const FVector& ImpactPoint)
 {
-	if (HitSound)
+	const UHitReactionConfigDataAsset* ReactionConfig = GetReactionConfig();
+	if (!ReactionConfig)
 	{
-		UGameplayStatics::PlaySoundAtLocation(this, HitSound, ImpactPoint);
+		return;
 	}
 
-	if (HitParticle)
+	if (ReactionConfig->HitReact.HitSound)
 	{
-		UGameplayStatics::SpawnEmitterAtLocation(this, HitParticle, ImpactPoint);
+		UGameplayStatics::PlaySoundAtLocation(this, ReactionConfig->HitReact.HitSound.Get(), ImpactPoint);
+	}
+
+	if (ReactionConfig->HitReact.HitParticle)
+	{
+		UGameplayStatics::SpawnEmitterAtLocation(this, ReactionConfig->HitReact.HitParticle.Get(), ImpactPoint);
 	}
 }
 
