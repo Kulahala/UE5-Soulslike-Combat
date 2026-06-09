@@ -1151,7 +1151,7 @@ bool AMyCharacter::StartDodgeAction()
 
 	SetMovementRotationMode(false, false);
 
-	Attributes->UseStamina(DodgeStaminaCost);
+	Attributes->UseStamina(GetDodgeStaminaCost(true));
 	Attributes->PauseStaminaRegen();
 
 	ActionState = EActionState::EAS_Dodging;
@@ -1182,7 +1182,7 @@ bool AMyCharacter::StartBlockAction()
 	}
 
 	bIsBlocking = true;
-	PlayBlockMontage(FName("BlockRaise"));
+	PlayBlockMontage(GetBlockRaiseSection());
 	return true;
 }
 
@@ -1227,6 +1227,64 @@ bool AMyCharacter::IsAtLeastSamePriority(EPlayerActionType NewAction, EPlayerAct
 {
 	const UPlayerActionConfigDataAsset* ActionConfig = GetActionConfig();
 	return ActionConfig && ActionConfig->IsAtLeastSamePriority(NewAction, CurrentAction);
+}
+
+float AMyCharacter::GetDodgeStaminaCost(bool bLogFallback) const
+{
+	if (const UPlayerActionConfigDataAsset* ActionConfig = GetActionConfig())
+	{
+		return ActionConfig->Dodge.StaminaCost;
+	}
+
+	if (bLogFallback)
+	{
+		UE_LOG(LogTemp, Warning,
+		       TEXT("%s: ActionConfig missing, falling back to C++ default DodgeStaminaCost = %.2f."),
+		       *GetName(), DodgeStaminaCost);
+	}
+	return DodgeStaminaCost;
+}
+
+float AMyCharacter::GetPotionCooldown(bool bLogFallback) const
+{
+	if (const UPlayerActionConfigDataAsset* ActionConfig = GetActionConfig())
+	{
+		return ActionConfig->Potion.Cooldown;
+	}
+
+	if (bLogFallback)
+	{
+		UE_LOG(LogTemp, Warning,
+		       TEXT("%s: ActionConfig missing, falling back to C++ default PotionCooldown = %.2f."),
+		       *GetName(), PotionCooldown);
+	}
+	return PotionCooldown;
+}
+
+float AMyCharacter::GetPotionFallbackHealPercent() const
+{
+	if (const UPlayerActionConfigDataAsset* ActionConfig = GetActionConfig())
+	{
+		return ActionConfig->Potion.HealPercent;
+	}
+
+	UE_LOG(LogTemp, Warning,
+	       TEXT("%s: ActionConfig missing, falling back to hard-coded potion heal percent = 0.50."),
+	       *GetName());
+	return 0.5f;
+}
+
+FName AMyCharacter::GetBlockRaiseSection() const
+{
+	if (const UPlayerActionConfigDataAsset* ActionConfig = GetActionConfig())
+	{
+		return ActionConfig->Block.BlockRaiseSection;
+	}
+
+	UE_LOG(LogTemp, Warning,
+	       TEXT("%s: ActionConfig missing, falling back to hard-coded BlockRaise section."),
+	       *GetName());
+	return FName("BlockRaise");
 }
 
 bool AMyCharacter::CanCancelCurrentActionWith(EPlayerActionType NewAction) const
@@ -1302,7 +1360,7 @@ bool AMyCharacter::StartPotionAction()
 		}
 		else
 		{
-			HealFromPotion(0.5f);
+			HealFromPotion(GetPotionFallbackHealPercent());
 			StartPotionCooldown();
 		}
 		return true;
@@ -1344,7 +1402,7 @@ void AMyCharacter::HealFromPotion(float Percent)
 		return;
 	}
 
-	const bool bUsesPotionMontage = ActionConfig->PotionMontage != nullptr;
+	const bool bUsesPotionMontage = ActionConfig->Potion.Montage != nullptr;
 	if (bUsesPotionMontage && ActionState != EActionState::EAS_UsingPotion)
 	{
 		return;
@@ -1380,7 +1438,8 @@ void AMyCharacter::InterruptPotion()
 
 void AMyCharacter::StartPotionCooldown()
 {
-	if (PotionCooldown <= 0.f)
+	const float Cooldown = GetPotionCooldown(true);
+	if (Cooldown <= 0.f)
 	{
 		bPotionOnCooldown = false;
 		UpdatePotionCooldownHUD();
@@ -1388,7 +1447,7 @@ void AMyCharacter::StartPotionCooldown()
 	}
 	bPotionOnCooldown = true;
 	GetWorldTimerManager().SetTimer(
-		PotionCooldownTimer, this, &AMyCharacter::ResetPotionCooldown, PotionCooldown, false);
+		PotionCooldownTimer, this, &AMyCharacter::ResetPotionCooldown, Cooldown, false);
 	UpdatePotionCooldownHUD();
 }
 
@@ -1928,7 +1987,7 @@ void AMyCharacter::UpdatePotionCooldownHUD() const
 	const float Remaining = bPotionOnCooldown
 		                        ? GetWorldTimerManager().GetTimerRemaining(PotionCooldownTimer)
 		                        : 0.f;
-	PlayerHUDWidget->SetPotionCooldown(Remaining, bPotionOnCooldown ? PotionCooldown : 0.f);
+	PlayerHUDWidget->SetPotionCooldown(Remaining, bPotionOnCooldown ? GetPotionCooldown(false) : 0.f);
 }
 
 void AMyCharacter::DrawDebugInfo() const
@@ -1940,8 +1999,8 @@ void AMyCharacter::DrawDebugInfo() const
 	FDebugDrawHelper::Add(FString::Printf(TEXT("HP: %.1f / %.1f"), Attributes->GetCurrentHealth(), Attributes->GetMaxHealth()), FColor::Red);
 	FDebugDrawHelper::Add(FString::Printf(TEXT("SP: %.1f / %.1f"), Attributes->GetCurrentStamina(), Attributes->GetMaxStamina()), FColor::Green);
 
-	FString PotionInfo = FString::Printf(TEXT("Potion: %d/%d"), 
-		Attributes->GetPotionCount(), 
+	FString PotionInfo = FString::Printf(TEXT("Potion: %d/%d"),
+		Attributes->GetPotionCount(),
 		Attributes->GetMaxPotionCount());
 	if (bPotionOnCooldown)
 	{
@@ -2037,7 +2096,7 @@ bool AMyCharacter::ShouldInterruptBlock() const
 void AMyCharacter::StartCameraRecenter()
 {
 	if (IsLockingOn()) return; // 锁定中不归中
-	
+
 	// 快照当前朝向作为目标
 	RecenterTargetRotation = GetActorRotation();
 	RecenterTargetRotation.Pitch = RecenterTargetPitch;

@@ -283,7 +283,7 @@ UAnimNotify → UAnimNotify_ComboBranchPoint (consumes buffered combo input and 
 UAnimNotify → UAnimNotify_PotionHeal (montage-driven partial potion healing)
 UDataAsset → UTreasureData (static mesh, gold value, pickup sound, scale)
 UDataAsset → UPlayerCharacterProfileDataAsset (single player character config entry: AttackConfig + ActionConfig)
-UDataAsset → UPlayerActionConfigDataAsset (player-only non-attack action montages and priority config: dodge, block, parry, optional potion)
+UDataAsset → UPlayerActionConfigDataAsset (player-only non-attack action structs: Dodge, Block, Parry, Potion, plus SharedPriority; legacy flat fields remain temporarily for asset migration)
 UDataAsset → UComboDataAsset (combo chain: SectionName, DamageMultiplier, StaminaCost, PoiseDamageMultiplier per segment)
 UDataAsset → UAttackConfigDataAsset (LightAttackCombo + SpecialAttacks for sprint/jump-style specials + ChargedAttack)
 UDataAsset → UEnemyAttackConfigDataAsset (Enemy attacks: montage, section, post-attack cooldown (v1.5: excludes montage duration and starts after attack end/interruption), MinDistance/MaxDistance, weight, damage/block-stamina multipliers, optional Motion Warping target config)
@@ -348,8 +348,8 @@ UDataAsset → UEnemyAttackConfigDataAsset (Enemy attacks: montage, section, pos
 - **当前范围**：`TryStartAction()` 启动 Dodge / Block / Parry / Potion，并支持普通轻攻击后摇的 CancelWindow。`Attack` / `HitReact` / `Death` 仍不通过该入口真实启动；蓄力攻击 / 冲刺攻击第一版不挂 CancelWindow。
 - **分发结构**：`TryStartAction()` 调用现有 `CanDodge()` / `CanStartBlock()` / `CanStartParry()` / `CanUsePotion()`，再分发到 `StartDodgeAction()`、`StartBlockAction()`、`StartParryAction()`、`StartPotionAction()`。这些 `Start*Action()` 返回 `bool`，资源缺失或配置缺失时必须在副作用前失败。
 - **Block 语义**：Block 是按住型动作。`TryStartAction(Block)` 内部同时检查 `bIsBlocking` 幂等和 `bBlockInputHeld` 输入意图；`ReleaseBlockInput()` 保持独立，负责松开、清理 `bIsBlocking` 和停止防御蒙太奇。
-- **副作用顺序**：消耗体力、消耗药瓶、设置状态、绑定 montage delegate 都必须发生在资源检查之后。`StartPotionAction()` 在 `Attributes->UsePotion()` 后没有失败返回路径；`StartBlockAction()` 先确认 `BlockMontage` / `AnimInstance` 可用，再设置 `bIsBlocking = true`。
-- **优先级数据**：`UPlayerActionConfigDataAsset::PriorityConfig` 保存 `Attack` / `Dodge` / `Block` / `Parry` / `Potion` / `HitReact` / `Death` 的动作优先级，数值越大优先级越高；`None` 不在 struct 字段中，由 `GetActionPriority(None)` 返回 `MIN_int32`。
+- **副作用顺序**：消耗体力、消耗药瓶、设置状态、绑定 montage delegate 都必须发生在资源检查之后。`StartPotionAction()` 在 `Attributes->UsePotion()` 后没有失败返回路径；`StartBlockAction()` 先确认 `ActionConfig->Block.Montage` / `AnimInstance` 可用，再设置 `bIsBlocking = true`。
+- **优先级数据**：`UPlayerActionConfigDataAsset` 使用 per-action struct 保存玩家主动动作优先级：`Dodge.Priority`、`Block.Priority`、`Parry.Priority`、`Potion.Priority`；`SharedPriority` 保存 `Attack` / `HitReact` / `Death` 这些非玩家主动动作的共享优先级。数值越大优先级越高；`None` 不在 struct 字段中，由 `GetActionPriority(None)` 返回 `MIN_int32`。旧 `PriorityConfig` 只作为一阶段 legacy 迁移字段保留。
 - **优先级查询**：`GetActionPriority()` 是唯一 priority switch 源，故意不写 `default` 以保留枚举新增时的 `-Wswitch` 漂移提示；`IsStrictlyHigherPriority()` 使用 `>`，`IsAtLeastSamePriority()` 使用 `>=`。`AMyCharacter` 只 forward 到 `ActionConfig`，不复制 switch。
 - **CancelWindow**：`UAnimNotifyState_PlayerActionCancelWindow` 只负责开关 `AMyCharacter::bActionCancelWindowOpen`；取消决策集中在 `CanCancelCurrentActionWith()`，要求当前状态是 `EAS_Attacking`、窗口开启、目标动作是 Dodge / Block / Parry / Potion、且目标动作 priority 严格高于 `Attack`。成功取消时 `TryStartAction()` 先调用 `CleanupInterruptedAttack()`，再启动新动作。
 - **CancelWindow 清理**：`ResetCombo()` 会清 `bActionCancelWindowOpen`；受击进入 `EAS_Stunning` 前也会主动关闭 CancelWindow。按住 Block 时，`OpenActionCancelWindow()` 会在窗口开启瞬间主动尝试 `TryStartAction(Block)`，因为按住型输入不会产生新的 Started 事件。
@@ -479,9 +479,9 @@ UDataAsset → UEnemyAttackConfigDataAsset (Enemy attacks: montage, section, pos
 
 - **入口职责**：`UPlayerCharacterProfileDataAsset` 是主角 Blueprint 的单一配置入口，只引用子 DataAsset，不复制所有字段，不持有 runtime state。
 - **当前子配置**：`AttackConfig` 指向现有 `UAttackConfigDataAsset`；`ActionConfig` 指向 `UPlayerActionConfigDataAsset`。
-- **ActionConfig 范围**：`UPlayerActionConfigDataAsset` 保存主角专属非攻击动作 Montage：`DodgeMontage`、`BlockMontage`、`ParryMontage`、可选 `PotionMontage`，并保存玩家动作优先级配置。`HitReactMontage` / `DeathMontage` 仍留在 `ABaseCharacter`，因为玩家和敌人共用。
+- **ActionConfig 范围**：`UPlayerActionConfigDataAsset` 保存主角专属非攻击动作配置：`Dodge.Montage/Priority/StaminaCost`、`Block.Montage/Priority/BlockRaiseSection`、`Parry.Montage/Priority`、`Potion.Montage/Priority/HealPercent/Cooldown`，并通过 `SharedPriority` 保存 `Attack` / `HitReact` / `Death` 的共享优先级。旧 `DodgeMontage`、`BlockMontage`、`ParryMontage`、`PotionMontage`、`PriorityConfig` 字段暂留在 `Legacy` category 用于资产迁移，不是运行时主配置源。`HitReactMontage` / `DeathMontage` 仍留在 `ABaseCharacter`，因为玩家和敌人共用。
 - **行为所有权**：`AMyCharacter` 仍负责状态切换、Montage 播放、打断清理和恢复；DataAsset 只提供配置。
-- **配置失败语义**：未设置 `PlayerProfile`、`AttackConfig` 或 `ActionConfig` 时输出 warning 并让对应动作失败。`PotionMontage` 为空不是错误配置，喝药会立即回血并进入冷却。
+- **配置失败语义**：未设置 `PlayerProfile`、`AttackConfig` 或 `ActionConfig` 时输出 warning 并让对应动作失败。`Potion.Montage` 为空不是错误配置，喝药会按 `Potion.HealPercent` 立即回血并按 `Potion.Cooldown` 进入冷却。
 
 <a name="charged-attack-system"></a>
 ## Charged Attack System（蓄力攻击系统）
@@ -501,7 +501,7 @@ UDataAsset → UEnemyAttackConfigDataAsset (Enemy attacks: montage, section, pos
 - **方向判定**：无输入时播 `Dodge_B`；非锁定 + 有输入时转向输入方向并播 `Dodge_F`；锁定 + 有输入时保持面向敌人，按角色本地输入方向切 8 个 45° 扇区（`Dodge_F` / `Dodge_FR` / `Dodge_R` / `Dodge_BR` / `Dodge_B` / `Dodge_BL` / `Dodge_L` / `Dodge_FL`）
 - **输入缓存 fallback**：`ACharacterController::CachedMoveInput` 先于 gameplay gate 采样移动输入。攻击 CancelWindow 等状态会阻止 `AddMovementInput()`，导致 Pawn 的 `GetLastMovementInputVector()` 为空；此时 `ComputeDodgeDirection()` 会用 controller 缓存按 `ControlRotation` 转成 world direction，仅用于翻滚 section 判定，不放开攻击中的实际移动。
 - **无输入语义**：`ComputeDodgeDirection()` 只在有 Pawn 输入或 controller 缓存输入时返回方向；真无输入返回 `FVector::ZeroVector`，由 `SelectDodgeSection()` 统一判空并返回 `Dodge_B`。
-- **蒙太奇契约**：`DodgeMontage` 必须提供上述 section；每个 section 都需要覆盖 `AnimNotifyState_DodgeInvulnerable`，否则该方向会缺失无敌帧
+- **蒙太奇契约**：`ActionConfig->Dodge.Montage` 必须提供上述 section；每个 section 都需要覆盖 `AnimNotifyState_DodgeInvulnerable`，否则该方向会缺失无敌帧
 - **⚠️ 执行顺序约束**：`SelectDodgeSection()` 必须在 `FaceDirection2D()` 之前调用，否则 `UnrotateVector()` 参考系错误
 
 ## Hearing Perception System
@@ -519,9 +519,9 @@ UDataAsset → UEnemyAttackConfigDataAsset (Enemy attacks: montage, section, pos
 <a name="potion-system"></a>
 ## Potion System (药瓶系统)
 
-- **恢复机制**：`PotionMontage` 配置在 `PlayerProfile->ActionConfig` 中；存在蒙太奇时，`UAnimNotify_PotionHeal` 从蒙太奇 notify 触发分段恢复，默认单次 `HealPercent = 0.25`。当前蒙太奇可通过放置多个 notify 形成分段回血；被打断只保留已触发部分。`PotionMontage` 为空时是合法 fallback：`UsePotion()` 立即回血并启动冷却。
+- **恢复机制**：`Potion.Montage` 配置在 `PlayerProfile->ActionConfig` 中；存在蒙太奇时，`UAnimNotify_PotionHeal` 从蒙太奇 notify 触发分段恢复，默认单次 `HealPercent = 0.25`。当前蒙太奇可通过放置多个 notify 形成分段回血；被打断只保留已触发部分。`Potion.Montage` 为空时是合法 fallback：`UsePotion()` 按 `Potion.HealPercent` 立即回血并启动冷却。
 - **状态管理**：新增 `EAS_UsingPotion` 状态，体力耗尽时可喝药，喝药期间可移动但速度降低到步行速度
-- **HUD 反馈**：`AMyCharacter::UpdatePotionCooldownHUD()` 将 `PotionCooldownTimer` 剩余时间推给 `UPlayerHUDWidget::SetPotionCooldown()`。`WBP_PlayerHUD` 需要绑定 `Image_PotionIcon`、`Image_PotionCooldownOverlay`、`PB_PotionCooldown`、`Text_PotionCooldown` 和 `Text_PotionCount`；冷却期间显示遮罩、进度和倒计时，药瓶为空时降低图标透明度。
+- **HUD 反馈**：`AMyCharacter::UpdatePotionCooldownHUD()` 将 `PotionCooldownTimer` 剩余时间和 `ActionConfig->Potion.Cooldown` 总时长推给 `UPlayerHUDWidget::SetPotionCooldown()`。`WBP_PlayerHUD` 需要绑定 `Image_PotionIcon`、`Image_PotionCooldownOverlay`、`PB_PotionCooldown`、`Text_PotionCooldown` 和 `Text_PotionCount`；冷却期间显示遮罩、进度和倒计时，药瓶为空时降低图标透明度。
 - **体力恢复**：喝药期间不暂停体力恢复（魂类设计：喝药是防御动作）
 - **打断机制**：`GetHit()` 打断喝药，`HandleExhausted()` 不打断；`InterruptPotion()` 只有在当前确实处于喝药状态或喝药蒙太奇仍在播放时才启动冷却，避免无关中断误触发药瓶 cooldown。
 

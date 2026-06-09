@@ -175,6 +175,10 @@ private:
 	int32 GetActionPriority(EPlayerActionType Action) const;
 	bool IsStrictlyHigherPriority(EPlayerActionType NewAction, EPlayerActionType CurrentAction) const;
 	bool IsAtLeastSamePriority(EPlayerActionType NewAction, EPlayerActionType CurrentAction) const;
+	float GetDodgeStaminaCost(bool bLogFallback) const;
+	float GetPotionCooldown(bool bLogFallback) const;
+	float GetPotionFallbackHealPercent() const;
+	FName GetBlockRaiseSection() const;
 
 	/* 提取方法 */
 	void InitializePlayerHUD();
@@ -259,14 +263,14 @@ private:
 	FTimerHandle ParryCooldownTimer;
 
 	/* 翻滚 */
-	UPROPERTY(EditDefaultsOnly, Category = "Combat|Dodge", meta = (ToolTip = "翻滚体力消耗。"))
+	UPROPERTY(VisibleAnywhere, Category = "Combat|Dodge|Legacy", meta = (ToolTip = "DataAsset 缺失时的翻滚体力消耗 fallback。正常路径请在 DA_PlayerActionConfig.Dodge.StaminaCost 调整。"))
 	float DodgeStaminaCost = 15.f;
 	bool bDodgeInvulnerable = false;
 
 	/* 药瓶 */
 	bool bPotionOnCooldown = false;
 	FTimerHandle PotionCooldownTimer;
-	UPROPERTY(EditDefaultsOnly, Category = "Combat|Potion")
+	UPROPERTY(VisibleAnywhere, Category = "Combat|Potion|Legacy", meta = (ToolTip = "DataAsset 缺失时的喝药冷却 fallback。正常路径请在 DA_PlayerActionConfig.Potion.Cooldown 调整。"))
 	float PotionCooldown = 2.f;
 
 	void StartPotionCooldown();
@@ -381,24 +385,24 @@ private:
 	FORCEINLINE UAnimMontage* GetDodgeMontage() const
 	{
 		const UPlayerActionConfigDataAsset* ActionConfig = GetActionConfig();
-		return ActionConfig ? ActionConfig->DodgeMontage.Get() : nullptr;
+		return ActionConfig ? ActionConfig->Dodge.Montage.Get() : nullptr;
 	}
 
 	FORCEINLINE UAnimMontage* GetBlockMontage() const
 	{
 		const UPlayerActionConfigDataAsset* ActionConfig = GetActionConfig();
-		return ActionConfig ? ActionConfig->BlockMontage.Get() : nullptr;
+		return ActionConfig ? ActionConfig->Block.Montage.Get() : nullptr;
 	}
 
 	FORCEINLINE UAnimMontage* GetParryMontage() const
 	{
 		const UPlayerActionConfigDataAsset* ActionConfig = GetActionConfig();
-		return ActionConfig ? ActionConfig->ParryMontage.Get() : nullptr;
+		return ActionConfig ? ActionConfig->Parry.Montage.Get() : nullptr;
 	}
 
 	FORCEINLINE UAnimMontage* GetPotionMontage() const
 	{
 		const UPlayerActionConfigDataAsset* ActionConfig = GetActionConfig();
-		return ActionConfig ? ActionConfig->PotionMontage.Get() : nullptr;
+		return ActionConfig ? ActionConfig->Potion.Montage.Get() : nullptr;
 	}
 };
