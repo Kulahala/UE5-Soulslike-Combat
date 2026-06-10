@@ -212,10 +212,7 @@ void AMyCharacter::PerformSprintAttack()
 		// 冲刺攻击发出噪音
 		EmitNoise(AttackNoiseLoudness, AttackNoiseRange);
 
-		// 手动绑定 End Delegate（与 PlayAttackMontage 保持一致）
-		FOnMontageEnded MontageEndedDelegate;
-		MontageEndedDelegate.BindUObject(this, &AMyCharacter::OnAttackMontageEnded);
-		AnimInstance->Montage_SetEndDelegate(MontageEndedDelegate, SprintConfig->Montage);
+		BindMontageEndDelegate(AnimInstance, SprintConfig->Montage, &AMyCharacter::OnAttackMontageEnded);
 	}
 }
 
@@ -297,9 +294,8 @@ void AMyCharacter::EnterChargeMode()
 	UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
 	if (AnimInstance)
 	{
-		FOnMontageEnded MontageEndedDelegate;
-		MontageEndedDelegate.BindUObject(this, &AMyCharacter::OnAttackMontageEnded);
-		AnimInstance->Montage_SetEndDelegate(MontageEndedDelegate, AttackConfig->ChargedAttack.Montage);
+		BindMontageEndDelegate(AnimInstance, AttackConfig->ChargedAttack.Montage,
+		                       &AMyCharacter::OnAttackMontageEnded);
 	}
 }
 
@@ -429,10 +425,7 @@ bool AMyCharacter::StartComboSegment(int32 SegmentIndex, EComboPlaybackMode Play
 	else
 	{
 		ContinuationAnimInstance->Montage_JumpToSection(Segment->SectionName, MontageToPlay);
-
-		FOnMontageEnded EndDelegate;
-		EndDelegate.BindUObject(this, &AMyCharacter::OnAttackMontageEnded);
-		ContinuationAnimInstance->Montage_SetEndDelegate(EndDelegate, MontageToPlay);
+		BindMontageEndDelegate(ContinuationAnimInstance, MontageToPlay, &AMyCharacter::OnAttackMontageEnded);
 	}
 
 	EmitNoise(AttackNoiseLoudness, AttackNoiseRange);
@@ -458,12 +451,7 @@ void AMyCharacter::PlayAttackMontage(const FName& SectionName)
 
 	PlayMontageSection(MontageToPlay, SectionName);
 
-	if (UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance(); AnimInstance && MontageToPlay)
-	{
-		FOnMontageEnded EndDelegate;
-		EndDelegate.BindUObject(this, &AMyCharacter::OnAttackMontageEnded);
-		AnimInstance->Montage_SetEndDelegate(EndDelegate, MontageToPlay);
-	}
+	BindMontageEndDelegate(GetMesh()->GetAnimInstance(), MontageToPlay, &AMyCharacter::OnAttackMontageEnded);
 }
 
 void AMyCharacter::OpenComboWindow()
@@ -566,7 +554,10 @@ void AMyCharacter::Jump()
 	if (ActionState == EActionState::EAS_UsingPotion) return;
 	if (CanJump() && ActionState != EActionState::EAS_Exhausted)
 	{
-		Attributes->UseStamina(10.f);
+		if (Attributes)
+		{
+			Attributes->UseStamina(10.f);
+		}
 		Super::Jump();
 	}
 }
@@ -665,25 +656,7 @@ void AMyCharacter::Die()
 	// 关闭碰撞
 	GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
-	// 播放死亡蒙太奇
-	UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
-	UAnimMontage* DeathMontageToPlay = GetDeathMontage();
-	if (AnimInstance && DeathMontageToPlay)
-	{
-		AnimInstance->Montage_Stop(0.1f);
-		const TArray<FName>& ConfigSections = GetDeathSections();
-		FName SectionName = NAME_None;
-		if (!ConfigSections.IsEmpty())
-		{
-			SectionName = ConfigSections[FMath::RandRange(0, ConfigSections.Num() - 1)];
-		}
-
-		AnimInstance->Montage_Play(DeathMontageToPlay);
-		if (SectionName != NAME_None)
-		{
-			AnimInstance->Montage_JumpToSection(SectionName, DeathMontageToPlay);
-		}
-	}
+	PlayDeathMontage();
 }
 
 void AMyCharacter::HandleExhausted()
@@ -1068,8 +1041,9 @@ void AMyCharacter::Equip()
 		// 武器：继续走原逻辑
 		if (WeaponState == EWeaponState::EWS_Unequipped)
 		{
+			AWeapon* Weapon = Cast<AWeapon>(OverLapItem);
 			IPickupInterface::Execute_OnPickup(OverLapItem, this);
-			if (AWeapon* Weapon = Cast<AWeapon>(OverLapItem))
+			if (Weapon)
 			{
 				EquippedWeapon = Weapon;
 			}
@@ -1184,9 +1158,7 @@ bool AMyCharacter::StartDodgeAction()
 	// 停止移动噪音定时器（翻滚期间不持续发声）
 	StopMovementNoiseTimer();
 
-	FOnMontageEnded EndDelegate;
-	EndDelegate.BindUObject(this, &AMyCharacter::OnDodgeMontageEnded);
-	Anim->Montage_SetEndDelegate(EndDelegate, DodgeMontage);
+	BindMontageEndDelegate(Anim, DodgeMontage, &AMyCharacter::OnDodgeMontageEnded);
 
 	return true;
 }
@@ -1224,9 +1196,7 @@ bool AMyCharacter::StartParryAction()
 	ActionState = EActionState::EAS_Parrying;
 	PlayMontageSection(ParryMontage, FName("Parry"));
 
-	FOnMontageEnded EndDelegate;
-	EndDelegate.BindUObject(this, &AMyCharacter::OnParryMontageEnded);
-	Anim->Montage_SetEndDelegate(EndDelegate, ParryMontage);
+	BindMontageEndDelegate(Anim, ParryMontage, &AMyCharacter::OnParryMontageEnded);
 
 	return true;
 }
@@ -1396,9 +1366,7 @@ void AMyCharacter::PlayPotionMontage()
 	if (AnimInstance && PotionMontage)
 	{
 		AnimInstance->Montage_Play(PotionMontage);
-		FOnMontageEnded EndDelegate;
-		EndDelegate.BindUObject(this, &AMyCharacter::OnPotionMontageEnded);
-		AnimInstance->Montage_SetEndDelegate(EndDelegate, PotionMontage);
+		BindMontageEndDelegate(AnimInstance, PotionMontage, &AMyCharacter::OnPotionMontageEnded);
 	}
 }
 
@@ -1605,6 +1573,19 @@ void AMyCharacter::PlayBlockMontage(const FName& SectionName)
 	PlayMontageSection(BlockMontage, SectionName);
 }
 
+void AMyCharacter::BindMontageEndDelegate(UAnimInstance* AnimInstance, UAnimMontage* Montage,
+                                          void (AMyCharacter::*Callback)(UAnimMontage*, bool))
+{
+	if (!AnimInstance || !Montage)
+	{
+		return;
+	}
+
+	FOnMontageEnded EndDelegate;
+	EndDelegate.BindUObject(this, Callback);
+	AnimInstance->Montage_SetEndDelegate(EndDelegate, Montage);
+}
+
 void AMyCharacter::OnAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted)
 {
 	Super::OnAttackMontageEnded(Montage, bInterrupted);
@@ -1615,29 +1596,16 @@ void AMyCharacter::OnAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted
 		return;
 	}
 
-	CancelChargeInputState(); // 新增蓄力清理
-	RestoreRotationMode();
+	RecoverFromAttackMontageEnd();
+}
 
-	ResetCombo();
-
-	if (ActionState == EActionState::EAS_Attacking)
+void AMyCharacter::OnHitReactEnd()
+{
+	const EActionState RecoveredState = RecoverActionStateAfterMontage(EActionState::EAS_Stunning, false);
+	if (RecoveredState == EActionState::EAS_UnOccupied
+		&& GetLastMovementInputVector().SizeSquared2D() > KINDA_SMALL_NUMBER)
 	{
-		if (ShouldRecoverToExhausted_Attack())
-		{
-			ActionState = EActionState::EAS_Exhausted;
-			EnsureExhaustionRecoveryTimer();
-		}
-		else
-		{
-			ActionState = EActionState::EAS_UnOccupied;
-		}
-	}
-
-	bPendingExhaustedAfterAttack = false;
-
-	if (Attributes)
-	{
-		Attributes->ResumeStaminaRegen();
+		StartMovementNoiseTimer();
 	}
 }
 
@@ -2189,7 +2157,7 @@ EActionState AMyCharacter::RecoverActionStateAfterMontage(EActionState ExpectedS
 	return ActionState;
 }
 
-void AMyCharacter::CleanupInterruptedAttack()
+void AMyCharacter::RecoverFromAttackMontageEnd()
 {
 	// 旋转恢复必须在早期还原：free-run 攻击设了双 false，打断后必须还原
 	RestoreRotationMode();
@@ -2215,4 +2183,9 @@ void AMyCharacter::CleanupInterruptedAttack()
 	{
 		Attributes->ResumeStaminaRegen();
 	}
+}
+
+void AMyCharacter::CleanupInterruptedAttack()
+{
+	RecoverFromAttackMontageEnd();
 }

@@ -22,6 +22,7 @@ class UComboDataAsset;
 class UAttackConfigDataAsset;
 class UHitReactionConfigDataAsset;
 class USoundBase;
+class UAnimInstance;
 
 UCLASS()
 class TEST_API AMyCharacter : public ABaseCharacter, public IBlockableInterface
@@ -123,6 +124,8 @@ public:
 	/* 听觉感知 */
 	void StartMovementNoiseTimer();
 	void StopMovementNoiseTimer();
+	// 由 UAnimNotify_CharacterHitReactEnd 转发调用，统一玩家受击硬直恢复入口。
+	void OnHitReactEnd();
 
 protected:
 	/* 蒙太奇 */
@@ -157,7 +160,11 @@ private:
 	bool ShouldRecoverToExhausted_Attack() const;
 	void EnsureExhaustionRecoveryTimer();
 	EActionState RecoverActionStateAfterMontage(EActionState ExpectedState, bool bResumeStaminaRegen);
+	void RecoverFromAttackMontageEnd();
 	void CleanupInterruptedAttack();
+	// 玩家侧 7 处 Montage EndDelegate 绑定的统一入口；敌人侧保留局部绑定，避免收尾期扩大重构范围。
+	void BindMontageEndDelegate(UAnimInstance* AnimInstance, UAnimMontage* Montage,
+	                            void (AMyCharacter::*Callback)(UAnimMontage*, bool));
 	bool StartComboSegment(int32 SegmentIndex, EComboPlaybackMode PlaybackMode);
 	/**
 	 * 尝试启动指定动作。

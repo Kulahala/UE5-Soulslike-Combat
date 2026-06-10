@@ -232,27 +232,7 @@ void AEnemy::Die()
 	}
 	HealthBarWidgetComp->SetVisibility(false);
 
-	// 播放死亡动画
-	UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
-	UAnimMontage* DeathMontageToPlay = GetDeathMontage();
-	if (AnimInstance && DeathMontageToPlay)
-	{
-		//强制打断其他动画
-		AnimInstance->Montage_Stop(0.1f);
-
-		const TArray<FName>& ConfigSections = GetDeathSections();
-		FName SectionName = NAME_None;
-		if (!ConfigSections.IsEmpty())
-		{
-			SectionName = ConfigSections[FMath::RandRange(0, ConfigSections.Num() - 1)];
-		}
-
-		AnimInstance->Montage_Play(DeathMontageToPlay);
-		if (SectionName != NAME_None)
-		{
-			AnimInstance->Montage_JumpToSection(SectionName, DeathMontageToPlay);
-		}
-	}
+	PlayDeathMontage();
 
 	// 设定销毁时间
 	SetLifeSpan(CorpseLifespan);
@@ -1101,8 +1081,7 @@ void AEnemy::TargetPerceptionUpdated(AActor* Actor, FAIStimulus Stimulus)
 		return;
 	}
 	// 锁定新目标
-	APawn* SeenPawn = dynamic_cast<APawn*>(Actor);
-	ChasingTarget = SeenPawn;
+	ChasingTarget = Actor;
 }
 
 // ==================== AI Tick ====================
@@ -1817,6 +1796,25 @@ bool AEnemy::IsAllyAttackingNearby(float& OutSuggestedWaitTime) const
 		return false;
 	}
 
+	const UWorld* World = GetWorld();
+	if (!World)
+	{
+		return false;
+	}
+
+	const float CurrentTime = World->GetTimeSeconds();
+	if (CachedAllyCheckTarget == ChasingTarget
+		&& CurrentTime - LastAllyAttackCheckTime < AllyAttackCheckCacheDuration)
+	{
+		OutSuggestedWaitTime = CachedAllySuggestedWaitTime;
+		return bCachedAllyAttackingNearby;
+	}
+
+	LastAllyAttackCheckTime = CurrentTime;
+	CachedAllyCheckTarget = ChasingTarget;
+	bCachedAllyAttackingNearby = false;
+	CachedAllySuggestedWaitTime = 0.f;
+
 	TArray<AActor*> NearbyEnemies;
 	UGameplayStatics::GetAllActorsOfClass(GetWorld(), AEnemy::StaticClass(), NearbyEnemies);
 
@@ -1831,6 +1829,8 @@ bool AEnemy::IsAllyAttackingNearby(float& OutSuggestedWaitTime) const
 				&& OtherEnemy->ChasingTarget == ChasingTarget)
 			{
 				OutSuggestedWaitTime = AttackCoordinationBuffer;
+				CachedAllySuggestedWaitTime = OutSuggestedWaitTime;
+				bCachedAllyAttackingNearby = true;
 				return true;
 			}
 		}

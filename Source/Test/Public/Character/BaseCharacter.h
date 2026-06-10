@@ -63,6 +63,7 @@ protected:
 	float CalcForwardDot2D(const FVector& WorldDirection) const;
 	virtual void PlayAttackMontage(const FName& SectionName);
 	virtual void PlayHitReactMontage(const FName& SectionName);
+	void PlayDeathMontage();
 	virtual bool CanAttack() const;
 	virtual void OnAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted);
 	virtual void OnHitReactMontageEnded(UAnimMontage* Montage, bool bInterrupted);

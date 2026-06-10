@@ -59,6 +59,8 @@ protected:
 	int32 MaxDrops = 3;
 
 private:
+	bool bBroken = false;
+
 	// 1. 完整的静态网格体
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true", ToolTip = "完整的静态网格体，破碎前显示。"))
 	UStaticMeshComponent* StaticMeshComp;

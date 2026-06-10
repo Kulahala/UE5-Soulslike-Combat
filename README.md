@@ -39,6 +39,14 @@ This README is a project overview. For implementation details, state machines, c
 | Debug & UI | Pause menu, debug settings page, HUD-rendered debug text, range/debug panel toggles |
 | Environment | Breakable actors and PCG-supported arena generation |
 
+### Extension Points
+
+- **Enemy variants**: enemy behavior is split between runtime FSM logic and `UEnemyAttackConfigDataAsset` entries. New enemy types can reuse patrol/chase/combat flow while changing attack montages, distance bands, weights, cooldowns, parry rules, and optional Motion Warping settings through data assets.
+- **Weapon variants**: weapon runtime logic is shared through `AWeapon`, including swept box traces, ignore-list handling, team filtering, block interception, hit feedback, base damage, and poise damage. Different weapon models can be configured through sockets, trace box dimensions, base values, and attack config references instead of rewriting hit resolution.
+- **Playable character profiles**: `UPlayerCharacterProfileDataAsset` acts as the single editable entry point for a playable character, referencing attack, action, and hit-reaction config assets. This keeps character setup modular and allows multiple playable profiles to share or swap subsets of combat data.
+- **DataAsset reuse**: combo chains, special attacks, charged attacks, enemy attack tables, action montages, and hit reactions are separated into focused data assets. The C++ layer owns state changes and combat rules; assets own tunable values and animation references.
+- **Future scaling path**: if the prototype grows into a larger RPG system, the current data-driven combat layer can be extended toward equipment-specific attack sets, enemy archetype libraries, richer hit-reaction tables, or a GAS-based ability/status layer without discarding the current combat pipeline.
+
 ### Architecture Deep Dives
 
 - [Player State Machine Flow](ARCHITECTURE.md#player-state-machine-flow)
@@ -113,6 +121,14 @@ This README is a project overview. For implementation details, state machines, c
 | 反馈 | 血条、缓冲血条、受击后退、相机晃动、伤害红晕 |
 | 调试与 UI | 暂停菜单、调试设置页、HUD 调试文本、范围/调试面板开关 |
 | 环境 | 可破坏物和 PCG 辅助竞技场生成 |
+
+### 扩展性设计
+
+- **敌人种类扩展**：敌人行为拆成运行时 FSM 逻辑和 `UEnemyAttackConfigDataAsset` 招式配置。新增敌人可以复用巡逻、追击、战斗、硬直和死亡流程，只替换攻击蒙太奇、距离区间、权重、冷却、是否可弹反和可选 Motion Warping 参数。
+- **武器种类扩展**：`AWeapon` 统一处理盒体扫掠、忽略列表、阵营过滤、格挡拦截、命中反馈、基础伤害和韧性伤害。不同武器可以通过挂点、Trace 盒体尺寸、基础数值和攻击配置引用扩展，不需要重写命中结算。
+- **可玩角色配置扩展**：`UPlayerCharacterProfileDataAsset` 作为主角蓝图的单一配置入口，引用攻击、动作和受击反应配置。多个可玩角色可以共享或替换部分 DataAsset，例如共用受击反应，但使用不同连招和动作资源。
+- **DataAsset 复用性**：连招链、特殊攻击、蓄力攻击、敌人招式表、玩家动作和受击反应拆成独立数据资产。C++ 负责状态切换和战斗规则，DataAsset 负责可调数值和动画资源引用。
+- **后续演进路径**：如果原型继续扩展，可以在当前数据驱动战斗层上增加武器专属攻击集、敌人 archetype 配置库、更丰富的受击反应表，或在技能/状态效果复杂后迁移到 GAS，而不需要推翻现有战斗管线。
 
 ### 架构细节入口
 

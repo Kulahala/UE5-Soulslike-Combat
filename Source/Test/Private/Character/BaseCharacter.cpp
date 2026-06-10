@@ -236,6 +236,31 @@ void ABaseCharacter::PlayHitReactMontage(const FName& SectionName)
 	}
 }
 
+void ABaseCharacter::PlayDeathMontage()
+{
+	UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
+	UAnimMontage* DeathMontageToPlay = GetDeathMontage();
+	if (!AnimInstance || !DeathMontageToPlay)
+	{
+		return;
+	}
+
+	AnimInstance->Montage_Stop(0.1f);
+
+	const TArray<FName>& ConfigSections = GetDeathSections();
+	FName SectionName = NAME_None;
+	if (!ConfigSections.IsEmpty())
+	{
+		SectionName = ConfigSections[FMath::RandRange(0, ConfigSections.Num() - 1)];
+	}
+
+	AnimInstance->Montage_Play(DeathMontageToPlay);
+	if (SectionName != NAME_None)
+	{
+		AnimInstance->Montage_JumpToSection(SectionName, DeathMontageToPlay);
+	}
+}
+
 UAnimMontage* ABaseCharacter::GetHitReactMontage() const
 {
 	const UHitReactionConfigDataAsset* ReactionConfig = GetReactionConfig();

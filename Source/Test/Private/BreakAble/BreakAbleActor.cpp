@@ -82,6 +82,12 @@ void ABreakAbleActor::SpawnSingleTreasure(UWorld* World)
 
 void ABreakAbleActor::GetHit_Implementation(const FVector& ImpactPoint, AActor* HitInstigator)
 {
+	if (bBroken)
+	{
+		return;
+	}
+
+	bBroken = true;
 	BreakReplaced(ImpactPoint);
 	UWorld* World = GetWorld();
 	if (!World)

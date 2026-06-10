@@ -46,6 +46,7 @@ void AWeapon::Equip(USceneComponent* Parent, const FName& SocketName, AActor* Ne
 
 	AttachMeshToSocket(Parent, SocketName);
 	ItemState = EItemState::EIS_Equipped;
+	DisablePickupCollision();
 
 	if (GetEffect())
 	{

@@ -227,6 +227,9 @@ private:
 	UPROPERTY(EditAnywhere, Category = "Combat|Attack Coordination", meta = (ClampMin = "1.0", ToolTip = "因队友攻击而被迫等待的最大秒数"))
 	float MaxAttackCoordinationWait = 3.f;
 
+	UPROPERTY(EditAnywhere, Category = "Combat|Attack Coordination", meta = (ClampMin = "0.0", ToolTip = "队友攻击扫描缓存时间。避免战斗态每帧全场景扫描。"))
+	float AllyAttackCheckCacheDuration = 0.25f;
+
 	// 选择武器类，BeginPlay自动生成
 	UPROPERTY(EditAnywhere, Category = "Combat", meta = (ToolTip = "敌人使用的武器类，BeginPlay 时自动生成并装备。"))
 	TSubclassOf<AWeapon> WeaponClass;
@@ -313,6 +316,11 @@ private:
 
 	// 攻击协调：检查同目标附近队友是否正在攻击，返回建议等待时间
 	bool IsAllyAttackingNearby(float& OutSuggestedWaitTime) const;
+	mutable float LastAllyAttackCheckTime = -1000.f;
+	mutable bool bCachedAllyAttackingNearby = false;
+	mutable float CachedAllySuggestedWaitTime = 0.f;
+	// 只用来做目标地址比较，不解引用，避免缓存目标生命周期耦合。
+	mutable const AActor* CachedAllyCheckTarget = nullptr;
 	void StartCombatRetreatSpeedEase(const FVector& GoalLocation);
 	void UpdateCombatRetreatSpeedEase();
 	void ClearCombatRetreatSpeedEase();

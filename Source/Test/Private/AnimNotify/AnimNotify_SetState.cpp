@@ -46,23 +46,7 @@ void UAnimNotify_CharacterHitReactEnd::Notify(USkeletalMeshComponent* MeshComp, 
 	{
 		if (AMyCharacter* MyCharacter = Cast<AMyCharacter>(MeshComp->GetOwner()))
 		{
-			if (MyCharacter->GetActionState() == EActionState::EAS_Stunning)
-			{
-				if (MyCharacter->IsExhaustionTimerActive())
-				{
-					MyCharacter->SetActionState(EActionState::EAS_Exhausted);
-				}
-				else
-				{
-					MyCharacter->SetActionState(EActionState::EAS_UnOccupied);
-
-					// 硬直结束后，如果仍在移动则重启定时器
-					if (MyCharacter->GetLastMovementInputVector().SizeSquared2D() > KINDA_SMALL_NUMBER)
-					{
-						MyCharacter->StartMovementNoiseTimer();
-					}
-				}
-			}
+			MyCharacter->OnHitReactEnd();
 		}
 	}
 }

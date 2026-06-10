@@ -260,8 +260,7 @@ AActor
 │   └── ATreasure (gold value, initialized from UTreasureData asset)
 ├── ABreakAbleActor + IHitInterface (static mesh → GeometryCollection swap on hit)
 ├── Interfaces: IHitInterface (GetHit — hit reaction), IBlockableInterface (TryBlockHit — angle/stamina block check)
-├── AArenaGenerator (USplineComponent + UPCGComponent for PCG-based arena spawning)
-└── ABird (APawn subclass, flyable spectator)
+└── AArenaGenerator (USplineComponent + UPCGComponent for PCG-based arena spawning)
 
 ACharacter
 ├── AMyCharacter (UAttributeComponent, spring arm + camera, weapon equipping, lock-on targeting)
@@ -313,7 +312,7 @@ UDataAsset → UEnemyAttackConfigDataAsset (Enemy attacks: montage, section, pos
 7. **NotifyBegin** → `AWeapon::StartWeaponTrace()` (records old box positions) + `SetAttackHyperArmor(true)` (player only)
 8. **NotifyTick** → `AWeapon::ExecuteWeaponTrace()` (sweeps from old→new center to prevent ghost swings)
 9. On hit:
-   - 同阵营命中：不 `ApplyDamage`，但仍走 `GetHit` 路径（击退、命中反馈、相机晃动）。同阵营判定通过 `FCombatTeamHelper::ShareTeamTag()`（Weapon + Enemy 共用）
+   - 同阵营命中：不 `ApplyDamage`，不造成韧性伤害，但仍走 `GetHit` / `DispatchHitFeedback` 路径（击退、命中反馈、相机晃动、卡肉、本次攻击黑名单）。同阵营判定通过 `FCombatTeamHelper::ShareTeamTag()`（Weapon + Enemy 共用），当前只认 `Player` / `Enemy` 阵营 Tag 白名单，避免功能 Tag 误判同队
    - 跨阵营命中：`IBlockableInterface::TryBlockHit()` 在 `ApplyDamage` 前拦截；格挡成功：减伤 + 跳过硬直；弹反成功：瞬间清空攻击方韧性触发破防
    - `ExecuteWeaponTrace()` 通过 `FPendingHitContext` 写入每命中的上下文（instigator、knockback scale、blocked flag、stun flag），然后调用 `GetHit()`
    - `ABaseCharacter::GetHit_Implementation()` 消费 context 驱动击退/受击反应，子类（`AMyCharacter`、`AEnemy`）在各自硬直逻辑后清空 context
@@ -339,7 +338,8 @@ UDataAsset → UEnemyAttackConfigDataAsset (Enemy attacks: montage, section, pos
   - `ShouldRecoverToExhausted_Attack() const` — 额外检查 `bPendingExhaustedAfterAttack`，攻击路径专用，防止延迟耗尽 flag 被通用恢复逻辑误消费
   - `EnsureExhaustionRecoveryTimer()` — 统一启动疲惫恢复计时器的 helper
 - **通用恢复路径**：`RecoverActionStateAfterMontage(ExpectedState, bResumeStaminaRegen)` 处理 parry/dodge/potion 的蒙太奇结束恢复，返回最终 `EActionState`。调用方如有动作专属尾部逻辑必须使用返回值；`OnDodgeMontageEnded()` 在恢复到 `EAS_Exhausted` 时提前 return，保持旧版"耗尽后不重启移动噪音"行为。
-- **攻击专属清理**：`CleanupInterruptedAttack()` 处理攻击打断路径：恢复旋转、取消蓄力输入、重置连招、解决攻击耗尽、清除 `bPendingExhaustedAfterAttack`、恢复体力恢复。攻击恢复保持独立，不与通用恢复路径混用。
+- **攻击专属恢复**：`RecoverFromAttackMontageEnd()` 处理攻击自然结束和打断后的共同恢复：恢复旋转、取消蓄力输入、重置连招、解决攻击耗尽、清除 `bPendingExhaustedAfterAttack`、恢复体力恢复。`CleanupInterruptedAttack()` 保留为打断语义入口并转发到该 helper；攻击恢复保持独立，不与通用恢复路径混用。
+- **受击恢复入口**：`AMyCharacter::OnHitReactEnd()` 由 `UAnimNotify_CharacterHitReactEnd` 转发调用，内部复用 `RecoverActionStateAfterMontage(EAS_Stunning, false)`。Notify 不直接修改玩家 `ActionState`，避免恢复逻辑漂移。
 - **扩展指引**：添加新的蒙太奇驱动动作时，优先复用这些 helper，再考虑新增 `EActionState` 或更广 HFSM。
 
 <a name="player-action-start-entry"></a>

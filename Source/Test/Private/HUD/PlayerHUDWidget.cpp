@@ -63,12 +63,15 @@ void UPlayerHUDWidget::SetPotionCooldown(float RemainingTime, float TotalTime)
 
 void UPlayerHUDWidget::BindToAttributes(UAttributeComponent* Attributes)
 {
-	if (Attributes)
+	UnbindFromAttributes();
+	BoundAttributes = Attributes;
+
+	if (BoundAttributes)
 	{
-		Attributes->OnHealthChanged.AddDynamic(this, &UPlayerHUDWidget::SetHealthPercent);
+		BoundAttributes->OnHealthChanged.AddDynamic(this, &UPlayerHUDWidget::SetHealthPercent);
 
 		// 初始化血量显示（同步当前值和目标值）
-		float InitialHealth = Attributes->GetHealthPercent();
+		float InitialHealth = BoundAttributes->GetHealthPercent();
 		TargetHealthPercent = InitialHealth;
 		CurrentHealthPercent = InitialHealth;
 		if (PB_Health)
@@ -76,12 +79,31 @@ void UPlayerHUDWidget::BindToAttributes(UAttributeComponent* Attributes)
 			PB_Health->SetPercent(InitialHealth);
 		}
 
-		Attributes->OnStaminaChanged.AddDynamic(this, &UPlayerHUDWidget::SetStaminaPercent);
-		SetStaminaPercent(Attributes->GetStaminaPercent());
+		BoundAttributes->OnStaminaChanged.AddDynamic(this, &UPlayerHUDWidget::SetStaminaPercent);
+		SetStaminaPercent(BoundAttributes->GetStaminaPercent());
 
-		Attributes->OnPotionCountChanged.AddDynamic(this, &UPlayerHUDWidget::SetPotionCount);
-		SetPotionCount(Attributes->GetPotionCount(), Attributes->GetMaxPotionCount());
+		BoundAttributes->OnPotionCountChanged.AddDynamic(this, &UPlayerHUDWidget::SetPotionCount);
+		SetPotionCount(BoundAttributes->GetPotionCount(), BoundAttributes->GetMaxPotionCount());
 	}
+}
+
+void UPlayerHUDWidget::UnbindFromAttributes()
+{
+	if (!BoundAttributes)
+	{
+		return;
+	}
+
+	BoundAttributes->OnHealthChanged.RemoveDynamic(this, &UPlayerHUDWidget::SetHealthPercent);
+	BoundAttributes->OnStaminaChanged.RemoveDynamic(this, &UPlayerHUDWidget::SetStaminaPercent);
+	BoundAttributes->OnPotionCountChanged.RemoveDynamic(this, &UPlayerHUDWidget::SetPotionCount);
+	BoundAttributes = nullptr;
+}
+
+void UPlayerHUDWidget::NativeDestruct()
+{
+	UnbindFromAttributes();
+	Super::NativeDestruct();
 }
 
 void UPlayerHUDWidget::SetPendingDamageFlashScale(float Scale)

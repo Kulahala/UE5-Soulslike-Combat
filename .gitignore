@@ -27,6 +27,8 @@ todo.md
 .claude/
 .claudeignore
 .antigravitycli/
+output/
+GameplayCpp_Interview_Preparation.md
 
 # Git-LFS S3 Adapter
 lfs-s3.exe

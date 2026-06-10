@@ -10,6 +10,7 @@ void AShield::EquipToOffhand(USceneComponent* Parent, const FName& SocketName, A
 	FAttachmentTransformRules Rules(EAttachmentRule::SnapToTarget, true);
 	AttachToComponent(Parent, Rules, SocketName);
 	ItemState = EItemState::EIS_Equipped;
+	DisablePickupCollision();
 	if (GetEffect()) GetEffect()->Deactivate();
 	if (EquipSound) UGameplayStatics::PlaySoundAtLocation(this, EquipSound, GetActorLocation());
 }

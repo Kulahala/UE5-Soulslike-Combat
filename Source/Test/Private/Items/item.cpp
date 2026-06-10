@@ -104,7 +104,19 @@ void Aitem::SphereEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* O
 {
 	if (AMyCharacter* SlashCharacter = Cast<AMyCharacter>(OtherActor))
 	{
-		SlashCharacter->SetEquippedItem(nullptr);
+		if (SlashCharacter->GetEquippedItem() == this)
+		{
+			SlashCharacter->SetEquippedItem(nullptr);
+		}
+	}
+}
+
+void Aitem::DisablePickupCollision()
+{
+	if (Sphere)
+	{
+		Sphere->SetGenerateOverlapEvents(false);
+		Sphere->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	}
 }
 

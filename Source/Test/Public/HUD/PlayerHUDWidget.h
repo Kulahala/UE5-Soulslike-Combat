@@ -52,11 +52,18 @@ public:
 
 protected:
 	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
+	virtual void NativeDestruct() override;
 	virtual int32 NativePaint(const FPaintArgs& Args, const FGeometry& AllottedGeometry,
 		const FSlateRect& MyCullingRect, FSlateWindowElementList& OutDrawElements,
 		int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const override;
 
 private:
+	void UnbindFromAttributes();
+
+	// 当前绑定的属性组件，用于重复 Bind 时去重，并在 NativeDestruct 中解绑。
+	UPROPERTY(Transient)
+	UAttributeComponent* BoundAttributes = nullptr;
+
 	// 缓冲条追赶真实血条的速度
 	UPROPERTY(EditAnywhere, Category = "Health Bar", meta = (ToolTip = "缓冲条追赶真实血条的插值速度。"))
 	float BufferInterpSpeed = 3.0f;
