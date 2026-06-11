@@ -179,7 +179,9 @@ private:
 	bool StartBlockAction();
 	bool StartParryAction();
 	bool StartPotionAction();
+	EPlayerActionType GetCurrentPlayerActionType() const;
 	bool CanCancelCurrentActionWith(EPlayerActionType NewAction) const;
+	void CleanupInterruptedAction(EPlayerActionType InterruptedAction);
 	int32 GetActionPriority(EPlayerActionType Action) const;
 	bool IsStrictlyHigherPriority(EPlayerActionType NewAction, EPlayerActionType CurrentAction) const;
 	bool IsAtLeastSamePriority(EPlayerActionType NewAction, EPlayerActionType CurrentAction) const;

@@ -1083,15 +1083,20 @@ void AMyCharacter::UsePotion()
 
 bool AMyCharacter::TryStartAction(EPlayerActionType Action)
 {
+	const EPlayerActionType CurrentAction = GetCurrentPlayerActionType();
 	const bool bShouldCancel = CanCancelCurrentActionWith(Action);
-	if (ActionState == EActionState::EAS_Attacking && !bShouldCancel)
+	if (CurrentAction != EPlayerActionType::None && CurrentAction != Action && !bShouldCancel)
 	{
 		return false;
 	}
 
 	if (bShouldCancel)
 	{
-		CleanupInterruptedAttack();
+		// Block 是常驻姿态，目标动作会在资源校验通过后自行 InterruptBlock()，避免目标资源缺失时丢失举盾。
+		if (CurrentAction != EPlayerActionType::Block)
+		{
+			CleanupInterruptedAction(CurrentAction);
+		}
 	}
 
 	bool bStarted = false;
@@ -1132,8 +1137,8 @@ bool AMyCharacter::TryStartAction(EPlayerActionType Action)
 	if (bShouldCancel && !bStarted)
 	{
 		UE_LOG(LogTemp, Warning,
-		       TEXT("%s: Attack cancelled but %s failed to start. Check that the action montage asset is bound on PlayerActionConfigDataAsset."),
-		       *GetName(), *UEnum::GetValueAsString(Action));
+		       TEXT("%s: Cancel from %s to %s was allowed, but the target action failed to start. Check stamina, cooldown and PlayerActionConfigDataAsset montage bindings."),
+		       *GetName(), *UEnum::GetValueAsString(CurrentAction), *UEnum::GetValueAsString(Action));
 	}
 
 	return bStarted;
@@ -1227,6 +1232,31 @@ bool AMyCharacter::StartParryAction()
 	return true;
 }
 
+EPlayerActionType AMyCharacter::GetCurrentPlayerActionType() const
+{
+	switch (ActionState)
+	{
+	case EActionState::EAS_Attacking:
+		return EPlayerActionType::Attack;
+	case EActionState::EAS_Parrying:
+		return EPlayerActionType::Parry;
+	case EActionState::EAS_Dodging:
+		return EPlayerActionType::Dodge;
+	case EActionState::EAS_UsingPotion:
+		return EPlayerActionType::Potion;
+	case EActionState::EAS_Stunning:
+		return EPlayerActionType::HitReact;
+	case EActionState::EAS_Dead:
+		return EPlayerActionType::Death;
+	case EActionState::EAS_UnOccupied:
+	case EActionState::EAS_Exhausted:
+		// Block 是按住输入维持的姿态，ActionState 通常仍是 UnOccupied。
+		return bIsBlocking ? EPlayerActionType::Block : EPlayerActionType::None;
+	default:
+		return EPlayerActionType::None;
+	}
+}
+
 int32 AMyCharacter::GetActionPriority(EPlayerActionType Action) const
 {
 	const UPlayerActionConfigDataAsset* ActionConfig = GetActionConfig();
@@ -1318,16 +1348,6 @@ FName AMyCharacter::GetBlockRaiseSection() const
 
 bool AMyCharacter::CanCancelCurrentActionWith(EPlayerActionType NewAction) const
 {
-	if (!bActionCancelWindowOpen)
-	{
-		return false;
-	}
-
-	if (ActionState != EActionState::EAS_Attacking)
-	{
-		return false;
-	}
-
 	switch (NewAction)
 	{
 	case EPlayerActionType::Dodge:
@@ -1343,7 +1363,24 @@ bool AMyCharacter::CanCancelCurrentActionWith(EPlayerActionType NewAction) const
 		return false;
 	}
 
-	if (!IsStrictlyHigherPriority(NewAction, EPlayerActionType::Attack))
+	const EPlayerActionType CurrentAction = GetCurrentPlayerActionType();
+	if (CurrentAction == EPlayerActionType::None || CurrentAction == NewAction)
+	{
+		return false;
+	}
+
+	if (CurrentAction == EPlayerActionType::HitReact || CurrentAction == EPlayerActionType::Death)
+	{
+		return false;
+	}
+
+	// 举盾是按住输入维持的姿态，不依赖蒙太奇 CancelWindow；其他动作由 NotifyState 开窗。
+	if (CurrentAction != EPlayerActionType::Block && !bActionCancelWindowOpen)
+	{
+		return false;
+	}
+
+	if (!IsStrictlyHigherPriority(NewAction, CurrentAction))
 	{
 		return false;
 	}
@@ -1353,12 +1390,44 @@ bool AMyCharacter::CanCancelCurrentActionWith(EPlayerActionType NewAction) const
 		return false;
 	}
 
-	if (NewAction != EPlayerActionType::Potion && ShouldRecoverToExhausted_Attack())
+	if (CurrentAction == EPlayerActionType::Attack && NewAction != EPlayerActionType::Potion && ShouldRecoverToExhausted_Attack())
 	{
 		return false;
 	}
 
 	return true;
+}
+
+void AMyCharacter::CleanupInterruptedAction(EPlayerActionType InterruptedAction)
+{
+	CloseActionCancelWindow();
+
+	switch (InterruptedAction)
+	{
+	case EPlayerActionType::Attack:
+		CleanupInterruptedAttack();
+		break;
+	case EPlayerActionType::Block:
+		InterruptBlock(false);
+		break;
+	case EPlayerActionType::Parry:
+		InterruptParry();
+		RecoverActionStateAfterMontage(EActionState::EAS_Parrying, false);
+		break;
+	case EPlayerActionType::Dodge:
+		bDodgeInvulnerable = false;
+		RestoreRotationMode();
+		RecoverActionStateAfterMontage(EActionState::EAS_Dodging, true);
+		break;
+	case EPlayerActionType::Potion:
+		InterruptPotion();
+		break;
+	case EPlayerActionType::HitReact:
+	case EPlayerActionType::Death:
+	case EPlayerActionType::None:
+	default:
+		break;
+	}
 }
 
 bool AMyCharacter::StartPotionAction()
