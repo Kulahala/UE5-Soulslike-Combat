@@ -40,7 +40,7 @@ Core character/combat state-machine enums and small shared combat-flow enums are
 | `EWeaponState` | Unequipped, OneHandEquipped, TwoHandEquipped | `AMyCharacter`, `USlashAnimInstance` |
 | `EActionState` | UnOccupied, Attacking, Stunning, Exhausted, Parrying, Dodging, UsingPotion, Dead | `AMyCharacter` |
 | `EComboPlaybackMode` | NewPlayback, Continuation | `AMyCharacter` light combo playback helper |
-| `EPlayerActionType` | None, Attack, Dodge, Block, Parry, Potion, HitReact, Death | `AMyCharacter::TryStartAction` non-attack action entry, future action priority/cancel windows |
+| `EPlayerActionType` | None, Attack, Dodge, Block, Parry, Potion, HitReact, Death | `AMyCharacter::TryStartAction` player action entry plus priority/cancel windows |
 | `EEnemyState` | UnOccupied, Patrolling, Searching, Chasing, Combating, Attacking, Stunned, StanceBreak, Dead | `AEnemy` |
 
 **State transition pattern**: Mixed C++ + AnimNotify driven. Entry states are set directly in C++ (`Attack()`, `GetHit_Implementation()`, `Die()`). Recovery transitions use `FOnMontageEnded` delegates with `bInterrupted` guards as primary path. `UAnimNotify_CharacterHitReactEnd` is the exception — used for player hit react recovery so designers can tune stun duration in the animation editor. Enemy recovery has double coverage (delegate + AnimNotify with state guards).
@@ -283,7 +283,7 @@ UAnimNotify → UAnimNotify_ComboBranchPoint (consumes buffered combo input and 
 UAnimNotify → UAnimNotify_PotionHeal (montage-driven partial potion healing)
 UDataAsset → UTreasureData (static mesh, gold value, pickup sound, scale)
 UDataAsset → UPlayerCharacterProfileDataAsset (single player character config entry: AttackConfig + ActionConfig)
-UDataAsset → UPlayerActionConfigDataAsset (player-only non-attack action structs: Dodge, Block, Parry, Potion, plus SharedPriority)
+UDataAsset → UPlayerActionConfigDataAsset (player-only action structs: Dodge, Block, Parry, Potion, plus SharedPriority for Attack/HitReact/Death priority)
 UDataAsset → UHitReactionConfigDataAsset (shared character HitReact / Death montage config with section names)
 UDataAsset → UComboDataAsset (combo chain: SectionName, DamageMultiplier, StaminaCost, PoiseDamageMultiplier per segment)
 UDataAsset → UAttackConfigDataAsset (LightAttackCombo + SpecialAttacks for sprint/jump-style specials + ChargedAttack)
@@ -346,17 +346,17 @@ UDataAsset → UEnemyAttackConfigDataAsset (Enemy attacks: montage, section, pos
 <a name="player-action-start-entry"></a>
 ## Player Action Start Entry
 
-- **统一入口**：`AMyCharacter::TryStartAction(EPlayerActionType)` 是 Dodge / Block / Parry / Potion 的统一启动入口；公开输入函数 `Dodge()`、`Input_Parry()`、`UsePotion()` 只转发到该入口，`TryResumeBlock()` 也通过该入口恢复举盾。
-- **当前范围**：`TryStartAction()` 启动 Dodge / Block / Parry / Potion，并通过 `GetCurrentPlayerActionType()` 将 `ActionState` 与 `bIsBlocking` 映射为当前动作类型，用同一套取消判断处理攻击后摇、蒙太奇动作后摇和举盾姿态。`Attack` / `HitReact` / `Death` 仍不通过该入口真实启动；蓄力攻击 / 冲刺攻击第一版不挂 CancelWindow。
-- **分发结构**：`TryStartAction()` 调用现有 `CanDodge()` / `CanStartBlock()` / `CanStartParry()` / `CanUsePotion()`，再分发到 `StartDodgeAction()`、`StartBlockAction()`、`StartParryAction()`、`StartPotionAction()`。这些 `Start*Action()` 返回 `bool`，资源缺失或配置缺失时必须在副作用前失败。
+- **统一入口**：`AMyCharacter::TryStartAction(EPlayerActionType)` 是 Attack / Dodge / Block / Parry / Potion 的统一启动入口；公开输入函数 `Attack()`、`Dodge()`、`Input_Parry()`、`UsePotion()` 只转发到该入口，`TryResumeBlock()` 也通过该入口恢复举盾。
+- **当前范围**：`TryStartAction()` 启动 Attack / Dodge / Block / Parry / Potion，并通过 `GetCurrentPlayerActionType()` 将 `ActionState` 与 `bIsBlocking` 映射为当前动作类型，用同一套取消判断处理攻击后摇、蒙太奇动作后摇和举盾姿态。`HitReact` / `Death` 仍不通过该入口真实启动；蓄力攻击继续保留按下/松开计时流程，普通攻击和冲刺攻击最终落到 `Attack -> TryStartAction(Attack)`。
+- **分发结构**：`TryStartAction()` 分发到 `StartAttackAction()`、`StartDodgeAction()`、`StartBlockAction()`、`StartParryAction()`、`StartPotionAction()`，并继续调用现有 `CanAttack()` / `CanDodge()` / `CanStartBlock()` / `CanStartParry()` / `CanUsePotion()` 保护资源和状态。普通轻攻击、冲刺攻击、蓄力攻击都归为 `Attack` 的内部变体，不拆额外 `EPlayerActionType`。
 - **Block 语义**：Block 是按住型动作。`TryStartAction(Block)` 内部同时检查 `bIsBlocking` 幂等和 `bBlockInputHeld` 输入意图；`ReleaseBlockInput()` 保持独立，负责松开、清理 `bIsBlocking` 和停止防御蒙太奇。
 - **副作用顺序**：消耗体力、消耗药瓶、设置状态、绑定 montage delegate 都必须发生在资源检查之后。`StartPotionAction()` 在 `Attributes->UsePotion()` 后没有失败返回路径；`StartBlockAction()` 先确认 `ActionConfig->Block.Montage` / `AnimInstance` 可用，再设置 `bIsBlocking = true`。
-- **优先级数据**：`UPlayerActionConfigDataAsset` 使用 per-action struct 保存玩家主动动作优先级：`Dodge.Priority`、`Block.Priority`、`Parry.Priority`、`Potion.Priority`；`SharedPriority` 保存 `Attack` / `HitReact` / `Death` 这些非玩家主动动作的共享优先级。数值越大优先级越高；`None` 不在 struct 字段中，由 `GetActionPriority(None)` 返回 `MIN_int32`。
+- **优先级数据**：`UPlayerActionConfigDataAsset` 使用 per-action struct 保存 `Dodge.Priority`、`Block.Priority`、`Parry.Priority`、`Potion.Priority`；`SharedPriority` 保存 `Attack` / `HitReact` / `Death` 的共享优先级。`Attack` 的蒙太奇和连招配置仍归 `UAttackConfigDataAsset`，这里只保存取消判断需要的 priority。数值越大优先级越高；`None` 不在 struct 字段中，由 `GetActionPriority(None)` 返回 `MIN_int32`。
 - **优先级查询**：`GetActionPriority()` 是唯一 priority switch 源，故意不写 `default` 以保留枚举新增时的 `-Wswitch` 漂移提示；`IsStrictlyHigherPriority()` 使用 `>`，`IsAtLeastSamePriority()` 使用 `>=`。`AMyCharacter` 只 forward 到 `ActionConfig`，不复制 switch。
-- **CancelWindow**：`UAnimNotifyState_PlayerActionCancelWindow` 只负责开关 `AMyCharacter::bActionCancelWindowOpen`；取消决策集中在 `CanCancelCurrentActionWith()`，要求目标动作是 Dodge / Block / Parry / Potion、目标 priority 严格高于当前动作 priority，且当前动作不是 `HitReact` / `Death`。除 Block 外，当前动作必须处于 CancelWindow；Block 是按住型常驻姿态，可被更高优先级动作立即打断。
+- **CancelWindow**：`UAnimNotifyState_PlayerActionCancelWindow` 只负责开关 `AMyCharacter::bActionCancelWindowOpen`；取消决策集中在 `CanCancelCurrentActionWith()`，要求目标动作是 Attack / Dodge / Block / Parry / Potion、目标 priority 严格高于当前动作 priority，且当前动作不是 `HitReact` / `Death`。除 Block 外，当前动作必须处于 CancelWindow；Block 是按住型常驻姿态，可被更高优先级动作立即打断。
 - **取消清理**：`TryStartAction()` 在启动目标动作前通过 `CleanupInterruptedAction()` 统一清理被打断动作；攻击转发到 `CleanupInterruptedAttack()`，弹反/翻滚/喝药各自清理状态。Block 例外：目标动作在资源校验通过后才调用 `InterruptBlock()`，避免目标蒙太奇缺失时提前丢失举盾。
 - **CancelWindow 清理**：`ResetCombo()` 会清 `bActionCancelWindowOpen`；受击进入 `EAS_Stunning` 前也会主动关闭 CancelWindow。按住 Block 时，`OpenActionCancelWindow()` 会在窗口开启瞬间主动尝试 `TryStartAction(Block)`，因为按住型输入不会产生新的 Started 事件。
-- **占位类型**：`Attack` / `HitReact` / `Death` 已在 `EPlayerActionType` 中占位，但 `TryStartAction()` 当前明确返回 `false`。`ActionConfig == nullptr` 时 player-side priority helper 返回安全 fallback（`MIN_int32` / false）。
+- **占位类型**：`HitReact` / `Death` 已在 `EPlayerActionType` 中占位，但 `TryStartAction()` 当前明确返回 `false`。`ActionConfig == nullptr` 时 player-side priority helper 返回安全 fallback（`MIN_int32` / false）。
 
 ## Hit Knockback（受击后退）
 
@@ -508,7 +508,7 @@ UDataAsset → UEnemyAttackConfigDataAsset (Enemy attacks: montage, section, pos
 
 - **入口职责**：`UPlayerCharacterProfileDataAsset` 是主角 Blueprint 的单一配置入口，只引用子 DataAsset，不复制所有字段，不持有 runtime state。
 - **当前子配置**：`AttackConfig` 指向现有 `UAttackConfigDataAsset`；`ActionConfig` 指向 `UPlayerActionConfigDataAsset`；`ReactionConfig` 指向 `UHitReactionConfigDataAsset`。
-- **ActionConfig 范围**：`UPlayerActionConfigDataAsset` 保存主角专属非攻击动作配置：`Dodge.Montage/Priority/StaminaCost`、`Block.Montage/Priority/BlockRaiseSection/StaminaRegenMultiplier`、`Parry.Montage/Priority`、`Potion.Montage/Priority/HealPercent/Cooldown/FallbackHealSound`，并通过 `SharedPriority` 保存 `Attack` / `HitReact` / `Death` 的共享优先级。主角 `HitReact` / `Death` montage 配置归 `PlayerProfile->ReactionConfig`；敌人当前归 `AEnemy::HitReactionConfig`。
+- **ActionConfig 范围**：`UPlayerActionConfigDataAsset` 保存主角专属动作配置：`Dodge.Montage/Priority/StaminaCost`、`Block.Montage/Priority/BlockRaiseSection/StaminaRegenMultiplier`、`Parry.Montage/Priority`、`Potion.Montage/Priority/HealPercent/Cooldown/FallbackHealSound`，并通过 `SharedPriority` 保存 `Attack` / `HitReact` / `Death` 的共享优先级。`Attack` montage/连招仍归 `PlayerProfile->AttackConfig`；主角 `HitReact` / `Death` montage 配置归 `PlayerProfile->ReactionConfig`；敌人当前归 `AEnemy::HitReactionConfig`。
 - **行为所有权**：`AMyCharacter` 仍负责状态切换、Montage 播放、打断清理和恢复；DataAsset 只提供配置。
 - **运行时兜底调参**：`AMyCharacter::PIETargetMaxFPS` 默认 `120`，在 `BeginPlay()` 中调用 `GEngine->SetMaxFPS()` 作为 PIE / 运行时帧率上限兜底；设为 `0` 表示不覆盖当前 `t.MaxFPS`。
 - **配置失败语义**：未设置 `PlayerProfile`、`AttackConfig`、`ActionConfig` 或 `ReactionConfig` 时输出 warning；缺少 `ReactionConfig` 时主角受击/死亡不播放对应蒙太奇，也不读取角色本体 `HitReactionConfig`。`Potion.Montage` 为空不是错误配置，喝药会按 `Potion.HealPercent` 立即回血并按 `Potion.Cooldown` 进入冷却。

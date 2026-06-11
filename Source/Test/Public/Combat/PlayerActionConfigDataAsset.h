@@ -91,7 +91,7 @@ struct FPlayerPotionActionConfig
 };
 
 /**
- * Player-only non-attack action montage config.
+ * Player-only action montage config.
  *
  * Attack montages stay in UAttackConfigDataAsset. HitReact/Death stay on
  * ABaseCharacter for now because they are shared by player and enemies.
@@ -114,7 +114,7 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Actions")
 	FPlayerPotionActionConfig Potion;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Priority", meta = (ToolTip = "非玩家主动动作的共享优先级。数值越大优先级越高。运行时不应修改，DataAsset 是配置真相源。"))
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Priority", meta = (ToolTip = "Attack / HitReact / Death 的共享优先级。Attack 的蒙太奇配置仍归 UAttackConfigDataAsset；这里只保存取消判断需要的优先级。数值越大优先级越高。"))
 	FPlayerSharedActionPriorityConfig SharedPriority;
 
 	UFUNCTION(BlueprintPure, Category = "Priority")

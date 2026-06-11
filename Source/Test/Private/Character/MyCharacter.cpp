@@ -153,26 +153,34 @@ void AMyCharacter::Tick(float DeltaTime)
 bool AMyCharacter::ShouldUseSprintAttack() const
 {
 	return bIsSprinting &&
+	       !bIsBlocking &&
 	       GetLastMovementInputVector().SizeSquared2D() > KINDA_SMALL_NUMBER &&
 	       WeaponState != EWeaponState::EWS_Unequipped &&
 	       ActionState == EActionState::EAS_UnOccupied &&
 	       !GetCharacterMovement()->IsFalling();
 }
 
-void AMyCharacter::PerformSprintAttack()
+bool AMyCharacter::PerformSprintAttack()
 {
 	UAttackConfigDataAsset* AttackConfig = GetAttackConfig();
 	if (!AttackConfig)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("AttackConfig not configured"));
-		return;
+		return false;
 	}
 
 	const FSpecialAttackConfig* SprintConfig = AttackConfig->FindSpecialAttack(ESpecialAttackType::SprintAttack);
 	if (!SprintConfig || !SprintConfig->Montage)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("SprintAttack not configured in AttackConfig"));
-		return;
+		return false;
+	}
+
+	UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
+	if (!AnimInstance)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s: PerformSprintAttack failed, AnimInstance is not available."), *GetName());
+		return false;
 	}
 
 	// 1. 清理旧连招状态
@@ -210,16 +218,13 @@ void AMyCharacter::PerformSprintAttack()
 	// 7. 播放攻击蒙太奇（关键：必须保留 Montage_Play + Montage_SetEndDelegate 模式！）
 	// 原因：当前实现依赖手动绑定 delegate，不能简化为 PlayAnimMontage()
 	ActionState = EActionState::EAS_Attacking;
-	UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
-	if (AnimInstance)
-	{
-		AnimInstance->Montage_Play(SprintConfig->Montage);
+	AnimInstance->Montage_Play(SprintConfig->Montage);
 
-		// 冲刺攻击发出噪音
-		EmitNoise(AttackNoiseLoudness, AttackNoiseRange);
+	// 冲刺攻击发出噪音
+	EmitNoise(AttackNoiseLoudness, AttackNoiseRange);
 
-		BindMontageEndDelegate(AnimInstance, SprintConfig->Montage, &AMyCharacter::OnAttackMontageEnded);
-	}
+	BindMontageEndDelegate(AnimInstance, SprintConfig->Montage, &AMyCharacter::OnAttackMontageEnded);
+	return true;
 }
 
 void AMyCharacter::CancelChargeInputState()
@@ -241,10 +246,14 @@ void AMyCharacter::OnAttackInputPressed()
 {
 	if (ShouldUseSprintAttack())
 	{
-		PerformSprintAttack();
+		Attack();
 		return;
 	}
-	if (!CanStartChargedAttack()) return;
+	if (!CanStartChargedAttack())
+	{
+		TryStartAction(EPlayerActionType::Attack);
+		return;
+	}
 
 	bAttackInputHeld = true;
 	AttackInputPressTime = GetWorld()->GetTimeSeconds();
@@ -349,23 +358,32 @@ void AMyCharacter::PerformChargedRelease()
 
 void AMyCharacter::Attack()
 {
-	if (bIsBlocking) return;  // 保留现有守卫
+	TryStartAction(EPlayerActionType::Attack);
+}
 
-	// 冲刺攻击优先级最高，放在 CanAttack() 之前
+bool AMyCharacter::StartAttackAction()
+{
 	if (ShouldUseSprintAttack())
 	{
-		PerformSprintAttack();
-		return;
+		return PerformSprintAttack();
 	}
 
 	Super::Attack();  // 保留
 
-	if (!CanAttack()) return;
+	if (!CanAttack()) return false;
 
 	if (!StartComboSegment(ComboCounter, EComboPlaybackMode::NewPlayback))
 	{
 		ResetCombo();
+		return false;
 	}
+
+	if (bIsBlocking)
+	{
+		InterruptBlock(false);
+	}
+
+	return true;
 }
 
 bool AMyCharacter::StartComboSegment(int32 SegmentIndex, EComboPlaybackMode PlaybackMode)
@@ -722,7 +740,9 @@ float AMyCharacter::TakeDamage(float DamageAmount, const struct FDamageEvent& Da
 
 bool AMyCharacter::CanAttack() const
 {
-	return ActionState == EActionState::EAS_UnOccupied && WeaponState != EWeaponState::EWS_Unequipped;
+	return ActionState == EActionState::EAS_UnOccupied
+		&& WeaponState != EWeaponState::EWS_Unequipped
+		&& !GetCharacterMovement()->IsFalling();
 }
 
 // ==================== 防御 ====================
@@ -1103,6 +1123,9 @@ bool AMyCharacter::TryStartAction(EPlayerActionType Action)
 
 	switch (Action)
 	{
+	case EPlayerActionType::Attack:
+		bStarted = StartAttackAction();
+		break;
 	case EPlayerActionType::Dodge:
 		bStarted = CanDodge() && StartDodgeAction();
 		break;
@@ -1125,7 +1148,6 @@ bool AMyCharacter::TryStartAction(EPlayerActionType Action)
 	case EPlayerActionType::Potion:
 		bStarted = CanUsePotion() && StartPotionAction();
 		break;
-	case EPlayerActionType::Attack:
 	case EPlayerActionType::HitReact:
 	case EPlayerActionType::Death:
 	case EPlayerActionType::None:
@@ -1350,12 +1372,12 @@ bool AMyCharacter::CanCancelCurrentActionWith(EPlayerActionType NewAction) const
 {
 	switch (NewAction)
 	{
+	case EPlayerActionType::Attack:
 	case EPlayerActionType::Dodge:
 	case EPlayerActionType::Block:
 	case EPlayerActionType::Parry:
 	case EPlayerActionType::Potion:
 		break;
-	case EPlayerActionType::Attack:
 	case EPlayerActionType::HitReact:
 	case EPlayerActionType::Death:
 	case EPlayerActionType::None:

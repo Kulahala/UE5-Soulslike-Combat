@@ -38,7 +38,7 @@ public:
 	/* 战斗 */
 	virtual void Attack() override;
 	bool ShouldUseSprintAttack() const;
-	void PerformSprintAttack();
+	bool PerformSprintAttack();
 	void OnAttackInputPressed();
 	void OnAttackInputReleased();
 	void EnterChargeMode();
@@ -175,6 +175,7 @@ private:
 	 * 阶段 3 若需要区分“触发新动作 vs 已在执行”，再扩展返回类型。
 	 */
 	bool TryStartAction(EPlayerActionType Action);
+	bool StartAttackAction();
 	bool StartDodgeAction();
 	bool StartBlockAction();
 	bool StartParryAction();
