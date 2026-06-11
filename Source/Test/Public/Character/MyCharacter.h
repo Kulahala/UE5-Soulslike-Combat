@@ -186,6 +186,7 @@ private:
 	float GetDodgeStaminaCost(bool bLogFallback) const;
 	float GetPotionCooldown(bool bLogFallback) const;
 	float GetPotionFallbackHealPercent() const;
+	float GetBlockStaminaRegenMultiplier() const;
 	FName GetBlockRaiseSection() const;
 
 	/* 提取方法 */
@@ -271,7 +272,6 @@ private:
 	FTimerHandle ParryCooldownTimer;
 
 	/* 翻滚 */
-	UPROPERTY(VisibleAnywhere, Category = "Combat|Dodge|Legacy", meta = (ToolTip = "DataAsset 缺失时的翻滚体力消耗 fallback。正常路径请在 DA_PlayerActionConfig.Dodge.StaminaCost 调整。"))
 	float DodgeStaminaCost = 15.f;
 	bool bDodgeInvulnerable = false;
 
@@ -337,6 +337,9 @@ private:
 
 	UPROPERTY(EditAnywhere, Category = "Combat|Hearing", meta = (ToolTip = "喝药噪音范围（cm）"))
 	float PotionNoiseRange = 500.f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Performance", meta = (ClampMin = "0.0", ToolTip = "PIE/运行时帧率上限兜底。0 表示不在 BeginPlay 覆盖 t.MaxFPS。"))
+	float PIETargetMaxFPS = 120.f;
 
 	/* 连招系统 */
 	int32 ComboCounter = 0;

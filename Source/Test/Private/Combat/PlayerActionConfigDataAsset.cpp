@@ -92,6 +92,11 @@ void UPlayerActionConfigDataAsset::LogConfigWarnings() const
 		UE_LOG(LogTemp, Warning, TEXT("%s: Dodge.StaminaCost is negative."), *GetName());
 	}
 
+	if (Block.StaminaRegenMultiplier < 0.f)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s: Block.StaminaRegenMultiplier is negative."), *GetName());
+	}
+
 	if (Potion.Cooldown < 0.f)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("%s: Potion.Cooldown is negative."), *GetName());

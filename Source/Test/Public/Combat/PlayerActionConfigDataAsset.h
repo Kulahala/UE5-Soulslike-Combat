@@ -6,6 +6,7 @@
 #include "PlayerActionConfigDataAsset.generated.h"
 
 class UAnimMontage;
+class USoundBase;
 struct FPropertyChangedEvent;
 
 USTRUCT(BlueprintType)
@@ -51,6 +52,9 @@ struct FPlayerBlockActionConfig
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Block", meta = (ToolTip = "举盾起手 Section 名称。"))
 	FName BlockRaiseSection = FName("BlockRaise");
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Block", meta = (ClampMin = "0.0", UIMin = "0.0", UIMax = "1.0", ToolTip = "防御期间体力自然恢复倍率。0.7 表示恢复速度为正常的 70%。"))
+	float StaminaRegenMultiplier = 0.7f;
 };
 
 USTRUCT(BlueprintType)
@@ -81,6 +85,9 @@ struct FPlayerPotionActionConfig
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Potion", meta = (ClampMin = "0.0", UIMin = "0.0", ToolTip = "喝药冷却时间。"))
 	float Cooldown = 2.f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Potion", meta = (ToolTip = "没有喝药蒙太奇时即时治疗播放的临时音效。使用喝药蒙太奇后请改用 Montage Sound Notify，避免重复播放。"))
+	TObjectPtr<USoundBase> FallbackHealSound = nullptr;
 };
 
 /**

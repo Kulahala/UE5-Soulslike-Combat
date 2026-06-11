@@ -61,15 +61,16 @@ private:
 
 	// 体力每秒恢复量
 	UPROPERTY(EditAnywhere, Category = "Actor Attributes", meta = (AllowPrivateAccess = "true", ToolTip = "体力每秒恢复量，冷却结束后生效。"))
-	float StaminaRegenRate = 10.f;
+	float StaminaRegenRate = 20.f;
 
 	// 体力消耗后冷却时间（秒），冷却结束才开始恢复
 	UPROPERTY(EditAnywhere, Category = "Actor Attributes", meta = (AllowPrivateAccess = "true", ToolTip = "体力消耗后的冷却时间（秒），冷却期间不恢复体力。"))
-	float StaminaRegenDelay = 1.f;
+	float StaminaRegenDelay = 2.f;
 
 	float StaminaRegenCooldown = 0.f; // 当前剩余冷却
 	bool bStaminaRegenPaused = false; // 攻击期间暂停恢复
 	bool bStaminaJustDepleted = false; // 防止重复广播耗尽
+	float StaminaRegenMultiplier = 1.f; // 当前体力自然恢复倍率
 
 	// 生命值每秒恢复量（需调用 EnableHealthRegen() 启用）
 	UPROPERTY(EditAnywhere, Category = "Actor Attributes", meta = (AllowPrivateAccess = "true", ToolTip = "生命值每秒恢复量，需调用 EnableHealthRegen() 启用。"))
@@ -114,6 +115,7 @@ public:
 	void ResetStaminaRegenCooldown();
 	void PauseStaminaRegen();
 	void ResumeStaminaRegen();
+	void SetStaminaRegenMultiplier(float Multiplier);
 	void ResetExhaustionFlag();
 	FORCEINLINE bool CheckStamina(float RequiredAmount) const { return CurrentStamina >= RequiredAmount; }
 

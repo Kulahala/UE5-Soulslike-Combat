@@ -17,6 +17,7 @@
 #include "HUD/PlayerHUDWidget.h"
 #include "AttributeComponent/AttributeComponent.h"
 #include "Enemy/Enemy.h"
+#include "Engine/Engine.h"
 #include "Kismet/GameplayStatics.h"
 #include "Kismet/KismetMathLibrary.h"
 #include "Perception/AISense_Hearing.h"
@@ -49,6 +50,11 @@ void AMyCharacter::BeginPlay()
 {
 	Super::BeginPlay();
 	Tags.Add(FName("Player"));
+
+	if (GEngine && PIETargetMaxFPS > 0.f)
+	{
+		GEngine->SetMaxFPS(PIETargetMaxFPS);
+	}
 
 	// 校验玩家配置入口
 	ensureMsgf(PlayerProfile, TEXT("PlayerProfile is not set on %s - player profile driven actions may fail"), *GetName());
@@ -739,6 +745,10 @@ void AMyCharacter::ReleaseBlockInput()
 {
 	bBlockInputHeld = false;
 	bIsBlocking = false;
+	if (Attributes)
+	{
+		Attributes->SetStaminaRegenMultiplier(1.f);
+	}
 	StopBlockMontage(0.2f);
 }
 
@@ -746,6 +756,10 @@ void AMyCharacter::InterruptBlock(bool bClearHeld)
 {
 	bIsBlocking = false;
 	if (bClearHeld) bBlockInputHeld = false;
+	if (Attributes)
+	{
+		Attributes->SetStaminaRegenMultiplier(1.f);
+	}
 	StopBlockMontage(0.1f);
 }
 
@@ -845,7 +859,6 @@ bool AMyCharacter::CanStartParry() const
 {
 	return EquippedShield
 		&& ActionState == EActionState::EAS_UnOccupied
-		&& !bIsBlocking
 		&& !bParryOnCooldown
 		&& Attributes
 		&& !GetCharacterMovement()->IsFalling();
@@ -1137,11 +1150,15 @@ bool AMyCharacter::StartDodgeAction()
 
 	ResetCombo();
 
-	if (bIsBlocking) InterruptBlock(true);
+	if (bIsBlocking) InterruptBlock(false);
 	if (bIsParrying) InterruptParry();
 
 	FVector DodgeDir = ComputeDodgeDirection();
 	FName Section = SelectDodgeSection(DodgeDir);
+	if (!IsLockingOn() && !DodgeDir.IsNearlyZero())
+	{
+		FaceDirection2D(DodgeDir);
+	}
 
 	SetMovementRotationMode(false, false);
 
@@ -1174,6 +1191,10 @@ bool AMyCharacter::StartBlockAction()
 	}
 
 	bIsBlocking = true;
+	if (Attributes)
+	{
+		Attributes->SetStaminaRegenMultiplier(GetBlockStaminaRegenMultiplier());
+	}
 	PlayBlockMontage(GetBlockRaiseSection());
 	return true;
 }
@@ -1186,6 +1207,11 @@ bool AMyCharacter::StartParryAction()
 	if (!ParryMontage || !Anim || !Attributes || !EquippedShield)
 	{
 		return false;
+	}
+
+	if (bIsBlocking)
+	{
+		InterruptBlock(false);
 	}
 
 	Attributes->UseStamina(EquippedShield->GetParryStaminaCost());
@@ -1262,6 +1288,19 @@ float AMyCharacter::GetPotionFallbackHealPercent() const
 	       TEXT("%s: ActionConfig missing, falling back to hard-coded potion heal percent = 0.50."),
 	       *GetName());
 	return 0.5f;
+}
+
+float AMyCharacter::GetBlockStaminaRegenMultiplier() const
+{
+	if (const UPlayerActionConfigDataAsset* ActionConfig = GetActionConfig())
+	{
+		return FMath::Max(0.f, ActionConfig->Block.StaminaRegenMultiplier);
+	}
+
+	UE_LOG(LogTemp, Warning,
+	       TEXT("%s: ActionConfig missing, falling back to normal block stamina regen multiplier = 1.00."),
+	       *GetName());
+	return 1.f;
 }
 
 FName AMyCharacter::GetBlockRaiseSection() const
@@ -1351,6 +1390,10 @@ bool AMyCharacter::StartPotionAction()
 		else
 		{
 			HealFromPotion(GetPotionFallbackHealPercent());
+			if (ActionConfig->Potion.FallbackHealSound)
+			{
+				UGameplayStatics::PlaySoundAtLocation(this, ActionConfig->Potion.FallbackHealSound.Get(), GetActorLocation());
+			}
 			StartPotionCooldown();
 		}
 		return true;
