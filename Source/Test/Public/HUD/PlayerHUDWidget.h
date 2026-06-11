@@ -35,6 +35,12 @@ public:
 	UPROPERTY(meta = (BindWidget))
 	UProgressBar* PB_Stamina;
 
+	UPROPERTY(meta = (BindWidgetOptional))
+	UTextBlock* Text_HealthValue;
+
+	UPROPERTY(meta = (BindWidgetOptional))
+	UTextBlock* Text_StaminaValue;
+
 	UPROPERTY(meta = (BindWidget))
 	UTextBlock* Text_PotionCount;
 
@@ -59,6 +65,8 @@ protected:
 
 private:
 	void UnbindFromAttributes();
+	void RefreshHealthValueText();
+	void RefreshStaminaValueText();
 
 	// 当前绑定的属性组件，用于重复 Bind 时去重，并在 NativeDestruct 中解绑。
 	UPROPERTY(Transient)

@@ -11,6 +11,8 @@
 
 void UPlayerHUDWidget::SetHealthPercent(float Percent)
 {
+	RefreshHealthValueText();
+
 	if (PB_Health)
 	{
 		// 更新目标值
@@ -33,6 +35,8 @@ void UPlayerHUDWidget::SetHealthPercent(float Percent)
 
 void UPlayerHUDWidget::SetStaminaPercent(float Percent)
 {
+	RefreshStaminaValueText();
+
 	if (PB_Stamina)
 	{
 		PB_Stamina->SetPercent(Percent);
@@ -78,6 +82,7 @@ void UPlayerHUDWidget::BindToAttributes(UAttributeComponent* Attributes)
 		{
 			PB_Health->SetPercent(InitialHealth);
 		}
+		RefreshHealthValueText();
 
 		BoundAttributes->OnStaminaChanged.AddDynamic(this, &UPlayerHUDWidget::SetStaminaPercent);
 		SetStaminaPercent(BoundAttributes->GetStaminaPercent());
@@ -98,6 +103,30 @@ void UPlayerHUDWidget::UnbindFromAttributes()
 	BoundAttributes->OnStaminaChanged.RemoveDynamic(this, &UPlayerHUDWidget::SetStaminaPercent);
 	BoundAttributes->OnPotionCountChanged.RemoveDynamic(this, &UPlayerHUDWidget::SetPotionCount);
 	BoundAttributes = nullptr;
+}
+
+void UPlayerHUDWidget::RefreshHealthValueText()
+{
+	if (!Text_HealthValue || !BoundAttributes)
+	{
+		return;
+	}
+
+	Text_HealthValue->SetText(FText::Format(INVTEXT("{0} / {1}"),
+		FMath::RoundToInt(BoundAttributes->GetCurrentHealth()),
+		FMath::RoundToInt(BoundAttributes->GetMaxHealth())));
+}
+
+void UPlayerHUDWidget::RefreshStaminaValueText()
+{
+	if (!Text_StaminaValue || !BoundAttributes)
+	{
+		return;
+	}
+
+	Text_StaminaValue->SetText(FText::Format(INVTEXT("{0} / {1}"),
+		FMath::RoundToInt(BoundAttributes->GetCurrentStamina()),
+		FMath::RoundToInt(BoundAttributes->GetMaxStamina())));
 }
 
 void UPlayerHUDWidget::NativeDestruct()
