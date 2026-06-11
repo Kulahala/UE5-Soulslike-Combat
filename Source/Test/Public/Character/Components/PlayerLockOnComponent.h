@@ -27,6 +27,7 @@ public:
 	FORCEINLINE float GetStrafeSpeedMultiplier() const { return LockOnStrafeSpeedMultiplier; }
 	FORCEINLINE float GetBackSpeedMultiplier() const { return LockOnBackSpeedMultiplier; }
 	FORCEINLINE const FVector& GetSocketOffset() const { return LockOnSocketOffset; }
+	FORCEINLINE float GetCameraPitch() const { return LockOnCameraPitch; }
 	FORCEINLINE float GetSocketOffsetInterpSpeed() const { return LockOnSocketOffsetInterpSpeed; }
 	FORCEINLINE float GetFreeRunCameraSideOffset() const { return LockOnFreeRunCameraSideOffset; }
 	FORCEINLINE float GetFreeRunCameraBackHeightOffset() const { return LockOnFreeRunCameraBackHeightOffset; }
@@ -59,14 +60,17 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category = "LockOn|Movement", meta = (ClampMin = "0.0", ToolTip = "锁定时后撤速度倍率。1.0 表示不低于基础移动速度。"))
 	float LockOnBackSpeedMultiplier = 0.9f;
 
-	UPROPERTY(EditDefaultsOnly, Category = "LockOnCamera", meta = (ToolTip = "锁定时 SpringArm 右肩偏移（Y=右, Z=上）。"))
-	FVector LockOnSocketOffset = FVector(0.f, 130.f, 75.f);
+	UPROPERTY(EditDefaultsOnly, Category = "LockOnCamera", meta = (ToolTip = "锁定时 SpringArm 居中上方偏移（Z=上）。"))
+	FVector LockOnSocketOffset = FVector(0.f, 0.f, 115.f);
+
+	UPROPERTY(EditDefaultsOnly, Category = "LockOnCamera", meta = (ToolTip = "锁定时控制器目标俯仰角（负值=向下俯视）。"))
+	float LockOnCameraPitch = -18.f;
 
 	UPROPERTY(EditDefaultsOnly, Category = "LockOnCamera", meta = (ToolTip = "SocketOffset 插值速度。"))
 	float LockOnSocketOffsetInterpSpeed = 7.f;
 
 	UPROPERTY(EditDefaultsOnly, Category = "LockOnCamera|FreeRun", meta = (ClampMin = "0.0", ToolTip = "锁定冲刺侧移时相机横向最大偏移幅度（cm），正值按输入方向偏移。"))
-	float LockOnFreeRunCameraSideOffset = 60.f;
+	float LockOnFreeRunCameraSideOffset = 35.f;
 
 	UPROPERTY(EditDefaultsOnly, Category = "LockOnCamera|FreeRun", meta = (ClampMin = "0.0", ToolTip = "锁定冲刺后撤时相机抬高幅度（cm）。"))
 	float LockOnFreeRunCameraBackHeightOffset = 20.f;
@@ -75,5 +79,5 @@ private:
 	float LockOnFreeRunCameraBackArmLengthBonus = 60.f;
 
 	UPROPERTY(EditDefaultsOnly, Category = "LockOnCamera|FreeRun", meta = (ToolTip = "锁定冲刺动态偏移插值速度。"))
-	float LockOnFreeRunCameraInterpSpeed = 8.f;
+	float LockOnFreeRunCameraInterpSpeed = 4.5f;
 };

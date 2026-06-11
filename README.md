@@ -18,7 +18,7 @@ This README is a project overview. For implementation details, state machines, c
 - **Precise weapon hit detection**: weapons use swept box traces between previous and current positions to reduce missed hits during fast animation frames.
 - **Shield block and parry**: block checks attack direction and stamina before damage is applied; successful parries deplete enemy poise and trigger stance break.
 - **Poise and stance break**: enemies have a hidden poise pool. Normal hits drain it over time, while parry can instantly break stance.
-- **Lock-on movement**: target selection, camera framing, strafing, and sprint free-run are handled while keeping target focus.
+- **Lock-on movement**: target selection, centered high camera framing, strafing, and sprint free-run are handled while keeping target focus.
 - **Enemy combat AI**: enemies patrol, search, chase, fight, stagger, and die through an outer FSM. Combat behavior inside `EES_Combating` is organized by a private local substate layer.
 - **Motion-warped leap attacks**: selected enemy attacks can use a fixed per-attack WarpTarget so leap/root-motion attacks correct toward the target without becoming continuous homing.
 - **Attack coordination**: nearby enemies chasing the same target avoid attacking simultaneously by entering a coordinated waiting substate.
@@ -101,7 +101,7 @@ This README is a project overview. For implementation details, state machines, c
 - **精确武器命中检测**：武器使用前一帧到当前帧的盒体扫掠，降低高速动画中的漏判。
 - **盾牌格挡与弹反**：伤害结算前先检查防御角度和体力；弹反成功会清空敌人韧性并触发破防。
 - **韧性与破防**：敌人拥有隐藏韧性条，普通命中逐步削减韧性，弹反可瞬间触发大硬直。
-- **锁定移动**：支持目标筛选、越肩相机构图、锁定绕行和锁定冲刺 free-run。
+- **锁定移动**：支持目标筛选、居中后上方相机构图、锁定绕行和锁定冲刺 free-run。
 - **敌人战斗 AI**：敌人通过外层 FSM 管理巡逻、搜索、追击、战斗、硬直和死亡，`EES_Combating` 内部再用私有局部子状态组织战斗行为。
 - **跳劈 Motion Warping**：指定敌人招式可写入一次固定 WarpTarget，让跃进/root motion 攻击向目标修正，但不做持续追踪。
 - **敌人攻击协调**：追击同一目标的附近敌人不会同时出手，会进入协调等待子状态。

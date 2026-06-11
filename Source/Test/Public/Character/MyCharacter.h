@@ -359,7 +359,7 @@ private:
 	float RecenterInterpSpeed = 8.f;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Camera", meta = (ToolTip = "归中目标俯仰角（负值=俯视）"))
-	float RecenterTargetPitch = -10.f;
+	float RecenterTargetPitch = -18.f;
 
 	FRotator RecenterTargetRotation = FRotator::ZeroRotator;
 

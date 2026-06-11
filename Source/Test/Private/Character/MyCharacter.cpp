@@ -35,8 +35,8 @@ AMyCharacter::AMyCharacter()
 	// 相机组件
 	SpringArm = CreateDefaultSubobject<USpringArmComponent>(TEXT("SpringArm"));
 	SpringArm->SetupAttachment(GetRootComponent());
-	SpringArm->TargetArmLength = 285.f;
-	SpringArm->SocketOffset = FVector(0.f, 65.f, 60.f);
+	SpringArm->TargetArmLength = 360.f;
+	SpringArm->SocketOffset = FVector(0.f, 0.f, 90.f);
 	SpringArm->bUsePawnControlRotation = true;
 
 	Camera = CreateDefaultSubobject<UCameraComponent>(TEXT("Camera"));
@@ -1930,11 +1930,11 @@ void AMyCharacter::UpdateLockOnControlRotation(float DeltaTime) const
 		return;
 	}
 
-	// 只锁 yaw，插值转向目标
+	// 锁定时保持居中的后上方视角，只让 yaw 跟随目标
 	const FVector PlayerLoc = GetActorLocation();
 	const FVector TargetLoc = LockedTarget->GetActorLocation();
 	FRotator LookAt = UKismetMathLibrary::FindLookAtRotation(PlayerLoc, TargetLoc);
-	LookAt.Pitch = 0.f;
+	LookAt.Pitch = LockOnComponent->GetCameraPitch();
 
 	if (APlayerController* PC = Cast<APlayerController>(GetController()))
 	{
