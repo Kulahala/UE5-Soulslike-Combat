@@ -16,6 +16,12 @@ void UPauseMenuWidget::NativeConstruct()
 		Btn_Resume->OnClicked.AddDynamic(this, &UPauseMenuWidget::OnResumeClicked);
 	}
 
+	if (Btn_Quit)
+	{
+		Btn_Quit->OnClicked.RemoveDynamic(this, &UPauseMenuWidget::OnQuitClicked);
+		Btn_Quit->OnClicked.AddDynamic(this, &UPauseMenuWidget::OnQuitClicked);
+	}
+
 	if (CB_DebugEnabled)
 	{
 		CB_DebugEnabled->OnCheckStateChanged.RemoveDynamic(this, &UPauseMenuWidget::OnDebugEnabledChanged);
@@ -63,6 +69,11 @@ void UPauseMenuWidget::NativeDestruct()
 		Btn_Resume->OnClicked.RemoveDynamic(this, &UPauseMenuWidget::OnResumeClicked);
 	}
 
+	if (Btn_Quit)
+	{
+		Btn_Quit->OnClicked.RemoveDynamic(this, &UPauseMenuWidget::OnQuitClicked);
+	}
+
 	if (CB_DebugEnabled)
 	{
 		CB_DebugEnabled->OnCheckStateChanged.RemoveDynamic(this, &UPauseMenuWidget::OnDebugEnabledChanged);
@@ -107,6 +118,11 @@ void UPauseMenuWidget::OnResumeClicked()
 {
 	PlayResumeSound();
 	OnResumeDelegate.Broadcast();
+}
+
+void UPauseMenuWidget::OnQuitClicked()
+{
+	OnQuitDelegate.Broadcast();
 }
 
 void UPauseMenuWidget::OnDebugEnabledChanged(bool bIsChecked)

@@ -121,6 +121,9 @@ private:
 	UFUNCTION()
 	void OnResumeRequested();
 
+	UFUNCTION()
+	void OnQuitRequested();
+
 public:
 	FString GetDebugInputText() const;
 	class AMyCharacter* GetMyCharacter() const;

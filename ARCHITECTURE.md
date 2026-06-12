@@ -27,7 +27,7 @@ Language policy: keep stable section titles and HTML anchors in English; use Chi
 - **Unreal Engine 5.7** project, **Windows only**, **Visual Studio 2022** required
 - Runtime module: `Test`
 - Local editor plugins in this checkout: `SmartBPCreator`, `UnrealBridge`
-- Targets: `TestEditor` (Editor), `Test` (Game)
+- Targets: `TestEditor` (Editor), `SoulslikeCombat` (Game)
 - Build.cs dependencies: `Core`, `CoreUObject`, `Engine`, `InputCore`, `EnhancedInput`, `AnimGraphRuntime`, `Niagara`, `GeometryCollectionEngine`, `PCG`, `UMG`, `AIModule`, `Slate`, `SlateCore`, `MotionWarping`
 
 <a name="state-machine-system"></a>
@@ -546,6 +546,7 @@ UDataAsset → UEnemyAttackConfigDataAsset (Enemy attacks: montage, section, pos
 ## Pause Menu System
 
 - **架构**：Controller 级别管理暂停状态、Widget 缓存、输入模式切换，`AMyCharacter` 无感知
+- **退出入口**：`UPauseMenuWidget` 通过 `OnQuitDelegate` 只发出 UI 请求，`ACharacterController::OnQuitRequested()` 负责解除暂停并调用 `QuitGame`
 - **智能锁定处理**：暂停时检查锁定旋转完成度（角度差 < 1°保持，≥ 1°清除），必须先 `IsValid(LockedTarget)` 检查
 - **死亡时序**：`Die()` 最前面调用 `ClearPauseIfActive()` + `SetCanPause(false)`，先恢复游戏状态再处理死亡演出
 

@@ -14,7 +14,7 @@ For general agent guidelines, see **[AGENTS.md](AGENTS.md)**.
 - Generate VS project: right-click `Test.uproject` → **Generate Visual Studio project files**, then open `Test.sln`.
 - Compile in IDE (Development Editor) or via UBT: `UnrealBuildTool TestEditor Win64 Development Test.uproject`
 - Launch editor: open `Test.uproject` directly.
-- Module: `Test` (Runtime), `SmartBPCreator` (Editor plugin). Targets: `TestEditor` (Editor), `Test` (Game).
+- Module: `Test` (Runtime), `SmartBPCreator` (Editor plugin). Targets: `TestEditor` (Editor), `SoulslikeCombat` (Game).
 - `Test.Build.cs` pulls in: `Core`, `CoreUObject`, `Engine`, `InputCore`, `EnhancedInput`, `AnimGraphRuntime`, `Niagara`, `GeometryCollectionEngine`, `PCG`, `UMG`, `AIModule`, `Slate`, `SlateCore`.
 
 ## Truth Sources
@@ -77,8 +77,8 @@ For general agent guidelines, see **[AGENTS.md](AGENTS.md)**.
   - `## 核心改动`
   - domain sections as needed, such as `## 输入与战斗流程`, `## 动画与资产`, `## 蒙太奇约束`
   - `## 文档更新`
-  - `## 验证`
-- Keep the body grounded in real changes and confirmed validation. Do not invent compile, PIE, push, or asset-verification results.
+- Do not require a standalone `## 验证` section. Include verified results in the most relevant section when useful.
+- Keep the body grounded in real changes. Do not invent compile, PIE, push, or asset-verification results.
 
 ### Implementation Notes
 - **Dodge Roll System**: `SelectDodgeSection()` 必须在 `FaceDirection2D()` 之前调用，否则 `UnrotateVector()` 参考系错误

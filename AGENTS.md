@@ -6,7 +6,7 @@ This file provides guidance to coding agents working in this repository.
 
 - **UE 5.7** project, **Windows only**, **Visual Studio 2022** required.
 - Modules: `Test` (Runtime), `SmartBPCreator` (Editor plugin).
-- Targets: `TestEditor` (Editor), `Test` (Game).
+- Targets: `TestEditor` (Editor), `SoulslikeCombat` (Game).
 - No automated tests exist in this project.
 
 ## Build & Editor
@@ -68,8 +68,8 @@ No CI pipeline, no lint/test commands configured.
   - `## 核心改动`
   - domain sections as needed, for example `## 输入与战斗流程`, `## 动画与资产`, `## 蒙太奇约束`
   - `## 文档更新`
-  - `## 验证`
-- The body must describe actual changed files, asset/editor work, documentation updates, and verified results. Do not claim compile, PIE, or asset validation unless the user or tool output confirmed it.
+- Do not require a standalone `## 验证` section. Include verified results in the most relevant section when useful.
+- The body must describe actual changed files, asset/editor work, and documentation updates. Do not claim compile, PIE, or asset validation unless the user or tool output confirmed it.
 
 ## Working Rules
 

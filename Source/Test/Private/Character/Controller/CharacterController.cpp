@@ -8,6 +8,7 @@
 #include "HUD/PauseMenuWidget.h"
 #include "Blueprint/UserWidget.h"
 #include "Kismet/GameplayStatics.h"
+#include "Kismet/KismetSystemLibrary.h"
 #include "Enemy/Enemy.h" 
 
 void ACharacterController::BeginPlay()
@@ -29,6 +30,7 @@ void ACharacterController::BeginPlay()
 		if (PauseMenuWidget)
 		{
 			PauseMenuWidget->OnResumeDelegate.AddDynamic(this, &ACharacterController::OnResumeRequested);
+			PauseMenuWidget->OnQuitDelegate.AddDynamic(this, &ACharacterController::OnQuitRequested);
 		}
 	}
 }
@@ -370,6 +372,16 @@ void ACharacterController::OnResumeRequested()
 	{
 		TogglePause();
 	}
+}
+
+void ACharacterController::OnQuitRequested()
+{
+	if (bIsPaused)
+	{
+		UGameplayStatics::SetGamePaused(GetWorld(), false);
+	}
+
+	UKismetSystemLibrary::QuitGame(this, this, EQuitPreference::Quit, false);
 }
 
 void ACharacterController::ClearPauseIfActive()

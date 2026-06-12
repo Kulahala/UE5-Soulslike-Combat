@@ -11,6 +11,7 @@ class UCheckBox;
 class UOverlay;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnResumeRequested);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnQuitRequested);
 
 /**
  * 暂停菜单Widget
@@ -26,6 +27,9 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Pause Menu")
 	FOnResumeRequested OnResumeDelegate;
 
+	UPROPERTY(BlueprintAssignable, Category = "Pause Menu")
+	FOnQuitRequested OnQuitDelegate;
+
 protected:
 	virtual void NativeConstruct() override;
 	virtual void NativeDestruct() override;
@@ -34,6 +38,9 @@ protected:
 	/* Widget Components */
 	UPROPERTY(meta = (BindWidget))
 	UButton* Btn_Resume;
+
+	UPROPERTY(meta = (BindWidgetOptional))
+	UButton* Btn_Quit;
 
 	UPROPERTY(meta = (BindWidget))
 	UOverlay* Overlay_Background;
@@ -56,6 +63,9 @@ protected:
 	/* Button Callbacks */
 	UFUNCTION()
 	void OnResumeClicked();
+
+	UFUNCTION()
+	void OnQuitClicked();
 
 	UFUNCTION()
 	void OnDebugEnabledChanged(bool bIsChecked);
