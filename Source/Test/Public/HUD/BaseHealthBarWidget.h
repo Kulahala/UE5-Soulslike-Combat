@@ -18,10 +18,10 @@ class TEST_API UBaseHealthBarWidget : public UUserWidget
 public:
 	void SetHealthPercent(float Percent);
 
-	UFUNCTION(BlueprintImplementableEvent, Category = "UI")
+	UFUNCTION(BlueprintImplementableEvent, Category = "UI", meta = (ToolTip = "播放血条淡出动画。动画结束后可在蓝图中隐藏 Widget。"))
 	void PlayFadeOutAnim();
 
-	UFUNCTION(BlueprintImplementableEvent, Category = "UI")
+	UFUNCTION(BlueprintImplementableEvent, Category = "UI", meta = (ToolTip = "取消血条淡出并恢复可见状态。"))
 	void CancelFadeOutAnim();
 
 	// 缓冲条追赶逻辑：掉血延迟后追赶，回血瞬间跟上（static，供外部复用）

@@ -16,7 +16,7 @@ class TEST_API ATreasure : public Aitem
 public:
 	ATreasure();
 
-	UFUNCTION(BlueprintCallable, Category = "Treasure Properties")
+	UFUNCTION(BlueprintCallable, Category = "Treasure Properties", meta = (ToolTip = "用宝物数据资产初始化金币、网格、音效、名称和缩放。"))
 	void InitializeFromData(UTreasureData* Data);
 
 	void SetGoldValue(int32 NewValue) { GoldValue = NewValue; }

@@ -60,10 +60,10 @@ class TEST_API UHitReactionConfigDataAsset : public UDataAsset
 	GENERATED_BODY()
 
 public:
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "HitReact")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "HitReact", meta = (ToolTip = "共享受击反应配置，包含蒙太奇、方向 Section 和普通受击反馈。"))
 	FHitReactConfig HitReact;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Death")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Death", meta = (ToolTip = "共享死亡蒙太奇配置。"))
 	FDeathConfig Death;
 
 	virtual void PostLoad() override;

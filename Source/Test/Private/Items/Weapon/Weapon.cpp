@@ -183,6 +183,11 @@ AWeapon::FWeaponHitResult AWeapon::ResolveHit(AActor* HitActor, const FHitResult
 
 void AWeapon::DispatchHitFeedback(AActor* HitActor, const FHitResult& HitPoint, const FWeaponHitResult& Result)
 {
+	/*
+	 * 命中反馈分层：
+	 * ResolveHit() 只决定同队/格挡/弹反/最终伤害；这里统一派发反馈和破防。
+	 * 同队命中不扣血，格挡可跳过普通硬直，但 GetHit、击退、相机震动、卡肉和黑名单仍需要走。
+	 */
 	// 应用韧性伤害（仅跨阵营 + 非破防状态）
 	if (!Result.bSameTeam)
 	{

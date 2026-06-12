@@ -45,7 +45,7 @@ struct FSpecialAttackConfig
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Stamina", meta = (ClampMin = "1.0", ToolTip = "体力消耗"))
 	float StaminaCost = 15.f;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Motion Warping")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Motion Warping", meta = (ToolTip = "该特殊攻击的锁定攻击 Motion Warping 配置。"))
 	FPlayerAttackMotionWarpingConfig MotionWarping;
 };
 

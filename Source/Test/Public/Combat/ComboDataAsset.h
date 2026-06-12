@@ -13,23 +13,19 @@ struct FComboSegment
 {
 	GENERATED_BODY()
 
-	// 蒙太奇section名称
-	UPROPERTY(EditAnywhere, Category = "Animation")
+	UPROPERTY(EditAnywhere, Category = "Animation", meta = (ToolTip = "该连招段播放的蒙太奇 Section 名称。"))
 	FName SectionName = NAME_None;
 
-	// 该段伤害倍率（相对基础伤害）
-	UPROPERTY(EditAnywhere, Category = "Damage", meta = (ClampMin = "0.1", ClampMax = "5.0"))
+	UPROPERTY(EditAnywhere, Category = "Damage", meta = (ClampMin = "0.1", ClampMax = "5.0", ToolTip = "该段伤害倍率（相对武器基础伤害）。"))
 	float DamageMultiplier = 1.0f;
 
-	// 该段体力消耗
-	UPROPERTY(EditAnywhere, Category = "Stamina", meta = (ClampMin = "0.0"))
+	UPROPERTY(EditAnywhere, Category = "Stamina", meta = (ClampMin = "0.0", ToolTip = "该段攻击消耗的体力。"))
 	float StaminaCost = 15.0f;
 
-	// 该段韧性伤害倍率（相对武器基础韧性伤害）
-	UPROPERTY(EditAnywhere, Category = "Poise", meta = (ClampMin = "0.1", ClampMax = "5.0"))
+	UPROPERTY(EditAnywhere, Category = "Poise", meta = (ClampMin = "0.1", ClampMax = "5.0", ToolTip = "该段韧性伤害倍率（相对武器基础韧性伤害）。"))
 	float PoiseDamageMultiplier = 1.0f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Motion Warping")
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Motion Warping", meta = (ToolTip = "该连招段的锁定攻击 Motion Warping 配置。"))
 	FPlayerAttackMotionWarpingConfig MotionWarping;
 };
 
@@ -42,16 +38,14 @@ class TEST_API UComboDataAsset : public UDataAsset
 	GENERATED_BODY()
 
 public:
-	// 连招使用的蒙太奇
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Animation")
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Animation", meta = (ToolTip = "轻攻击连招共用的蒙太奇。ComboChain 中的 Section 必须存在于此蒙太奇。"))
 	TObjectPtr<UAnimMontage> ComboMontage = nullptr;
 
-	// 连招链（按顺序）
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Combo")
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Combo", meta = (ToolTip = "轻攻击连招段列表，按输入续接顺序执行。"))
 	TArray<FComboSegment> ComboChain;
 
 	// 获取连招总段数
-	UFUNCTION(BlueprintCallable, Category = "Combo")
+	UFUNCTION(BlueprintCallable, Category = "Combo", meta = (ToolTip = "返回连招段总数。"))
 	int32 GetComboCount() const { return ComboChain.Num(); }
 
 	// 获取指定段的配置（带边界检查）

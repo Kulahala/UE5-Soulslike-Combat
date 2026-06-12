@@ -20,8 +20,7 @@ class TEST_API Aitem : public AActor, public IPickupInterface
 public:
 	Aitem();
 
-	// 开始抛物线生成
-	UFUNCTION(BlueprintCallable, Category = "Spawning")
+	UFUNCTION(BlueprintCallable, Category = "Spawning", meta = (ToolTip = "从当前位置沿抛物线移动到目标位置，结束后进入可拾取状态。"))
 	void StartSpawning(const FVector& Target);
 
 	virtual void OnPickup_Implementation(AActor* Picker) override;
@@ -63,7 +62,7 @@ protected:
 	float RotationRate = 45.f;
 
 	/* 状态 */
-	UPROPERTY(BlueprintReadOnly, Category = "State")
+	UPROPERTY(BlueprintReadOnly, Category = "State", meta = (ToolTip = "当前物品状态：生成抛物线中、掉落待拾取或已装备。"))
 	EItemState ItemState = EItemState::EIS_Dropped;
 
 private:

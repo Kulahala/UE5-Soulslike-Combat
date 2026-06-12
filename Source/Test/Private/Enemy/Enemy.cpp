@@ -479,6 +479,11 @@ void AEnemy::ClearCurrentAttackConfig(bool bStartCooldown)
 
 void AEnemy::UpdateAttackMotionWarpTarget(const FEnemyAttackEntry& Entry)
 {
+	/*
+	 * 敌人跃进攻击使用出手瞬间的固定 WarpTarget。
+	 * Motion Warping NotifyState 只修正这次写入的目标，不持续追踪移动中的玩家。
+	 * 这样能保留跳劈/前冲的命中校正，同时避免空中 root motion 变成强吸附。
+	 */
 	if (!Entry.bUseMotionWarping)
 	{
 		return;
@@ -613,6 +618,11 @@ void AEnemy::RollPendingAttackIntent()
 
 bool AEnemy::TryExecutePendingAttack(float DistanceToTarget, float ForwardDot, const FVector& ToTarget)
 {
+	/*
+	 * PendingAttack 保留已抽中的招式意图。
+	 * 敌人先尝试移动到该招式自己的距离窗口内，转正后再出手；距离不合法或超时才屏蔽/重抽。
+	 * 这样避免每帧按当前距离重新随机选招，导致 AI 在多个招式边界间抖动。
+	 */
 	if (!HasPendingAttack())
 	{
 		return false;

@@ -76,14 +76,14 @@ protected:
 
 
 	/* 状态 */
-	UPROPERTY(BlueprintReadOnly, Category = "State", meta = (AllowPrivateAccess = "true"))
+	UPROPERTY(BlueprintReadOnly, Category = "State", meta = (AllowPrivateAccess = "true", ToolTip = "当前武器装备状态，驱动角色与动画状态机。"))
 	EWeaponState WeaponState = EWeaponState::EWS_Unequipped; // 装备状态
 
 	/* 动画驱动变量 */
-	UPROPERTY(BlueprintReadOnly, Category = "Animation", meta = (AllowPrivateAccess = "true"))
+	UPROPERTY(BlueprintReadOnly, Category = "Animation", meta = (AllowPrivateAccess = "true", ToolTip = "地速（2D），驱动 BlendSpace。"))
 	float GroundSpeed; // 地速（2D），驱动 BlendSpace
 
-	UPROPERTY(BlueprintReadOnly, Category = "Animation", meta = (AllowPrivateAccess = "true"))
+	UPROPERTY(BlueprintReadOnly, Category = "Animation", meta = (AllowPrivateAccess = "true", ToolTip = "移动方向（-180~180），驱动 BlendSpace。"))
 	float Direction; // 移动方向（-180~180），驱动 BlendSpace
 
 	/* 组件 */

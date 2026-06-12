@@ -55,9 +55,9 @@ public:
 	virtual void Attack() override;
 
 	/* 蒙太奇回调 */
-	UFUNCTION(BlueprintCallable)
+	UFUNCTION(BlueprintCallable, meta = (ToolTip = "动画受击结束时调用，恢复敌人 AI 状态。"))
 	void OnHitReactEnd();
-	UFUNCTION(BlueprintCallable)
+	UFUNCTION(BlueprintCallable, meta = (ToolTip = "动画攻击结束时调用，恢复敌人 AI 状态并启动攻击冷却。"))
 	void OnAttackEnd();
 	virtual void OnAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted) override;
 	virtual void OnHitReactMontageEnded(UAnimMontage* Montage, bool bInterrupted) override;
@@ -350,6 +350,10 @@ private:
 	void StartAttackCooldown(float MinCooldown, float MaxCooldown);
 	bool PlayEnemyAttackMontage(const FEnemyAttackEntry& Entry);
 	void ClearCurrentAttackConfig(bool bStartCooldown = false);
+	/**
+	 * 为当前敌人招式写入/清理 Motion Warping 目标。
+	 * Entry 提供 WarpTargetName、StopDistance 和 MaxWarpDistance；目标点只在出手瞬间计算一次。
+	 */
 	void UpdateAttackMotionWarpTarget(const FEnemyAttackEntry& Entry);
 	void ClearAttackMotionWarpTarget(const FEnemyAttackEntry& Entry);
 	void ValidateEnemyAttackConfig() const;
@@ -357,6 +361,11 @@ private:
 	bool HasPendingAttack() const;
 	void ClearPendingAttack();
 	void RollPendingAttackIntent();
+	/**
+	 * 尝试执行已抽中的 PendingAttack。
+	 * DistanceToTarget 是当前水平距离，ForwardDot 是朝向目标的点积，ToTarget 是指向目标的 2D 单位方向。
+	 * 返回 true 表示本帧已处理攻击意图（移动、等待、清理或出手），调用方不应再重新抽招。
+	 */
 	bool TryExecutePendingAttack(float DistanceToTarget, float ForwardDot, const FVector& ToTarget);
 	void HandlePendingAttackPositioning(float DistanceToTarget, const FVector& ToTarget);
 	bool IsPendingAttackExpired() const;

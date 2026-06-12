@@ -17,7 +17,8 @@ class TEST_API IHitInterface
 	GENERATED_BODY()
 
 public:
-	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Combat")
+	// 命中反馈入口。ImpactPoint 为命中点，HitInstigator 为发起命中的角色或武器拥有者。
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Combat", meta = (ToolTip = "受击反馈入口。ImpactPoint 为命中点，HitInstigator 为攻击发起者。"))
 	void GetHit(const FVector& ImpactPoint, AActor* HitInstigator);
 
 	// 受击特效（音效+粒子），无受击动画，同类命中也触发

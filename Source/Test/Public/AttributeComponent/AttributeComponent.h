@@ -19,16 +19,16 @@ class TEST_API UAttributeComponent : public UActorComponent
 public:
 	UAttributeComponent();
 
-	UPROPERTY(BlueprintAssignable, Category = "Events")
+	UPROPERTY(BlueprintAssignable, Category = "Events", meta = (ToolTip = "生命百分比变化时广播，参数范围 0~1。"))
 	FOnHealthChangedSignature OnHealthChanged;
 
-	UPROPERTY(BlueprintAssignable, Category = "Events")
+	UPROPERTY(BlueprintAssignable, Category = "Events", meta = (ToolTip = "体力百分比变化时广播，参数范围 0~1。"))
 	FOnStaminaChangedSignature OnStaminaChanged;
 
-	UPROPERTY(BlueprintAssignable, Category = "Events")
+	UPROPERTY(BlueprintAssignable, Category = "Events", meta = (ToolTip = "体力首次耗尽时广播，用于进入 Exhausted 状态。"))
 	FOnExhaustedSignature OnExhausted;
 
-	UPROPERTY(BlueprintAssignable, Category = "Events")
+	UPROPERTY(BlueprintAssignable, Category = "Events", meta = (ToolTip = "药瓶数量变化时广播当前数量和上限。"))
 	FOnPotionCountChanged OnPotionCountChanged;
 
 	void ReceiveDamage(float Damage);
@@ -91,13 +91,13 @@ private:
 	float PotionHealPercent = 0.5f;
 
 public:
-	UFUNCTION(BlueprintCallable, Category = "Actor Attributes")
+	UFUNCTION(BlueprintCallable, Category = "Actor Attributes", meta = (ToolTip = "增加金币数量。"))
 	FORCEINLINE void AddGold(int32 Amount) { Gold += Amount; }
 
-	UFUNCTION(BlueprintCallable, Category = "Actor Attributes")
+	UFUNCTION(BlueprintCallable, Category = "Actor Attributes", meta = (ToolTip = "直接设置金币数量。"))
 	FORCEINLINE void SetGold(int32 Value) { Gold = Value; }
 
-	UFUNCTION(BlueprintPure, Category = "Actor Attributes")
+	UFUNCTION(BlueprintPure, Category = "Actor Attributes", meta = (ToolTip = "返回当前金币数量。"))
 	FORCEINLINE int32 GetGold() const { return Gold; }
 
 	FORCEINLINE float GetHealthPercent() const { return CurrentHealth / MaxHealth; }

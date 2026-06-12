@@ -64,7 +64,7 @@ public:
 	bool TryConsumeComboInputAtBranchPoint();
 	FORCEINLINE bool IsComboWindowOpen() const { return bComboWindowOpen; }
 	FORCEINLINE void SetComboInputReceived(bool bReceived) { bComboInputReceived = bReceived; }
-	UFUNCTION(BlueprintCallable, Category = "Combat")
+	UFUNCTION(BlueprintCallable, Category = "Combat", meta = (ToolTip = "返回当前轻攻击连招段索引，主要供调试或 UI 显示使用。"))
 	FORCEINLINE int32 GetComboCounter() const { return ComboCounter; }
 	void OpenActionCancelWindow();
 	void CloseActionCancelWindow();
@@ -139,7 +139,7 @@ protected:
 	void OnPotionMontageEnded(UAnimMontage* Montage, bool bInterrupted);
 
 	/* 动作状态 */
-	UPROPERTY(BlueprintReadOnly, Category = "State")
+	UPROPERTY(BlueprintReadOnly, Category = "State", meta = (ToolTip = "当前玩家动作状态，控制攻击、硬直、翻滚、喝药等互斥动作。"))
 	EActionState ActionState = EActionState::EAS_UnOccupied;
 
 	// 体力耗尽后恢复时间
@@ -168,6 +168,10 @@ private:
 	void BindMontageEndDelegate(UAnimInstance* AnimInstance, UAnimMontage* Montage,
 	                            void (AMyCharacter::*Callback)(UAnimMontage*, bool));
 	bool StartComboSegment(int32 SegmentIndex, EComboPlaybackMode PlaybackMode);
+	/**
+	 * 为当前攻击写入玩家侧 Motion Warping 目标。
+	 * Config 来自轻击段、冲刺攻击或蓄力 Release；目标名固定为 AttackTarget。
+	 */
 	void UpdateAttackMotionWarpTarget(const FPlayerAttackMotionWarpingConfig& Config);
 	void ClearAttackMotionWarpTarget();
 	/**
@@ -255,7 +259,7 @@ private:
 	float AttackInputPressTime = 0.f;
 	FTimerHandle ChargeDecisionTimer;
 
-	UPROPERTY(EditDefaultsOnly, Category = "Combat|Charge")
+	UPROPERTY(EditDefaultsOnly, Category = "Combat|Charge", meta = (ToolTip = "按住攻击超过该时间后进入蓄力判定。"))
 	float ChargeInputThreshold = 0.2f;
 
 	bool bPendingExhaustedAfterAttack = false;
@@ -264,10 +268,10 @@ private:
 	UPROPERTY(VisibleInstanceOnly, Category = "State", meta = (AllowPrivateAccess = "true", ToolTip = "当前重叠的可拾取物品。"))
 	Aitem* OverLapItem;
 
-	UPROPERTY(BlueprintReadOnly, Category = "State", meta = (AllowPrivateAccess = "true"))
+	UPROPERTY(BlueprintReadOnly, Category = "State", meta = (AllowPrivateAccess = "true", ToolTip = "当前是否处于冲刺状态。"))
 	bool bIsSprinting = false;
 
-	UPROPERTY(BlueprintReadOnly, Category = "State", meta = (AllowPrivateAccess = "true"))
+	UPROPERTY(BlueprintReadOnly, Category = "State", meta = (AllowPrivateAccess = "true", ToolTip = "当前是否处于步行状态。"))
 	bool bIsWalking = false;
 
 	/* 防御 */

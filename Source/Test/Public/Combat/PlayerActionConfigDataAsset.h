@@ -102,28 +102,28 @@ class TEST_API UPlayerActionConfigDataAsset : public UDataAsset
 	GENERATED_BODY()
 
 public:
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Actions")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Actions", meta = (ToolTip = "玩家翻滚动作配置。"))
 	FPlayerDodgeActionConfig Dodge;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Actions")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Actions", meta = (ToolTip = "玩家举盾防御动作配置。"))
 	FPlayerBlockActionConfig Block;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Actions")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Actions", meta = (ToolTip = "玩家弹反动作配置。"))
 	FPlayerParryActionConfig Parry;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Actions")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Actions", meta = (ToolTip = "玩家喝药动作配置。"))
 	FPlayerPotionActionConfig Potion;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Priority", meta = (ToolTip = "Attack / HitReact / Death 的共享优先级。Attack 的蒙太奇配置仍归 UAttackConfigDataAsset；这里只保存取消判断需要的优先级。数值越大优先级越高。"))
 	FPlayerSharedActionPriorityConfig SharedPriority;
 
-	UFUNCTION(BlueprintPure, Category = "Priority")
+	UFUNCTION(BlueprintPure, Category = "Priority", meta = (ToolTip = "返回指定玩家动作类型的优先级。未识别动作返回 0。"))
 	int32 GetActionPriority(EPlayerActionType Action) const;
 
-	UFUNCTION(BlueprintPure, Category = "Priority")
+	UFUNCTION(BlueprintPure, Category = "Priority", meta = (ToolTip = "判断新动作优先级是否严格高于当前动作。"))
 	bool IsStrictlyHigherPriority(EPlayerActionType NewAction, EPlayerActionType CurrentAction) const;
 
-	UFUNCTION(BlueprintPure, Category = "Priority")
+	UFUNCTION(BlueprintPure, Category = "Priority", meta = (ToolTip = "判断新动作优先级是否不低于当前动作。"))
 	bool IsAtLeastSamePriority(EPlayerActionType NewAction, EPlayerActionType CurrentAction) const;
 
 	virtual void PostLoad() override;

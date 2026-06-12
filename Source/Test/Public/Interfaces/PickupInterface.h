@@ -18,7 +18,7 @@ class TEST_API IPickupInterface
 	GENERATED_BODY()
 
 public:
-	// 被角色按E拾取时调用，Picker 为拾取者
-	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Pickup")
+	// 被角色按拾取键调用，Picker 为拾取者。
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Pickup", meta = (ToolTip = "拾取入口。Picker 为触发拾取的角色或 Actor。"))
 	void OnPickup(AActor* Picker);
 };

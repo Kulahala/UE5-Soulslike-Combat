@@ -520,6 +520,11 @@ void AMyCharacter::ResetCombo()
 
 void AMyCharacter::UpdateAttackMotionWarpTarget(const FPlayerAttackMotionWarpingConfig& Config)
 {
+	/*
+	 * 主角攻击 Motion Warping 契约：
+	 * 只在锁定目标且距离合理时写入一次固定 AttackTarget，AnimNotifyState 只消费该目标。
+	 * 不在窗口内持续追踪敌人，避免轻击/冲刺/蓄力释放变成远距离吸附。
+	 */
 	if (!Config.bUseMotionWarping)
 	{
 		ClearAttackMotionWarpTarget();
@@ -1181,6 +1186,11 @@ void AMyCharacter::UsePotion()
 
 bool AMyCharacter::TryStartAction(EPlayerActionType Action)
 {
+	/*
+	 * 玩家动作统一入口。
+	 * 这里先判断“当前动作能否被目标动作取消”，再启动目标动作，避免各输入函数各自维护优先级。
+	 * Block 是按住输入维持的常驻姿态：允许被更高优先级动作打断，但目标动作资源校验失败时不提前丢盾。
+	 */
 	const EPlayerActionType CurrentAction = GetCurrentPlayerActionType();
 	const bool bShouldCancel = CanCancelCurrentActionWith(Action);
 	if (CurrentAction != EPlayerActionType::None && CurrentAction != Action && !bShouldCancel)
