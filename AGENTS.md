@@ -51,6 +51,13 @@ No CI pipeline, no lint/test commands configured.
 - Write agent feedback and implementation plans there as working context, not end-user documentation.
 - For code review and closeout passes, ignore `Content/*.uasset` by default unless the user explicitly asks to inspect or include asset changes.
 
+## Content Boundaries
+
+- C++ source lives under `Source/Test/`; Public/Private mirrors the UE module structure.
+- Game-owned assets live under `Content/_GAME/`; modify this directory by default for project gameplay/HUD/content work.
+- Marketplace, sample, Paragon, Mixamo, and other large reference asset folders are read-only context unless the user explicitly asks to edit them.
+- For review and closeout passes, ignore tracked `.uasset` changes under `Content/` by default unless the user explicitly asks to inspect or include asset changes.
+
 ## Documentation Update Policy
 
 - Each agent updates only the markdown files within its responsibility.
@@ -101,6 +108,20 @@ No CI pipeline, no lint/test commands configured.
 ### Sub-Agent Strategy
 - **轻量子代理（mini 模型）适用场景**：低风险只读任务、机械文档任务、批量搜索
 - **不要交给 mini**：架构决策、关键 review、行为敏感逻辑、设计方案制定
+
+## Project Gameplay Rules
+
+- Async callback guards: timer callbacks, AnimNotifies, montage delegates, collision delegates, and perception delegates must check current state and object validity before mutating gameplay state. These callbacks may fire after a higher-priority path such as hit stun, death, interruption, or lock-on clearing has already changed state.
+- FSM hysteresis: distance-, angle-, or threshold-based state transitions need separate enter/exit thresholds to avoid boundary flicker. Enemy combat exit currently uses `CombatingRadius + CombatExitBuffer`; use the same pattern for similar states.
+- Shared recovery entry: if natural montage end, interruption, Notify, and delegate paths recover the same action state, converge them through a shared helper instead of maintaining separate recovery logic.
+- Compile ownership: the user compiles and packages manually. Do not run UBT, `Build.bat`, packaging, or other long-running compile/build commands unless the user explicitly asks.
+
+## Debug Output Rules
+
+- UI checkbox initialization must read raw debug values such as `GetPlayerEnabledRaw()` so the UI shows the sub-toggle's own state.
+- Runtime debug output must use effective getters such as `IsPlayerEnabled()` so the global debug gate is respected.
+- Place debug guards at function or block entry. Do not repeat per-line checks before every debug `Add()`.
+- `FDebugDrawHelper` must stay independent from gameplay classes such as `AEnemy`, `AMyCharacter`, and combat state enums, and must not own gameplay state.
 
 ## Architecture
 
@@ -172,6 +193,10 @@ Override lifecycle functions (`BeginPlay`, `Tick`) and interface implementations
 ### Error Handling
 
 Use `check()` / `ensure()` for invariants. No `try/catch` unless interacting with third-party code that throws.
+
+### Spawn Actor Safety
+
+All `SpawnActor` calls must null-check the returned actor before use. On failure, log with `GetNameSafe(ActorClass)` and return early instead of dereferencing a null actor.
 
 ### Comments
 

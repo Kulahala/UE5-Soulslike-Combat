@@ -84,6 +84,10 @@ For general agent guidelines, see **[AGENTS.md](AGENTS.md)**.
 - **Dodge Roll System**: `SelectDodgeSection()` 必须在 `FaceDirection2D()` 之前调用，否则 `UnrotateVector()` 参考系错误
 - **Combo System**: 续接判断必须在状态恢复之前，临时设 `ActionState = EAS_UnOccupied` 让 `CanAttack()` 通过
 - **Charged Attack**: 蒙太奇契约：C++ 硬编码跳转 `Default` 和 `Release` Section
+- **Async Callback Guards**: 定时器、AnimNotify、蒙太奇委托、碰撞/感知委托等异步回调入口必须先检查当前状态或对象有效性。回调触发时状态可能已被更高优先级路径覆盖，例如受击硬直、死亡、打断、解除锁定。
+- **FSM Hysteresis**: 基于距离、角度、阈值的状态切换必须保留进入/退出死区，避免边界每帧抖动。当前敌人战斗退出使用 `CombatingRadius + CombatExitBuffer`，新增类似状态时沿用这个模式。
+- **Shared Recovery Entry**: 多条路径把同一动作从异常态恢复到正常态时，优先收敛到共享 helper。不要让自然结束、打断、Notify、Delegate 各自维护一份恢复逻辑。
+- **Compile Ownership**: 本项目由用户手动编译/打包。除非用户明确要求，不要主动运行 UBT、Build.bat、UE 打包或长时间编译命令。
 
 
 
