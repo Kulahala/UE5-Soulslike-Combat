@@ -1807,6 +1807,7 @@ void AMyCharacter::UpdateLockOn(float DeltaTime)
 	if (ActionState == EActionState::EAS_Dead || ActionState == EActionState::EAS_Stunning) return;
 
 	UpdateLockOnControlRotation(DeltaTime);
+	UpdateLockOnActorFacing(DeltaTime);
 
 	// [调试]
 	if (FDebugDrawHelper::IsPlayerEnabled())
@@ -1865,7 +1866,7 @@ void AMyCharacter::SetMovementRotationMode(bool bOrientToMovement, bool bUseCont
 void AMyCharacter::ApplyCurrentLockOnRotationMode()
 {
 	const bool bFreeRun = ShouldUseLockOnFreeRun();
-	SetMovementRotationMode(bFreeRun, !bFreeRun);
+	SetMovementRotationMode(bFreeRun, false);
 }
 
 void AMyCharacter::ApplyLockOnRotationMode()
@@ -2019,7 +2020,7 @@ void AMyCharacter::CacheLockOnRotationState()
 
 void AMyCharacter::EnterLockOnRotationMode()
 {
-	SetMovementRotationMode(false, true);
+	SetMovementRotationMode(false, false);
 	SpringArm->bUsePawnControlRotation = true;
 }
 
@@ -2075,6 +2076,39 @@ void AMyCharacter::UpdateLockOnControlRotation(float DeltaTime) const
 		const FRotator Current = PC->GetControlRotation();
 		PC->SetControlRotation(FMath::RInterpTo(Current, LookAt, DeltaTime, LockOnComponent->GetRotationInterpSpeed()));
 	}
+}
+
+void AMyCharacter::UpdateLockOnActorFacing(float DeltaTime)
+{
+	if (!IsLockingOn() || ShouldUseLockOnFreeRun() ||
+		ActionState == EActionState::EAS_Attacking ||
+		ActionState == EActionState::EAS_Dodging ||
+		ActionState == EActionState::EAS_Stunning ||
+		ActionState == EActionState::EAS_Dead)
+	{
+		return;
+	}
+
+	const AEnemy* LockedTarget = GetLockedTarget();
+	if (!LockedTarget || !LockOnComponent)
+	{
+		return;
+	}
+
+	FVector ToTarget = LockedTarget->GetActorLocation() - GetActorLocation();
+	ToTarget.Z = 0.f;
+	if (ToTarget.IsNearlyZero())
+	{
+		return;
+	}
+
+	const FRotator CurrentRotation(0.f, GetActorRotation().Yaw, 0.f);
+	const FRotator TargetRotation(0.f, ToTarget.Rotation().Yaw, 0.f);
+	SetActorRotation(FMath::RInterpConstantTo(
+		CurrentRotation,
+		TargetRotation,
+		DeltaTime,
+		LockOnComponent->GetFacingTurnRate()));
 }
 
 void AMyCharacter::FaceDirection2D(const FVector& FacingDirection)

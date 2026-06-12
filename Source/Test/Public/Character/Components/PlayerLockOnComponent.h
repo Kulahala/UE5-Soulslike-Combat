@@ -24,6 +24,7 @@ public:
 	FORCEINLINE bool IsLockingOn() const { return bIsLockingOn; }
 	FORCEINLINE AEnemy* GetLockedTarget() const { return LockedTarget; }
 	FORCEINLINE float GetRotationInterpSpeed() const { return LockOnRotationInterpSpeed; }
+	FORCEINLINE float GetFacingTurnRate() const { return LockOnFacingTurnRate; }
 	FORCEINLINE float GetStrafeSpeedMultiplier() const { return LockOnStrafeSpeedMultiplier; }
 	FORCEINLINE float GetBackSpeedMultiplier() const { return LockOnBackSpeedMultiplier; }
 	FORCEINLINE const FVector& GetSocketOffset() const { return LockOnSocketOffset; }
@@ -50,6 +51,9 @@ private:
 
 	UPROPERTY(EditDefaultsOnly, Category = "LockOn", meta = (ToolTip = "锁定朝向插值速度。值越大转向越快。"))
 	float LockOnRotationInterpSpeed = 8.f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "LockOn|Facing", meta = (ClampMin = "0.0", ToolTip = "锁定非 free-run 状态下角色模型每秒最大转向角度。"))
+	float LockOnFacingTurnRate = 720.f;
 
 	UPROPERTY(EditDefaultsOnly, Category = "LockOn", meta = (ToolTip = "自动解锁距离（cm）。目标超出此距离自动解锁，带滞后防抖动。"))
 	float LockOnBreakRadius = 2000.f;

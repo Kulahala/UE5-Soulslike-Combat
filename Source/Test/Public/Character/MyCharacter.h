@@ -209,6 +209,7 @@ private:
 	void SetLockOnTarget(AEnemy* NewTarget);
 	bool IsLockOnTargetValid() const;
 	void UpdateLockOnControlRotation(float DeltaTime) const;
+	void UpdateLockOnActorFacing(float DeltaTime);
 	bool ShouldUseLockOnFreeRun() const;
 	FVector GetLockOnFreeRunDirection() const;
 	FVector GetLockOnFreeRunCameraInputLocal() const;
