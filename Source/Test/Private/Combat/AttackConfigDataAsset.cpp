@@ -72,6 +72,12 @@ void UAttackConfigDataAsset::LogConfigWarnings() const
 			UE_LOG(LogTemp, Warning, TEXT("%s: SpecialAttacks[%d] %s has no Montage."),
 			       *GetName(), Index, *UEnum::GetValueAsString(Config.Type));
 		}
+
+		if (Config.MotionWarping.bUseMotionWarping && Config.MotionWarping.MaxWarpDistance <= 0.f)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("%s: SpecialAttacks[%d] %s enables Motion Warping but MaxWarpDistance is <= 0."),
+			       *GetName(), Index, *UEnum::GetValueAsString(Config.Type));
+		}
 	}
 
 	if (!bHasSprintAttack)
@@ -93,6 +99,11 @@ void UAttackConfigDataAsset::LogConfigWarnings() const
 	if (ChargedAttack.MaxChargeHoldTime <= 0.f)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("%s: ChargedAttack MaxChargeHoldTime %.2f must be > 0."), *GetName(), ChargedAttack.MaxChargeHoldTime);
+	}
+
+	if (ChargedAttack.MotionWarping.bUseMotionWarping && ChargedAttack.MotionWarping.MaxWarpDistance <= 0.f)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s: ChargedAttack enables Motion Warping but MaxWarpDistance is <= 0."), *GetName());
 	}
 #endif
 }

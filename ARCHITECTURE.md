@@ -435,6 +435,15 @@ UDataAsset → UEnemyAttackConfigDataAsset (Enemy attacks: montage, section, pos
 - **Cleanup**: `ClearCurrentAttackConfig()` 在 `CurrentAttackIndex = INDEX_NONE` 前调用 `ClearAttackMotionWarpTarget(Entry)`，使用 `UMotionWarpingComponent::RemoveWarpTarget(...)` 清理当前招式目标。该路径覆盖 montage 播放失败、攻击结束、打断、硬直/破防/死亡切出攻击态，避免下一次 NotifyState 复用 stale target。
 - **Montage contract**: 跳劈蒙太奇需要有效 root motion，并在起跳/飞行前冲段放置 Motion Warping NotifyState。窗口决定哪段 root motion 被修正，不会重新计算目标；如需分阶段调参，可用同一个 `AttackTarget` 拆成 rotation-only 和 translation/rotation 窗口，但不要让平移窗口覆盖落地后的收招恢复。
 
+### Player Attack Motion Warping
+
+- **Scope**: 主角攻击 Motion Warping 只在锁定目标时启用，用于小幅修正轻击连段、冲刺攻击和蓄力 `Release` 段的 root motion；未锁定时不自动搜敌，不做远距离吸附。
+- **Data fields**: `FPlayerAttackMotionWarpingConfig` 嵌入 `FComboSegment`、`FSpecialAttackConfig` 和 `FChargedAttackConfig`，提供 `bUseMotionWarping`、`WarpStopDistance`、`MaxWarpDistance`。主角不暴露 `WarpTargetName`，C++ 固定写入 `AttackTarget`，动画 Motion Warping NotifyState 也必须使用 `AttackTarget`。
+- **Runtime owner**: `AMyCharacter` 持有 `UMotionWarpingComponent`。轻击在 `StartComboSegment()` 播放/跳 section 前写入，冲刺攻击在 `PerformSprintAttack()` 播放 montage 前写入，蓄力攻击只在 `PerformChargedRelease()` 跳到 `Release` 前写入，不作用于 `Default` / `Loop` 蓄力段。
+- **Target calculation**: 目标来自 `GetLockedTarget()`。`WarpLocation = TargetLocation - ToTarget * WarpStopDistance`，当前距离小于等于 `WarpStopDistance`、目标无效/死亡、或从玩家到 `WarpLocation` 的距离超过 `MaxWarpDistance` 时清理目标并跳过修正。
+- **Cleanup**: `ResetCombo()` 清理主角 `AttackTarget`；受击、死亡、攻击自然结束和打断路径复用现有攻击/连招清理，避免 stale target 影响后续攻击。
+- **Montage contract**: 主角攻击蒙太奇需要有效 root motion，并在前踏/跃进/释放段放置 Motion Warping NotifyState。NotifyState 不应覆盖命中后和收招段。
+
 ## Stamina & Exhaustion System
 
 - `UAttributeComponent` manages stamina: `UseStamina()`, `AddStamina()`, `CheckStamina()`.

@@ -20,8 +20,14 @@
 #include "Engine/Engine.h"
 #include "Kismet/GameplayStatics.h"
 #include "Kismet/KismetMathLibrary.h"
+#include "MotionWarpingComponent.h"
 #include "Perception/AISense_Hearing.h"
 #include "Utils/DebugDrawHelper.h"
+
+namespace
+{
+	const FName PlayerAttackWarpTargetName(TEXT("AttackTarget"));
+}
 
 // ==================== 生命周期 ====================
 
@@ -44,6 +50,8 @@ AMyCharacter::AMyCharacter()
 	Camera->SetupAttachment(SpringArm);
 
 	LockOnComponent = CreateDefaultSubobject<UPlayerLockOnComponent>(TEXT("LockOnComponent"));
+
+	MotionWarpingComponent = CreateDefaultSubobject<UMotionWarpingComponent>(TEXT("MotionWarpingComponent"));
 }
 
 void AMyCharacter::BeginPlay()
@@ -215,10 +223,15 @@ bool AMyCharacter::PerformSprintAttack()
 	// 6. 停止冲刺
 	StopSprinting();
 
+	UpdateAttackMotionWarpTarget(SprintConfig->MotionWarping);
+
 	// 7. 播放攻击蒙太奇（关键：必须保留 Montage_Play + Montage_SetEndDelegate 模式！）
 	// 原因：当前实现依赖手动绑定 delegate，不能简化为 PlayAnimMontage()
 	ActionState = EActionState::EAS_Attacking;
-	AnimInstance->Montage_Play(SprintConfig->Montage);
+	if (AnimInstance->Montage_Play(SprintConfig->Montage) <= 0.f)
+	{
+		ClearAttackMotionWarpTarget();
+	}
 
 	// 冲刺攻击发出噪音
 	EmitNoise(AttackNoiseLoudness, AttackNoiseRange);
@@ -351,6 +364,7 @@ void AMyCharacter::PerformChargedRelease()
 	UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
 	if (AnimInstance)
 	{
+		UpdateAttackMotionWarpTarget(Config.MotionWarping);
 		AnimInstance->Montage_JumpToSection(ChargedReleaseSectionName, Config.Montage);
 		EmitNoise(AttackNoiseLoudness, AttackNoiseRange);
 	}
@@ -441,6 +455,7 @@ bool AMyCharacter::StartComboSegment(int32 SegmentIndex, EComboPlaybackMode Play
 	}
 
 	ActionState = EActionState::EAS_Attacking;
+	UpdateAttackMotionWarpTarget(Segment->MotionWarping);
 
 	if (PlaybackMode == EComboPlaybackMode::NewPlayback)
 	{
@@ -498,8 +513,71 @@ void AMyCharacter::ResetCombo()
 	bActionCancelWindowOpen = false;
 	SetAttackDamageMultiplier(1.0f);
 	CurrentPoiseDamage = EquippedWeapon ? EquippedWeapon->GetBasePoiseDamage() : 1.f;
+	ClearAttackMotionWarpTarget();
 
 	UE_LOG(LogTemp, Log, TEXT("Combo reset"));
+}
+
+void AMyCharacter::UpdateAttackMotionWarpTarget(const FPlayerAttackMotionWarpingConfig& Config)
+{
+	if (!Config.bUseMotionWarping)
+	{
+		ClearAttackMotionWarpTarget();
+		return;
+	}
+
+	if (!MotionWarpingComponent || Config.MaxWarpDistance <= 0.f)
+	{
+		ClearAttackMotionWarpTarget();
+		return;
+	}
+
+	AEnemy* LockedTarget = GetLockedTarget();
+	if (!LockedTarget || !LockedTarget->GetAttributes() || !LockedTarget->GetAttributes()->IsAlive())
+	{
+		ClearAttackMotionWarpTarget();
+		return;
+	}
+
+	const FVector PlayerLocation = GetActorLocation();
+	const FVector TargetLocation = LockedTarget->GetActorLocation();
+	const FVector ToTarget = (TargetLocation - PlayerLocation).GetSafeNormal2D();
+	if (ToTarget.IsNearlyZero())
+	{
+		ClearAttackMotionWarpTarget();
+		return;
+	}
+
+	const float StopDistance = FMath::Max(0.f, Config.WarpStopDistance);
+	const float CurrentDistance = FVector::Dist2D(PlayerLocation, TargetLocation);
+	if (CurrentDistance <= StopDistance)
+	{
+		ClearAttackMotionWarpTarget();
+		return;
+	}
+
+	const FVector WarpLocation = TargetLocation - ToTarget * StopDistance;
+	const float WarpDistance = FVector::Dist2D(PlayerLocation, WarpLocation);
+	if (WarpDistance > Config.MaxWarpDistance)
+	{
+		ClearAttackMotionWarpTarget();
+		return;
+	}
+
+	const FRotator WarpRotation(0.f, ToTarget.Rotation().Yaw, 0.f);
+	MotionWarpingComponent->AddOrUpdateWarpTargetFromTransform(
+		PlayerAttackWarpTargetName,
+		FTransform(WarpRotation, WarpLocation));
+}
+
+void AMyCharacter::ClearAttackMotionWarpTarget()
+{
+	if (!MotionWarpingComponent)
+	{
+		return;
+	}
+
+	MotionWarpingComponent->RemoveWarpTarget(PlayerAttackWarpTargetName);
 }
 
 bool AMyCharacter::TryConsumeComboInputAtBranchPoint()

@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
+#include "Combat/PlayerAttackMotionWarpingConfig.h"
 #include "ComboDataAsset.generated.h"
 
 class UAnimMontage;
@@ -27,6 +28,9 @@ struct FComboSegment
 	// 该段韧性伤害倍率（相对武器基础韧性伤害）
 	UPROPERTY(EditAnywhere, Category = "Poise", meta = (ClampMin = "0.1", ClampMax = "5.0"))
 	float PoiseDamageMultiplier = 1.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Motion Warping")
+	FPlayerAttackMotionWarpingConfig MotionWarping;
 };
 
 /**

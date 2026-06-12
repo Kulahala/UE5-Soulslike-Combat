@@ -53,6 +53,11 @@ void UComboDataAsset::LogConfigWarnings() const
 		{
 			UE_LOG(LogTemp, Warning, TEXT("%s: ComboChain[%d] PoiseDamageMultiplier %.2f is <= 0."), *GetName(), Index, Segment.PoiseDamageMultiplier);
 		}
+
+		if (Segment.MotionWarping.bUseMotionWarping && Segment.MotionWarping.MaxWarpDistance <= 0.f)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("%s: ComboChain[%d] enables Motion Warping but MaxWarpDistance is <= 0."), *GetName(), Index);
+		}
 	}
 #endif
 }

@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
+#include "Combat/PlayerAttackMotionWarpingConfig.h"
 #include "AttackConfigDataAsset.generated.h"
 
 class UComboDataAsset;
@@ -43,6 +44,9 @@ struct FSpecialAttackConfig
 	// 体力消耗
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Stamina", meta = (ClampMin = "1.0", ToolTip = "体力消耗"))
 	float StaminaCost = 15.f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Motion Warping")
+	FPlayerAttackMotionWarpingConfig MotionWarping;
 };
 
 /* 蓄力攻击专用配置 */
@@ -74,6 +78,9 @@ struct FChargedAttackConfig
 	// 满蓄力时长
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Charge Timing", meta = (ClampMin = "0.1", ToolTip = "达到满蓄力的时长（达到此值后，倍率不再增加）"))
 	float MaxChargeHoldTime = 1.2f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Motion Warping", meta = (ToolTip = "只作用于 Release 段，不作用于蓄力 Default/Loop。"))
+	FPlayerAttackMotionWarpingConfig MotionWarping;
 };
 
 /**

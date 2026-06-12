@@ -23,6 +23,8 @@ class UAttackConfigDataAsset;
 class UHitReactionConfigDataAsset;
 class USoundBase;
 class UAnimInstance;
+class UMotionWarpingComponent;
+struct FPlayerAttackMotionWarpingConfig;
 
 UCLASS()
 class TEST_API AMyCharacter : public ABaseCharacter, public IBlockableInterface
@@ -166,6 +168,8 @@ private:
 	void BindMontageEndDelegate(UAnimInstance* AnimInstance, UAnimMontage* Montage,
 	                            void (AMyCharacter::*Callback)(UAnimMontage*, bool));
 	bool StartComboSegment(int32 SegmentIndex, EComboPlaybackMode PlaybackMode);
+	void UpdateAttackMotionWarpTarget(const FPlayerAttackMotionWarpingConfig& Config);
+	void ClearAttackMotionWarpTarget();
 	/**
 	 * 尝试启动指定动作。
 	 * 返回 true 表示“当前处于或刚启动该动作”，不区分“新启动”和“已在执行”。
@@ -232,6 +236,9 @@ private:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true", ToolTip = "玩家锁定组件，负责锁定状态、目标筛选和参数持有。"))
 	UPlayerLockOnComponent* LockOnComponent;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true", ToolTip = "Motion Warping 组件，用于锁定攻击在蒙太奇窗口内做短距离目标修正。"))
+	UMotionWarpingComponent* MotionWarpingComponent;
 
 	/* HUD */
 	// 玩家 HUD 控件类，BeginPlay 时创建并绑定到视口
