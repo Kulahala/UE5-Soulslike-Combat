@@ -46,6 +46,15 @@ AEnemy::AEnemy()
 	HealthBarWidgetComp = CreateDefaultSubobject<UHealthBarComponent>(TEXT("HealthBar"));
 	HealthBarWidgetComp->SetupAttachment(RootComponent);
 
+	// 锁定标记：WidgetClass 在敌人蓝图中指定，C++ 只负责组件入口和显隐。
+	LockOnMarkerWidgetComp = CreateDefaultSubobject<UWidgetComponent>(TEXT("LockOnMarker"));
+	LockOnMarkerWidgetComp->SetupAttachment(RootComponent);
+	LockOnMarkerWidgetComp->SetWidgetSpace(EWidgetSpace::Screen);
+	LockOnMarkerWidgetComp->SetDrawSize(FVector2D(72.f, 72.f));
+	LockOnMarkerWidgetComp->SetPivot(FVector2D(0.5f, 0.5f));
+	LockOnMarkerWidgetComp->SetRelativeLocation(FVector(0.f, 0.f, 105.f));
+	LockOnMarkerWidgetComp->SetVisibility(false);
+
 	// AI感知
 	AIPerceptionComp = CreateDefaultSubobject<UAIPerceptionComponent>(TEXT("AIPerceptionComp"));
 
@@ -123,6 +132,10 @@ void AEnemy::BeginPlay()
 	if (HealthBarWidgetComp)
 	{
 		HealthBarWidgetComp->SetVisibility(false);
+	}
+	if (LockOnMarkerWidgetComp)
+	{
+		LockOnMarkerWidgetComp->SetVisibility(false);
 	}
 	if (Attributes)
 	{
@@ -1704,6 +1717,11 @@ void AEnemy::HideHealthBar()
 void AEnemy::SetTargetedByPlayer(bool bTargeted)
 {
 	bIsTargetedByPlayer = bTargeted;
+	if (LockOnMarkerWidgetComp)
+	{
+		LockOnMarkerWidgetComp->SetVisibility(bTargeted);
+	}
+
 	if (bTargeted)
 	{
 		// 锁定时确保血条可见（覆盖未挨打过的敌人和正在淡出的敌人）

@@ -133,6 +133,9 @@ private:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true", ToolTip = "头顶血条组件。"))
 	UHealthBarComponent* HealthBarWidgetComp;
 
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true", ToolTip = "锁定目标标记组件，锁定该敌人时显示。"))
+	UWidgetComponent* LockOnMarkerWidgetComp;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true", ToolTip = "Motion Warping 组件，用于跃进类攻击在蒙太奇窗口内修正 root motion 目标。"))
 	UMotionWarpingComponent* MotionWarpingComponent;
 

@@ -481,6 +481,7 @@ UDataAsset → UEnemyAttackConfigDataAsset (Enemy attacks: montage, section, pos
 - **旋转模式切换**：开启时缓存 `bOrientRotationToMovement` / `bUseControllerRotationYaw` / `bUsePawnControlRotation`，切换到锁定模式。普通锁定不再用 `bUseControllerRotationYaw` 硬贴控制器朝向，而是由角色侧独立插值面向目标；解锁时恢复缓存状态。
 - **角色朝向与相机朝向拆分**：`LockOnRotationInterpSpeed` 只控制 Controller/Camera 朝向目标的插值速度；`LockOnFacingTurnRate` 控制非 free-run 锁定状态下角色模型每秒最大转向角度，避免锁定开始或松开 Shift 后瞬间吸回目标 yaw。
 - **锁定相机**：默认使用居中后上方构图，`LockOnSocketOffset` 负责 SpringArm 高度偏移，`LockOnCameraPitch` 负责控制器俯视角；不再使用右肩越肩构图。
+- **锁定目标反馈**：`AEnemy::SetTargetedByPlayer()` 是敌人被玩家锁定的统一反馈入口；锁定时保持血条可见，并显示 Enemy 自持的 `LockOnMarker` screen-space WidgetComponent，解锁时隐藏标记并恢复血条延迟隐藏流程。
 - **锁定冲刺 Free-Run**：`ShouldUseLockOnFreeRun()` 条件 = `bIsLockingOn && bIsSprinting && EAS_UnOccupied && !IsFalling && 有移动输入`。满足时角色临时恢复自由移动语义，控制器/相机继续盯敌人。
 - **Free-Run 相机让位**：锁定冲刺时会根据本地移动输入添加轻量侧向/后撤相机 offset，避免高速绕行时视野过窄；`LockOnFreeRunCameraInterpSpeed` 默认较慢，避免前后左右切换时镜头频繁抖动。
 
