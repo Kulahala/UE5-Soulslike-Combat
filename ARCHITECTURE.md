@@ -282,7 +282,7 @@ UAnimNotifyState → UAnimNotifyState_WeaponCollision (drives weapon trace windo
 UAnimNotify → UAnimNotify_ComboBranchPoint (consumes buffered combo input and branches to next attack section)
 UAnimNotify → UAnimNotify_PotionHeal (montage-driven partial potion healing)
 UDataAsset → UTreasureData (static mesh, gold value, pickup sound, scale)
-UDataAsset → UPlayerCharacterProfileDataAsset (single player character config entry: AttackConfig + ActionConfig)
+UDataAsset → UPlayerCharacterProfileDataAsset (single player character config entry: AttackConfig + ActionConfig + ReactionConfig)
 UDataAsset → UPlayerActionConfigDataAsset (player-only action structs: Dodge, Block, Parry, Potion, plus SharedPriority for Attack/HitReact/Death priority)
 UDataAsset → UHitReactionConfigDataAsset (shared character HitReact / Death montage config with section names)
 UDataAsset → UComboDataAsset (combo chain: SectionName, DamageMultiplier, StaminaCost, PoiseDamageMultiplier per segment)
