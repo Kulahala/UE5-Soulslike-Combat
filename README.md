@@ -11,6 +11,8 @@ An Unreal Engine 5.7 C++ Action-RPG prototype focused on responsive character co
 
 This README is a project overview. For implementation details, state machines, combat pipeline, class boundaries, and agent-facing architecture notes, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
+![Gameplay parry and stance break demo](docs/media/demo-parry-stancebreak.gif)
+
 ### Highlights
 
 - **State-driven player combat**: light combos, sprint attack, charged attack, dodge, parry, block, potion use, stamina exhaustion, hit stun, and death all flow through explicit action-state guards.
@@ -39,6 +41,10 @@ This README is a project overview. For implementation details, state machines, c
 | Debug & UI | Pause menu, debug settings page, HUD-rendered debug text, range/debug panel toggles |
 | Environment | Breakable actors and PCG-supported arena generation |
 
+### Demo Clips
+
+![Combat finish and kill feedback](docs/media/demo-combat-finish-kill.gif)
+
 ### Extension Points
 
 - **Enemy variants**: enemy behavior is split between runtime FSM logic and `UEnemyAttackConfigDataAsset` entries. New enemy types can reuse patrol/chase/combat flow while changing attack montages, distance bands, weights, cooldowns, parry rules, and optional Motion Warping settings through data assets.
@@ -61,6 +67,8 @@ This README is a project overview. For implementation details, state machines, c
 - [Poise and Stance Break System](ARCHITECTURE.md#poise-stance-break-system)
 - [Combo System](ARCHITECTURE.md#combo-system)
 - [Charged Attack System](ARCHITECTURE.md#charged-attack-system)
+- [Dodge Roll System](ARCHITECTURE.md#dodge-roll-system)
+- [World Interaction / Breakable System](ARCHITECTURE.md#world-interaction-breakable-system)
 - [Lock-On System](ARCHITECTURE.md#lock-on-system)
 - [Debug Output System](ARCHITECTURE.md#debug-output-system)
 
@@ -94,6 +102,8 @@ This README is a project overview. For implementation details, state machines, c
 
 本文档只作为项目首页介绍。实现细节、状态机、战斗管线、类职责边界和 agent 共用架构说明见 [ARCHITECTURE.md](ARCHITECTURE.md)。
 
+![玩法弹反与破防演示](docs/media/demo-parry-stancebreak.gif)
+
 ### 核心亮点
 
 - **状态驱动的主角战斗**：轻攻击连招、冲刺攻击、蓄力攻击、翻滚、格挡、弹反、喝药、体力耗尽、受击硬直和死亡都通过明确的动作状态守卫组织。
@@ -122,6 +132,10 @@ This README is a project overview. For implementation details, state machines, c
 | 调试与 UI | 暂停菜单、调试设置页、HUD 调试文本、范围/调试面板开关 |
 | 环境 | 可破坏物和 PCG 辅助竞技场生成 |
 
+### 演示片段
+
+![战斗收尾与击杀反馈](docs/media/demo-combat-finish-kill.gif)
+
 ### 扩展性设计
 
 - **敌人种类扩展**：敌人行为拆成运行时 FSM 逻辑和 `UEnemyAttackConfigDataAsset` 招式配置。新增敌人可以复用巡逻、追击、战斗、硬直和死亡流程，只替换攻击蒙太奇、距离区间、权重、冷却、是否可弹反和可选 Motion Warping 参数。
@@ -144,6 +158,8 @@ This README is a project overview. For implementation details, state machines, c
 - [韧性与破防系统](ARCHITECTURE.md#poise-stance-break-system)
 - [连招系统](ARCHITECTURE.md#combo-system)
 - [蓄力攻击系统](ARCHITECTURE.md#charged-attack-system)
+- [翻滚系统](ARCHITECTURE.md#dodge-roll-system)
+- [环境交互与破坏物系统](ARCHITECTURE.md#world-interaction-breakable-system)
 - [锁定系统](ARCHITECTURE.md#lock-on-system)
 - [调试输出系统](ARCHITECTURE.md#debug-output-system)
 
@@ -167,3 +183,4 @@ This README is a project overview. For implementation details, state machines, c
 3. 打开 `Test.sln`。
 4. 使用 **Development Editor** 配置编译 `TestEditor` 目标。
 5. 打开 `Test.uproject` 启动编辑器。
+

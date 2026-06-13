@@ -466,6 +466,8 @@ UDataAsset → UEnemyAttackConfigDataAsset (Enemy attacks: montage, section, pos
 <a name="poise-stance-break-system"></a>
 ## Poise & Stance Break System (韧性与破防系统)
 
+![Parry and stance break gameplay demo](docs/media/demo-parry-stancebreak.gif)
+
 - **架构**：Dark Souls 风格的隐藏韧性条系统，统一弹反和韧性破防到 `EES_StanceBreak` 状态。
 - **韧性机制**：敌人持有隐藏韧性条（`MaxPoise` 默认 10，`CurrentPoise` 运行时值），每次受击扣除韧性伤害（`BasePoiseDamage × PoiseDamageMultiplier`），韧性归零触发破防硬直（`EES_StanceBreak`）。
 - **破防触发**：
@@ -484,6 +486,8 @@ UDataAsset → UEnemyAttackConfigDataAsset (Enemy attacks: montage, section, pos
 
 <a name="lock-on-system"></a>
 ## Lock-On System (`AMyCharacter` + `UPlayerLockOnComponent`)
+
+![Lock-on approach and target feedback](docs/media/architecture-lockon-approach.gif)
 
 - **组件架构**：`UPlayerLockOnComponent` 拥有锁定状态、目标搜索/评分逻辑、所有 `LockOn*` 参数。`AMyCharacter` 保留 facade + 旋转/相机实际写入。
 - **目标搜索**：`FindBestTarget()` 遍历所有 `AEnemy`，`ScoreTarget()` 按 `IsAlive()` + 距离 + Camera forward 视角角度评分。
@@ -504,6 +508,13 @@ UDataAsset → UEnemyAttackConfigDataAsset (Enemy attacks: montage, section, pos
 - **启用条件**：下落时关闭 IK（`IsFalling` 为 true 时不做脚底追踪）；静止或低速时启用更强的贴地效果，避免移动/root motion 阶段被 IK 抢姿态。
 - **Control Rig 职责**：`CR_Slash_foot_ik` 对 `foot_l` / `foot_r` 做地面 trace，计算左右脚 `ZOffset` 与 `ZOffset_Pelvis`，再通过 feet 和 pelvis 的 IK / transform 节点修正台阶、斜坡和不平地面站姿。
 - **使用边界**：该系统是表现层后处理，不改变角色胶囊体、导航、移动速度、战斗判定或 `AMyCharacter` 状态机；调试时优先检查 AnimBP 输入变量 `GroundSpeed` / `IsFalling`、Control Rig trace 命中和脚骨命名。
+
+<a name="world-interaction-breakable-system"></a>
+## World Interaction / Breakable System（环境交互与破坏物）
+
+- `ABreakAbleActor` 通过 `IHitInterface::GetHit_Implementation()` 接入武器命中流程，被击中后从 StaticMesh 切换到 `UGeometryCollectionComponent` 破碎表现，并在配置允许时生成掉落物。
+- `Aitem` 负责可拾取物的基础 overlap、漂浮旋转和抛物线生成表现；武器、盾牌、宝物复用该基础交互语义。
+- 该系统属于轻量世界交互补充，不参与角色状态机或伤害结算核心；武器 trace 命中仍是触发入口。
 
 <a name="combo-system"></a>
 ## Combo System（连招系统）
@@ -539,6 +550,8 @@ UDataAsset → UEnemyAttackConfigDataAsset (Enemy attacks: montage, section, pos
 <a name="dodge-roll-system"></a>
 ## Dodge Roll System（翻滚系统）
 
+![Dodge evade during enemy attack](docs/media/architecture-dodge-evade.gif)
+
 - **状态**：`EAS_Dodging`，无敌帧由 `AnimNotifyState_DodgeInvulnerable` 覆盖全程
 - **方向判定**：无输入时播 `Dodge_B`；非锁定 + 有输入时转向输入方向并播 `Dodge_F`；锁定 + 有输入时保持面向敌人，按角色本地输入方向切 8 个 45° 扇区（`Dodge_F` / `Dodge_FR` / `Dodge_R` / `Dodge_BR` / `Dodge_B` / `Dodge_BL` / `Dodge_L` / `Dodge_FL`）
 - **输入缓存 fallback**：`ACharacterController::CachedMoveInput` 先于 gameplay gate 采样移动输入。攻击 CancelWindow 等状态会阻止 `AddMovementInput()`，导致 Pawn 的 `GetLastMovementInputVector()` 为空；此时 `ComputeDodgeDirection()` 会用 controller 缓存按 `ControlRotation` 转成 world direction，仅用于翻滚 section 判定，不放开攻击中的实际移动。
@@ -573,3 +586,4 @@ UDataAsset → UEnemyAttackConfigDataAsset (Enemy attacks: montage, section, pos
 
 - `GetCurrentActiveMontage()` 可能返回 nullptr，即使 `IsAnyMontagePlaying()` 为 true。必须单独 null 检查。
 - `FAIMoveRequest` 默认 `bReachTestIncludesAgentRadius(true)` + `bReachTestIncludesGoalRadius(true)`。短距离导航必须 `SetReachTestIncludesAgentRadius(false)` + `SetReachTestIncludesGoalRadius(false)`，否则胶囊体半径会被加进 AcceptanceRadius。
+
