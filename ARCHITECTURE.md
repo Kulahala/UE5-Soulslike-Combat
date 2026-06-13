@@ -37,11 +37,11 @@ Core character/combat state-machine enums and small shared combat-flow enums are
 
 | Enum | States | Used By |
 |------|--------|---------|
-| `EWeaponState` | Unequipped, OneHandEquipped, TwoHandEquipped | `AMyCharacter`, `USlashAnimInstance` |
-| `EActionState` | UnOccupied, Attacking, Stunning, Exhausted, Parrying, Dodging, UsingPotion, Dead | `AMyCharacter` |
-| `EComboPlaybackMode` | NewPlayback, Continuation | `AMyCharacter` light combo playback helper |
-| `EPlayerActionType` | None, Attack, Dodge, Block, Parry, Potion, HitReact, Death | `AMyCharacter::TryStartAction` player action entry plus priority/cancel windows |
-| `EEnemyState` | UnOccupied, Patrolling, Searching, Chasing, Combating, Attacking, Stunned, StanceBreak, Dead | `AEnemy` |
+| `EWeaponState` | `EWS_Unequipped`, `EWS_OneHandEquipped`, `EWS_TwoHandEquipped` | `AMyCharacter`, `USlashAnimInstance` |
+| `EActionState` | `EAS_UnOccupied`, `EAS_Attacking`, `EAS_Stunning`, `EAS_Exhausted`, `EAS_Parrying`, `EAS_Dodging`, `EAS_UsingPotion`, `EAS_Dead` | `AMyCharacter` |
+| `EComboPlaybackMode` | `NewPlayback`, `Continuation` | `AMyCharacter` light combo playback helper |
+| `EPlayerActionType` | `None`, `Attack`, `Dodge`, `Block`, `Parry`, `Potion`, `HitReact`, `Death` | `AMyCharacter::TryStartAction` player action entry plus priority/cancel windows |
+| `EEnemyState` | `EES_UnOccupied`, `EES_Patrolling`, `EES_Searching`, `EES_Chasing`, `EES_Attacking`, `EES_Combating`, `EES_Stunned`, `EES_StanceBreak`, `EES_Dead` | `AEnemy` |
 
 **State transition pattern**: Mixed C++ + AnimNotify driven. Entry states are set directly in C++ (`Attack()`, `GetHit_Implementation()`, `Die()`). Recovery transitions use `FOnMontageEnded` delegates with `bInterrupted` guards as primary path. `UAnimNotify_CharacterHitReactEnd` is the exception — used for player hit react recovery so designers can tune stun duration in the animation editor. Enemy recovery has double coverage (delegate + AnimNotify with state guards).
 
@@ -156,11 +156,11 @@ stateDiagram-v2
     Searching --> Chasing : Senses target
 
     Patrolling --> Chasing : Senses target
-    Chasing --> Combating : Enters combat radius
+Chasing --> Combating : Enters combat radius
     Combating --> Chasing : Leaves combat radius + exit buffer
-    Chasing --> SearchingLost : Target lost / leaves chase radius
-    SearchingLost --> Patrolling : Search timer ends
-    SearchingLost --> Chasing : Senses target again
+    Chasing --> Searching : Target lost / leaves chase radius
+    Searching --> Patrolling : Search timer ends (no target)
+    Searching --> Chasing : Senses target again
 
     Combating --> Attacking : Local HFSM allows attack
     Attacking --> Recheck : Montage ended
@@ -254,17 +254,18 @@ flowchart LR
 
 ```
 AActor
-├── Aitem (base: parabolic spawning, floating animation, overlap events)
+├── Aitem + IPickupInterface (base: parabolic spawning, floating animation, overlap events)
 │   ├── AWeapon (box-trace sweep collision, hit-stop, camera shake)
 │   ├── AShield (off-hand equip, block parameters: angle/damage/stamina/speed)
 │   └── ATreasure (gold value, initialized from UTreasureData asset)
 ├── ABreakAbleActor + IHitInterface (static mesh → GeometryCollection swap on hit)
-├── Interfaces: IHitInterface (GetHit — hit reaction), IBlockableInterface (TryBlockHit — angle/stamina block check)
+├── Interfaces: IHitInterface (GetHit — hit reaction), IBlockableInterface (TryBlockHit — angle/stamina block check), IPickupInterface (pickup overlap callbacks)
 └── AArenaGenerator (USplineComponent + UPCGComponent for PCG-based arena spawning)
 
 ACharacter
-├── AMyCharacter (UAttributeComponent, spring arm + camera, weapon equipping, lock-on targeting)
-└── AEnemy + IHitInterface (AI patrol/search/chase/combat state machine, directional hit react)
+└── ABaseCharacter + IHitInterface (shared: UAttributeComponent, weapon equipping, hit reaction, knockback, FPendingHitContext, GroundSpeed/Direction anim variables)
+    ├── AMyCharacter + IBlockableInterface (spring arm + camera, lock-on targeting, player action system, dodge/parry/potion)
+    └── AEnemy (AI patrol/search/chase/combat state machine, directional hit react, poise/stance break)
 
 APlayerController → ACharacterController (Enhanced Input actions for movement, combat, lock-on, pause, and potion)
 UActorComponent → UAttributeComponent (health, gold, OnHealthChanged delegate)
@@ -279,8 +280,14 @@ UAnimNotifyState → UAnimNotifyState_ParryActive (marks parry active window in 
 UAnimNotifyState → UAnimNotifyState_ComboWindow (marks combo input window in animation)
 UAnimNotifyState → UAnimNotifyState_DodgeInvulnerable (marks dodge invulnerability window)
 UAnimNotifyState → UAnimNotifyState_WeaponCollision (drives weapon trace window + player attack hyper armor)
+UAnimNotifyState → UAnimNotifyState_PlayerActionCancelWindow (opens/closes bActionCancelWindowOpen for action cancel)
 UAnimNotify → UAnimNotify_ComboBranchPoint (consumes buffered combo input and branches to next attack section)
 UAnimNotify → UAnimNotify_PotionHeal (montage-driven partial potion healing)
+UAnimNotify → UAnimNotify_SetActionState (sets EActionState from AnimNotify)
+UAnimNotify → UAnimNotify_EnemyHitReactEnd (enemy hit react recovery)
+UAnimNotify → UAnimNotify_EnemyAttackEnd (enemy attack end)
+UAnimNotify → UAnimNotify_CharacterHitReactEnd (player hit react recovery)
+UAnimNotify → UAnimNotify_AttachWeapon (attach/detach weapon mesh during montage)
 UDataAsset → UTreasureData (static mesh, gold value, pickup sound, scale)
 UDataAsset → UPlayerCharacterProfileDataAsset (single player character config entry: AttackConfig + ActionConfig + ReactionConfig)
 UDataAsset → UPlayerActionConfigDataAsset (player-only action structs: Dodge, Block, Parry, Potion, plus SharedPriority for Attack/HitReact/Death priority)
@@ -288,6 +295,7 @@ UDataAsset → UHitReactionConfigDataAsset (shared character HitReact / Death mo
 UDataAsset → UComboDataAsset (combo chain: SectionName, DamageMultiplier, StaminaCost, PoiseDamageMultiplier per segment)
 UDataAsset → UAttackConfigDataAsset (LightAttackCombo + SpecialAttacks for sprint/jump-style specials + ChargedAttack)
 UDataAsset → UEnemyAttackConfigDataAsset (Enemy attacks: montage, section, post-attack cooldown (v1.5: excludes montage duration and starts after attack end/interruption), MinDistance/MaxDistance, weight, damage/block-stamina multipliers, optional Motion Warping target config)
+FCombatTeamHelper (static helper: ShareTeamTag for same-team detection via Actor Tags whitelist — Player / Enemy)
 ```
 
 <a name="debug-output-system"></a>
@@ -411,7 +419,7 @@ UDataAsset → UEnemyAttackConfigDataAsset (Enemy attacks: montage, section, pos
 - **Attack Coordination**: Prevents multiple enemies from attacking simultaneously. Before attacking, enemies check if nearby allies (within `AttackCoordinationRange`, default 800cm) **chasing the same target** (`ChasingTarget` match) are in `EES_Attacking` state. Only allies attacking the same target participate in coordination. If allies are attacking, the enemy enters local combat substate `CoordinatedWaiting`, with suggested wait time from fixed `AttackCoordinationBuffer` (clamped by `SetCombatSubState()` to `MaxAttackCoordinationWait`).
 - **Attack Configuration**: 敌人攻击行为由 `UEnemyAttackConfigDataAsset` 驱动，条目描述 montage / section、post-attack cooldown、`MinDistance` / `MaxDistance`、weight、damage multiplier、block-stamina multiplier、是否不可弹反、可选 Motion Warping 配置。缺少 DataAsset 时不会攻击，并输出配置警告；不再保留旧 `AttackMontage + Attack1` 硬编码回退。配置校验区分 DataAsset 自身校验与 `AEnemy` 边界校验（`CombatAttackMaxRadius`）。
   - **Cooldown Semantics**: v1.5 后敌人攻击 DataAsset 的 `MinCooldown` / `MaxCooldown` 不包含蒙太奇播放时长；攻击自然结束或被打断并退出 `EES_Attacking` 后才开始计时。
-  - **Attack Selection**: `ChooseAttackIndex(float DistanceToTarget)` 按距离过滤候选招式后加权随机，用于距离筛选/兜底路径；`ChooseAttackIntentIndex(int32 ExcludedAttackIndex)` 忽略距离、只按权重抽取，并可排除一个 index，用于 pending intent + retry block 路径。
+  - **Attack Selection**: `UEnemyAttackConfigDataAsset::ChooseAttackIndex(float DistanceToTarget)` 按距离过滤候选招式后加权随机，用于距离筛选/兜底路径；`UEnemyAttackConfigDataAsset::ChooseAttackIntentIndex(int32 ExcludedAttackIndex)` 忽略距离、只按权重抽取，并可排除一个 index，用于 pending intent + retry block 路径。`AEnemy` 通过 `EnemyAttackConfig->` 调用这两个方法。
   - **Pending Attack Intent**: 未冷却且未协调等待时，`OnCombating()` 先缓存一个 pending attack intent，再尝试执行。抽中近距离攻击但当前距离大于该招式有效 `MaxDistance` 时，敌人使用 `MoveToCombatTarget(AcceptanceRadiusOverride)` 动态追踪目标并继续前压，直到进入该招式距离内再出手。
   - **Pending Cleanup**: pending intent 在攻击成功开始、目标丢失、进入 `CooldownSpacing` / `CoordinatedWaiting`、或离开 `EES_Combating` / `EES_Attacking` 到受击、破防、死亡、脱战等状态时清理。
   - **Distance Contract**: 执行距离上限为 `Min(Entry.MaxDistance, CombatAttackMaxRadius)`。`CombatAttackMaxRadius` 仍表示最大可出手距离，不是 cooldown spacing 距离；调大它时必须同步保持 `CombatAttackMaxRadius <= CombatPreferredMinRadius <= CombatPreferredMaxRadius < CombatingRadius`。
