@@ -579,6 +579,9 @@ FCombatTeamHelper (static helper: ShareTeamTag for same-team detection via Actor
 - **退出入口**：`UPauseMenuWidget` 通过 `OnQuitDelegate` 只发出 UI 请求，`ACharacterController::OnQuitRequested()` 负责解除暂停并调用 `QuitGame`
 - **智能锁定处理**：暂停时检查锁定旋转完成度（角度差 < 1°保持，≥ 1°清除），必须先 `IsValid(LockedTarget)` 检查
 - **死亡时序**：`Die()` 最前面调用 `ClearPauseIfActive()` + `SetCanPause(false)`，先恢复游戏状态再处理死亡演出
+- **死亡菜单**：`AMyCharacter::Die()` 完成死亡清理和死亡蒙太奇播放后调用 `ACharacterController::ShowDeathMenu()`；Controller 切换到 UI 输入模式并显示 `UDeathMenuWidget`，按钮通过 delegate 请求重开当前关卡或退出游戏。死亡菜单不暂停世界，避免冻结死亡蒙太奇。
+
+![Death menu runtime overlay](docs/images/death-menu.png)
 
 <a name="potion-system"></a>
 ## Potion System (药瓶系统)

@@ -5,6 +5,7 @@
 #include "EnhancedInputSubsystems.h"
 #include "Character/MyCharacter.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "HUD/DeathMenuWidget.h"
 #include "HUD/PauseMenuWidget.h"
 #include "Blueprint/UserWidget.h"
 #include "Kismet/GameplayStatics.h"
@@ -32,6 +33,20 @@ void ACharacterController::BeginPlay()
 			PauseMenuWidget->OnResumeDelegate.AddDynamic(this, &ACharacterController::OnResumeRequested);
 			PauseMenuWidget->OnQuitDelegate.AddDynamic(this, &ACharacterController::OnQuitRequested);
 		}
+	}
+
+	if (IsLocalPlayerController() && DeathMenuClass)
+	{
+		DeathMenuWidget = CreateWidget<UDeathMenuWidget>(this, DeathMenuClass);
+		if (DeathMenuWidget)
+		{
+			DeathMenuWidget->OnRestartDelegate.AddDynamic(this, &ACharacterController::OnRestartRequested);
+			DeathMenuWidget->OnQuitDelegate.AddDynamic(this, &ACharacterController::OnDeathQuitRequested);
+		}
+	}
+	else if (IsLocalPlayerController())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s: DeathMenuClass is not set. Death screen will not appear on player death."), *GetName());
 	}
 }
 
@@ -384,11 +399,58 @@ void ACharacterController::OnQuitRequested()
 	UKismetSystemLibrary::QuitGame(this, this, EQuitPreference::Quit, false);
 }
 
+void ACharacterController::OnRestartRequested()
+{
+	if (!GetWorld()) return;
+
+	UGameplayStatics::SetGamePaused(GetWorld(), false);
+	bShowMouseCursor = false;
+
+	if (DeathMenuWidget)
+	{
+		DeathMenuWidget->RemoveFromParent();
+	}
+
+	FInputModeGameOnly InputMode;
+	SetInputMode(InputMode);
+
+	const FName CurrentLevelName(*UGameplayStatics::GetCurrentLevelName(this, true));
+	UGameplayStatics::OpenLevel(this, CurrentLevelName);
+}
+
+void ACharacterController::OnDeathQuitRequested()
+{
+	UGameplayStatics::SetGamePaused(GetWorld(), false);
+	UKismetSystemLibrary::QuitGame(this, this, EQuitPreference::Quit, false);
+}
+
 void ACharacterController::ClearPauseIfActive()
 {
 	if (bIsPaused)
 	{
 		TogglePause();  // 统一走恢复路径
+	}
+}
+
+void ACharacterController::ShowDeathMenu()
+{
+	bCanPause = false;
+
+	if (bIsPaused)
+	{
+		ClearPauseIfActive();
+	}
+
+	if (!DeathMenuWidget) return;
+
+	FInputModeUIOnly InputMode;
+	InputMode.SetWidgetToFocus(DeathMenuWidget->TakeWidget());
+	SetInputMode(InputMode);
+	bShowMouseCursor = true;
+
+	if (!DeathMenuWidget->IsInViewport())
+	{
+		DeathMenuWidget->AddToViewport(2);
 	}
 }
 

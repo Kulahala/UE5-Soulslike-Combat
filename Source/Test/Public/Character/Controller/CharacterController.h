@@ -10,6 +10,7 @@
 class UInputMappingContext;
 class UInputAction;
 class UPauseMenuWidget;
+class UDeathMenuWidget;
 
 /**
  * 
@@ -116,6 +117,12 @@ private:
 	UPROPERTY()
 	UPauseMenuWidget* PauseMenuWidget = nullptr;
 
+	UPROPERTY(EditDefaultsOnly, Category = "UI", meta = (ToolTip = "死亡菜单Widget类（蓝图子类）"))
+	TSubclassOf<UDeathMenuWidget> DeathMenuClass;
+
+	UPROPERTY()
+	UDeathMenuWidget* DeathMenuWidget = nullptr;
+
 	void TogglePause();
 
 	UFUNCTION()
@@ -124,6 +131,12 @@ private:
 	UFUNCTION()
 	void OnQuitRequested();
 
+	UFUNCTION()
+	void OnRestartRequested();
+
+	UFUNCTION()
+	void OnDeathQuitRequested();
+
 public:
 	FString GetDebugInputText() const;
 	class AMyCharacter* GetMyCharacter() const;
@@ -131,4 +144,5 @@ public:
 	bool IsPaused() const { return bIsPaused; }
 	void SetCanPause(bool bCanPauseNew) { bCanPause = bCanPauseNew; }
 	void ClearPauseIfActive();
+	void ShowDeathMenu();
 };

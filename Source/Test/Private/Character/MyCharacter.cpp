@@ -764,6 +764,11 @@ void AMyCharacter::Die()
 	GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
 	PlayDeathMontage();
+
+	if (ACharacterController* CC = Cast<ACharacterController>(GetController()))
+	{
+		CC->ShowDeathMenu();
+	}
 }
 
 void AMyCharacter::HandleExhausted()
