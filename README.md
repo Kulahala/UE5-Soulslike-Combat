@@ -9,9 +9,13 @@
 
 An Unreal Engine 5.7 C++ Action-RPG prototype focused on responsive character control, state-driven melee combat, lock-on movement, shield defense, enemy combat AI, and data-driven attack configuration.
 
-This README is a project overview. For implementation details, state machines, combat pipeline, class boundaries, and agent-facing architecture notes, see [ARCHITECTURE.md](ARCHITECTURE.md).
+This README is a project overview. For implementation details, state machines, combat pipeline, class boundaries, 和 agent-facing architecture notes, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ![Gameplay parry and stance break demo](docs/media/demo-parry-stancebreak.gif)
+
+## QuickDemo
+
+https://github.com/user-attachments/assets/fdd9304c-a7ea-4185-bfa1-09df583fa784
 
 ### Highlights
 
