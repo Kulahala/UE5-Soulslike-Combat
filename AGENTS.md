@@ -50,6 +50,7 @@ No CI pipeline, no lint/test commands configured.
 - Before continuing prior collaboration work, read the header rules in `plan.md`.
 - Write agent feedback and implementation plans there as working context, not end-user documentation.
 - For code review and closeout passes, ignore `Content/*.uasset` by default unless the user explicitly asks to inspect or include asset changes.
+- If Serena MCP is available in the client, activate this repository as the current project before symbol-level navigation or edits; use `Activate the current dir as project using serena` when the client does not auto-activate it.
 
 ## Content Boundaries
 

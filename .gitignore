@@ -19,6 +19,9 @@ Build/
 plugins/
 
 # AI CLI Configs
+.codegraph/
+.serena/
+compile_commands.json
 .playwright-mcp/
 .learnings/
 plan.md
