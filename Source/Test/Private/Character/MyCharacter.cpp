@@ -601,6 +601,7 @@ bool AMyCharacter::TryConsumeComboInputAtBranchPoint()
 		return false;
 	}
 
+
 	UAttackConfigDataAsset* AttackConfig = GetAttackConfig();
 	if (!AttackConfig || !AttackConfig->LightAttackCombo)
 	{
@@ -676,35 +677,6 @@ void AMyCharacter::GetHit_Implementation(const FVector& ImpactPoint, AActor* Hit
 	if (ActionState == EActionState::EAS_UsingPotion)
 	{
 		InterruptPotion();
-	}
-
-	// 攻击霸体：扣血+击退+相机晃动+音效粒子，但不播放受击蒙太奇
-	if (bAttackHyperArmor)
-	{
-		// 手动复制 Super 中需要的逻辑，跳过 DirectionalHitReact()
-		IHitInterface::GetHit_Implementation(ImpactPoint, HitInstigator);
-
-		if (Attributes->IsAlive())
-		{
-			ConsumePendingHitKnockback();  // 击退
-		}
-
-		if (!PendingHitContext.bWasBlocked)
-		{
-			PlayHitEffects(ImpactPoint);  // 音效+粒子
-		}
-
-		// 受击相机晃动
-		if (HitReceivedCameraShake)
-		{
-			if (APlayerController* PC = Cast<APlayerController>(GetController()))
-			{
-				PC->ClientStartCameraShake(HitReceivedCameraShake);
-			}
-		}
-
-		ResetPendingHitContext();
-		return;
 	}
 
 	Super::GetHit_Implementation(ImpactPoint, HitInstigator);
@@ -985,11 +957,6 @@ void AMyCharacter::SetParryActive(bool bActive)
 void AMyCharacter::SetDodgeInvulnerable(bool bInvulnerable)
 {
 	bDodgeInvulnerable = bInvulnerable;
-}
-
-void AMyCharacter::SetAttackHyperArmor(bool bHyperArmor)
-{
-	bAttackHyperArmor = bHyperArmor;
 }
 
 void AMyCharacter::StartParryCooldown()

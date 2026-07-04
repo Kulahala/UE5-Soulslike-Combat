@@ -121,6 +121,8 @@ protected:
 	void ConsumePendingHitKnockback();
 
 private:
+	int32 HyperArmorCount = 0;
+
 	static const TArray<FName> EmptyDeathSections;
 
 	bool bKnockbackActive = false;
@@ -133,6 +135,10 @@ private:
 	void TickHitKnockback(float DeltaTime);
 
 public:
+	void AddHyperArmor();
+	void RemoveHyperArmor();
+	bool HasHyperArmor() const;
+
 	FORCEINLINE AWeapon* GetWeapon() const { return EquippedWeapon; }
 	FORCEINLINE UAttributeComponent* GetAttributes() const { return Attributes; }
 	FORCEINLINE float GetGroundSpeed() const { return GroundSpeed; }

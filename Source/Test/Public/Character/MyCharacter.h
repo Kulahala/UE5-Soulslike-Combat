@@ -97,7 +97,6 @@ public:
 	bool CanStartParry() const;
 	void SetParryActive(bool bActive);
 	void SetDodgeInvulnerable(bool bInvulnerable);
-	void SetAttackHyperArmor(bool bHyperArmor);
 	void StartParryCooldown();
 	void ResetParryCooldown();
 	void InterruptParry();
@@ -298,9 +297,6 @@ private:
 
 	void StartPotionCooldown();
 	void ResetPotionCooldown();
-
-	/* 攻击霸体 */
-	bool bAttackHyperArmor = false;
 
 	FTimerHandle ExhaustionTimerHandle;
 

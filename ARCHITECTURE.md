@@ -279,7 +279,8 @@ Anim Blueprint / Control Rig assets → `ABP_DarkKnight_IkTrace` + `CR_Slash_foo
 UAnimNotifyState → UAnimNotifyState_ParryActive (marks parry active window in animation)
 UAnimNotifyState → UAnimNotifyState_ComboWindow (marks combo input window in animation)
 UAnimNotifyState → UAnimNotifyState_DodgeInvulnerable (marks dodge invulnerability window)
-UAnimNotifyState → UAnimNotifyState_WeaponCollision (drives weapon trace window + player attack hyper armor)
+UAnimNotifyState → UAnimNotifyState_WeaponCollision (drives weapon trace window)
+UAnimNotifyState → UAnimNotifyState_HyperArmor (drives universal attack hyper armor with stance-break vulnerability)
 UAnimNotifyState → UAnimNotifyState_PlayerActionCancelWindow (opens/closes bActionCancelWindowOpen for action cancel)
 UAnimNotify → UAnimNotify_ComboBranchPoint (consumes buffered combo input and branches to next attack section)
 UAnimNotify → UAnimNotify_PotionHeal (montage-driven partial potion healing)
@@ -319,7 +320,7 @@ FCombatTeamHelper (static helper: ShareTeamTag for same-team detection via Actor
 4. **Charged Attack**: Holding past `ChargeInputThreshold` enters `ChargedAttack.Montage` section `Default`; releasing while charging jumps to section `Release` and applies charged damage/poise multipliers.
 5. **Combo System**: `Attack()` queries `UComboDataAsset` for current segment config (SectionName, DamageMultiplier, StaminaCost); `UAnimNotify_ComboBranchPoint` increments `ComboCounter` only when buffered input successfully branches to the next segment
 6. `PlayAttackMontage(SectionName)` plays normal/combo attack animation from `AttackConfig->LightAttackCombo->ComboMontage` with `UAnimNotifyState_WeaponCollision` + `UAnimNotifyState_ComboWindow` baked in
-7. **NotifyBegin** → `AWeapon::StartWeaponTrace()` (records old box positions) + `SetAttackHyperArmor(true)` (player only)
+7. **NotifyBegin** → `AWeapon::StartWeaponTrace()` (records old box positions)
 8. **NotifyTick** → `AWeapon::ExecuteWeaponTrace()` (sweeps from old→new center to prevent ghost swings)
 9. On hit:
    - 同阵营命中：不 `ApplyDamage`，不造成韧性伤害，但仍走 `GetHit` / `DispatchHitFeedback` 路径（击退、命中反馈、相机晃动、卡肉、本次攻击黑名单）。同阵营判定通过 `FCombatTeamHelper::ShareTeamTag()`（Weapon + Enemy 共用），当前只认 `Player` / `Enemy` 阵营 Tag 白名单，避免功能 Tag 误判同队
@@ -333,7 +334,7 @@ FCombatTeamHelper (static helper: ShareTeamTag for same-team detection via Actor
    - **Damage / Block Stamina Multipliers**: `ResolveHit()` 在格挡判定前应用 `BaseCharacter->GetAttackDamageMultiplier()` 计算实际伤害；格挡耗体不再按伤害缩放，而由 `AShield::BlockStaminaCost × Attacker->GetBlockStaminaDamageMultiplier()` 决定，让盾牌类型和敌人招式分别控制防御压力
    - **Poise Damage Multiplier**: 连招系统同时计算 `CurrentPoiseDamage = BasePoiseDamage × PoiseDamageMultiplier`，冲刺攻击使用独立倍率，蓄力攻击按持有时长在 1.0 到 `ChargedAttack.MaxPoiseDamageMultiplier` 间插值
 10. HitStop + CameraShake（所有命中都触发）
-11. **NotifyEnd** → clears `IgnoreActors` blacklist + `SetAttackHyperArmor(false)` (player only)
+11. **NotifyEnd** → clears `IgnoreActors` blacklist
 12. **Combo Window**: `AnimNotifyState_ComboWindow` marks input-buffer timing; `Input_AttackPressed()` sets `bComboInputReceived` during the window before any charged timer starts
 13. **Combo Branch Point**: `UAnimNotify_ComboBranchPoint` is the single normal continuation point. It closes the current combo window, consumes `bComboInputReceived`, and if a next segment exists and the player is not entering exhaustion, jumps to the next attack section without restarting the montage. If no input is buffered, the montage continues into the current section's `end` recovery.
 14. `OnAttackMontageEnded` delegate fires → recovery helpers clear charged input / restore rotation / handle delayed exhaustion → `ResetCombo()`, restore `EAS_UnOccupied` or `EAS_Exhausted`, resume stamina regen
@@ -388,14 +389,16 @@ FCombatTeamHelper (static helper: ShareTeamTag for same-team detection via Actor
 - `AEnemy::Die()` 使用 `GetDeathMontage()`；若 `HitReactionConfig.Death.Sections` 非空，则随机选择数组 section；若 sections 为空，则直接播放死亡 montage。
 - Legacy `HitReactMontage` / `DeathMontage` / `HitSound` / `HitParticle` 字段和 fallback 已删除。未配置 ReactionConfig 时角色受击/死亡不播放蒙太奇和音效/粒子。
 
-## Attack Hyper Armor System（攻击霸体系统）
+<a name="hyper-armor-system"></a>
+## Hyper Armor System (霸体系统)
 
-- **架构**：玩家专属，武器碰撞窗口期间（`AnimNotifyState_WeaponCollision`）获得霸体效果。
-- **生命周期**：`NotifyBegin` 调用 `SetAttackHyperArmor(true)`，`NotifyEnd` 调用 `SetAttackHyperArmor(false)`，与武器碰撞检测窗口完全同步。
-- **霸体效果**：受击时仍然扣血、击退、相机晃动、播放音效粒子，但不播放受击蒙太奇、不进入硬直状态（`EAS_Stunning`），攻击动画继续播放。
-- **实现细节**：`GetHit_Implementation()` 在调用 `Super` 之前检查 `bAttackHyperArmor`，霸体分支手动复制必要逻辑（击退、音效、相机晃动），跳过 `DirectionalHitReact()`。
-- **中断恢复**：`OnAttackMontageEnded(bInterrupted=true)` 确保恢复 `ActionState`，防止卡在 `EAS_Attacking` 状态。
-- **优先级**：翻滚无敌帧（`bDodgeInvulnerable`）优先级高于霸体，完全免疫 vs 部分免疫。
+- **架构**：通用底层支持（玩家与敌人均可享用），通过将独立的 `UAnimNotifyState_HyperArmor` 置于动画蒙太奇时间轴上来划分霸体保护区间。
+- **生命周期**：`NotifyBegin` / `NotifyEnd` 会对基类 `ABaseCharacter` 的 `HyperArmorCount` 计数器进行加减。使用计数而非单一布尔值可安全处理多蒙太奇混合时状态生命周期重叠的问题。
+- **霸体效果**：处于霸体状态的角色在受击时，照常被扣减韧性（Poise）、受到伤害、触发击退、相机震动及特效音效，但**免疫常规硬直，动作不会被打断**（在 `GetHit_Implementation` 底层强制重置 `PendingHitContext.bApplyStun = false` 实现，同时跳过了 `DirectionalHitReact` 的播放）。
+- **优先级与特权（破霸体）**：
+  - **韧性破防（Stance Break）无视霸体**：霸体不免疫削韧。如果敌人在霸体出招时黄条（韧性）被打空，底层的 `ApplyStanceBreak` 会直接通过 `Montage_Stop` 强制掐断霸体动画并进入破防处决态。
+  - **弹反（Parry）无视霸体**：弹反成功瞬间清空韧性的机制，天然无视霸体。
+  - **正交性**：霸体（防守端抗硬直属性）与不可弹反机制（招式端无法被防守方弹开属性）完全正交，红光大招=不可弹反+霸体。
 
 <a name="enemy-ai"></a>
 ## Enemy AI (`AEnemy`)

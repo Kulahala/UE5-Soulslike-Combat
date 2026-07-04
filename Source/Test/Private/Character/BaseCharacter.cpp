@@ -45,6 +45,21 @@ void ABaseCharacter::Tick(float DeltaTime)
 
 // ==================== 受击/战斗 ====================
 
+void ABaseCharacter::AddHyperArmor()
+{
+	HyperArmorCount++;
+}
+
+void ABaseCharacter::RemoveHyperArmor()
+{
+	HyperArmorCount = FMath::Max(0, HyperArmorCount - 1);
+}
+
+bool ABaseCharacter::HasHyperArmor() const
+{
+	return HyperArmorCount > 0;
+}
+
 void ABaseCharacter::GetHit_Implementation(const FVector& ImpactPoint, AActor* HitInstigator)
 {
 	IHitInterface::GetHit_Implementation(ImpactPoint, HitInstigator);
@@ -55,7 +70,14 @@ void ABaseCharacter::GetHit_Implementation(const FVector& ImpactPoint, AActor* H
 
 		if (!PendingHitContext.bWasBlocked)
 		{
-			DirectionalHitReact(ImpactPoint, HitInstigator);  // 仅普通受击
+			if (HasHyperArmor())
+			{
+				PendingHitContext.bApplyStun = false; // 霸体：免疫普通硬直，子类也将跳过中断逻辑
+			}
+			else
+			{
+				DirectionalHitReact(ImpactPoint, HitInstigator);  // 仅普通受击
+			}
 		}
 	}
 

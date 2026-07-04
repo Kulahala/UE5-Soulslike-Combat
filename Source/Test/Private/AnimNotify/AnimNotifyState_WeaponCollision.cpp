@@ -22,12 +22,6 @@ void UAnimNotifyState_WeaponCollision::NotifyBegin(USkeletalMeshComponent* MeshC
 			// 记录刀的起始位置
 			Weapon->StartWeaponTrace();
 		}
-
-		// 玩家攻击出手阶段开启霸体
-		if (AMyCharacter* Player = Cast<AMyCharacter>(Character))
-		{
-			Player->SetAttackHyperArmor(true);
-		}
 	}
 }
 
@@ -59,12 +53,6 @@ void UAnimNotifyState_WeaponCollision::NotifyEnd(USkeletalMeshComponent* MeshCom
 		{
 			// 挥砍结束，再次清空一下防万一
 			Weapon->ClearIgnoreActors();
-		}
-
-		// 玩家攻击出手阶段结束，关闭霸体
-		if (AMyCharacter* Player = Cast<AMyCharacter>(Character))
-		{
-			Player->SetAttackHyperArmor(false);
 		}
 	}
 }
