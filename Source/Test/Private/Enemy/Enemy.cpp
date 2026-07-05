@@ -76,8 +76,8 @@ AEnemy::AEnemy()
 	UAISenseConfig_Hearing* HearingConfig = CreateDefaultSubobject<UAISenseConfig_Hearing>(TEXT("HearingConfig"));
 	HearingConfig->HearingRange = HearingRange;
 	HearingConfig->DetectionByAffiliation.bDetectEnemies = true;
-	HearingConfig->DetectionByAffiliation.bDetectNeutrals = false;
-	HearingConfig->DetectionByAffiliation.bDetectFriendlies = false;
+	HearingConfig->DetectionByAffiliation.bDetectNeutrals = true;
+	HearingConfig->DetectionByAffiliation.bDetectFriendlies = true;
 	AIPerceptionComp->ConfigureSense(*HearingConfig);
 }
 
@@ -1168,7 +1168,13 @@ void AEnemy::DrawDebugInfo() const
 		FDebugDrawHelper::Add(FString::Printf(TEXT("EnemyState: %s | Speed: %.0f"),
 			*UEnum::GetValueAsString(EnemyState), GroundSpeed), FColor::White);
 
-		FDebugDrawHelper::Add(FString::Printf(TEXT("Poise: %.1f/%.1f"), CurrentPoise, MaxPoise), FColor::Cyan);
+		// 在头顶渲染血量和韧性（解决多敌人文字混在一起的问题）
+		if (Attributes)
+		{
+			FString OverheadText = FString::Printf(TEXT("HP: %.0f/%.0f | Poise: %.1f/%.1f"), 
+				Attributes->GetCurrentHealth(), Attributes->GetMaxHealth(), CurrentPoise, MaxPoise);
+			DrawDebugString(GetWorld(), GetActorLocation() + FVector(0.f, 0.f, 120.f), OverheadText, nullptr, FColor::White, 0.f, true);
+		}
 
 		if (ChasingTarget)
 		{

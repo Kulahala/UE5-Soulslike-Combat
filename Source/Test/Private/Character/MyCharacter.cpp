@@ -22,6 +22,7 @@
 #include "Kismet/KismetMathLibrary.h"
 #include "MotionWarpingComponent.h"
 #include "Perception/AISense_Hearing.h"
+#include "Components/PawnNoiseEmitterComponent.h"
 #include "Utils/DebugDrawHelper.h"
 
 namespace
@@ -52,6 +53,7 @@ AMyCharacter::AMyCharacter()
 	LockOnComponent = CreateDefaultSubobject<UPlayerLockOnComponent>(TEXT("LockOnComponent"));
 
 	MotionWarpingComponent = CreateDefaultSubobject<UMotionWarpingComponent>(TEXT("MotionWarpingComponent"));
+	NoiseEmitterComponent = CreateDefaultSubobject<UPawnNoiseEmitterComponent>(TEXT("NoiseEmitterComponent"));
 }
 
 void AMyCharacter::BeginPlay()

@@ -24,6 +24,7 @@ class UHitReactionConfigDataAsset;
 class USoundBase;
 class UAnimInstance;
 class UMotionWarpingComponent;
+class UPawnNoiseEmitterComponent;
 struct FPlayerAttackMotionWarpingConfig;
 
 UCLASS()
@@ -242,6 +243,9 @@ private:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true", ToolTip = "Motion Warping 组件，用于锁定攻击在蒙太奇窗口内做短距离目标修正。"))
 	UMotionWarpingComponent* MotionWarpingComponent;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true", ToolTip = "Noise Emitter 组件，用于使感知系统能听到玩家噪音。"))
+	UPawnNoiseEmitterComponent* NoiseEmitterComponent;
 
 	/* HUD */
 	// 玩家 HUD 控件类，BeginPlay 时创建并绑定到视口
