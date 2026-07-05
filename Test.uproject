@@ -115,6 +115,10 @@
 		{
 			"Name": "UnrealBridge",
 			"Enabled": false
+		},
+		{
+			"Name": "VibeUE",
+			"Enabled": true
 		}
 	],
 	"TargetPlatforms": [
