@@ -56,6 +56,14 @@ void UPlayerHUDWidget::SetPotionCount(int32 CurrentCount, int32 MaxCount)
 	RefreshPotionVisuals();
 }
 
+void UPlayerHUDWidget::SetGoldCount(int32 CurrentGold)
+{
+	if (Text_GoldCount)
+	{
+		Text_GoldCount->SetText(FText::Format(INVTEXT("Gold: {0}"), CurrentGold));
+	}
+}
+
 void UPlayerHUDWidget::SetPotionCooldown(float RemainingTime, float TotalTime)
 {
 	PotionCooldownDuration = FMath::Max(0.f, TotalTime);
@@ -89,6 +97,9 @@ void UPlayerHUDWidget::BindToAttributes(UAttributeComponent* Attributes)
 
 		BoundAttributes->OnPotionCountChanged.AddDynamic(this, &UPlayerHUDWidget::SetPotionCount);
 		SetPotionCount(BoundAttributes->GetPotionCount(), BoundAttributes->GetMaxPotionCount());
+
+		BoundAttributes->OnGoldChanged.AddDynamic(this, &UPlayerHUDWidget::SetGoldCount);
+		SetGoldCount(BoundAttributes->GetGold());
 	}
 }
 
@@ -102,6 +113,7 @@ void UPlayerHUDWidget::UnbindFromAttributes()
 	BoundAttributes->OnHealthChanged.RemoveDynamic(this, &UPlayerHUDWidget::SetHealthPercent);
 	BoundAttributes->OnStaminaChanged.RemoveDynamic(this, &UPlayerHUDWidget::SetStaminaPercent);
 	BoundAttributes->OnPotionCountChanged.RemoveDynamic(this, &UPlayerHUDWidget::SetPotionCount);
+	BoundAttributes->OnGoldChanged.RemoveDynamic(this, &UPlayerHUDWidget::SetGoldCount);
 	BoundAttributes = nullptr;
 }
 

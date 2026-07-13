@@ -10,6 +10,8 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnHealthChangedSignature, float, He
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnStaminaChangedSignature, float, StaminaPercent);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnExhaustedSignature);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnPotionCountChanged, int32, CurrentCount, int32, MaxCount);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGoldChangedSignature, int32, CurrentGold);
+
 
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
 class TEST_API UAttributeComponent : public UActorComponent
@@ -30,6 +32,9 @@ public:
 
 	UPROPERTY(BlueprintAssignable, Category = "Events", meta = (ToolTip = "药瓶数量变化时广播当前数量和上限。"))
 	FOnPotionCountChanged OnPotionCountChanged;
+
+	UPROPERTY(BlueprintAssignable, Category = "Events", meta = (ToolTip = "金币变化时广播当前金币。"))
+	FOnGoldChangedSignature OnGoldChanged;
 
 	void ReceiveDamage(float Damage);
 
@@ -92,10 +97,10 @@ private:
 
 public:
 	UFUNCTION(BlueprintCallable, Category = "Actor Attributes", meta = (ToolTip = "增加金币数量。"))
-	FORCEINLINE void AddGold(int32 Amount) { Gold += Amount; }
+	FORCEINLINE void AddGold(int32 Amount) { Gold += Amount; OnGoldChanged.Broadcast(Gold); }
 
 	UFUNCTION(BlueprintCallable, Category = "Actor Attributes", meta = (ToolTip = "直接设置金币数量。"))
-	FORCEINLINE void SetGold(int32 Value) { Gold = Value; }
+	FORCEINLINE void SetGold(int32 Value) { Gold = Value; OnGoldChanged.Broadcast(Gold); }
 
 	UFUNCTION(BlueprintPure, Category = "Actor Attributes", meta = (ToolTip = "返回当前金币数量。"))
 	FORCEINLINE int32 GetGold() const { return Gold; }

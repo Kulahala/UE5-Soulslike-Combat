@@ -22,6 +22,8 @@ public:
 	void SetStaminaPercent(float Percent);
 	UFUNCTION()
 	void SetPotionCount(int32 CurrentCount, int32 MaxCount);
+	UFUNCTION()
+	void SetGoldCount(int32 CurrentGold);
 	void SetPotionCooldown(float RemainingTime, float TotalTime);
 	void BindToAttributes(UAttributeComponent* Attributes);
 	void SetPendingDamageFlashScale(float Scale);
@@ -43,6 +45,9 @@ public:
 
 	UPROPERTY(meta = (BindWidget))
 	UTextBlock* Text_PotionCount;
+
+	UPROPERTY(meta = (BindWidgetOptional))
+	UTextBlock* Text_GoldCount;
 
 	UPROPERTY(meta = (BindWidgetOptional))
 	UImage* Image_PotionIcon;
