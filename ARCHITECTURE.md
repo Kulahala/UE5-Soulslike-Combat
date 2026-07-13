@@ -268,11 +268,11 @@ ACharacter
     └── AEnemy (AI patrol/search/chase/combat state machine, directional hit react, poise/stance break)
 
 APlayerController → ACharacterController (Enhanced Input actions for movement, combat, lock-on, pause, and potion)
-UActorComponent → UAttributeComponent (health, gold, OnHealthChanged delegate)
+UActorComponent → UAttributeComponent (health, stamina, gold; OnHealthChanged, OnStaminaChanged, OnGoldChanged delegates)
 UActorComponent → UPlayerLockOnComponent (lock-on state, target search/scoring, lock-on parameters)
 UWidgetComponent → UHealthBarComponent
 UUserWidget → UBaseHealthBarWidget (PB_Health + PB_Buffer progress bars, buffer delay logic)
-UUserWidget → UPlayerHUDWidget (health/stamina/potion HUD, damage vignette, debug text paint)
+UUserWidget → UPlayerHUDWidget (health/stamina/gold/potion HUD, damage vignette, debug text paint)
 UUserWidget → UPauseMenuWidget (resume delegate, pause keyboard handling, debug checkbox controls)
 UAnimInstance → USlashAnimInstance (exposes GroundSpeed, Direction, bIsBlocking, bIsStunning, state enums to anim graph)
 Anim Blueprint / Control Rig assets → `ABP_DarkKnight_IkTrace` + `CR_Slash_foot_ik` (post locomotion foot IK trace and pelvis offset for uneven ground)
@@ -306,7 +306,7 @@ FCombatTeamHelper (static helper: ShareTeamTag for same-team detection via Actor
 - CVar gates: `test.Debug.Enable` controls project debug output routed through `FDebugDrawHelper`; `test.Debug.Player` controls player text; `test.Debug.Enemy` controls enemy text; `test.Debug.Ranges` controls range/world shapes. `IsShapesEnabled()` remains a C++ compatibility wrapper for `IsRangesEnabled()`.
 - `UPauseMenuWidget` exposes a Debug Settings subpage that controls those CVars through `FDebugDrawHelper` raw getters/setters. UI checkbox state reads raw CVar values, while actual output still uses effective gated checks such as `IsPlayerEnabled()`, `IsEnemyEnabled()`, and `IsRangesEnabled()`.
 - `UPlayerHUDWidget::NativePaint()` renders `FDebugDrawEntry` text from `FDebugDrawHelper::GetEntries()`.
-- `WBP_PlayerHUD` can optionally bind `Text_HealthValue` and `Text_StaminaValue` to display rounded `Current / Max` values from the bound `UAttributeComponent`; static `HP` / `SP` labels and bar sizing remain pure UMG layout.
+- `WBP_PlayerHUD` can optionally bind `Text_HealthValue` and `Text_StaminaValue` to display rounded `Current / Max` values, and `Text_GoldCount` to display `Gold: <CurrentGold>`. `UPlayerHUDWidget` initializes these values from the bound `UAttributeComponent` and subscribes to `OnHealthChanged`, `OnStaminaChanged`, and `OnGoldChanged`; static `HP` / `SP` labels and bar sizing remain pure UMG layout.
 - Actor/system classes own debug content assembly: current examples are `AMyCharacter::DrawDebugInfo()` and `AEnemy::DrawDebugInfo()`. Keep gameplay-specific strings and field choices in the owning class, then emit through `FDebugDrawHelper`.
 - Do not move gameplay knowledge into `FDebugDrawHelper`; it should not depend on `AEnemy`, `AMyCharacter`, combat state enums, or asset classes.
 - Temporary direct `DrawDebug*` / `GEngine->AddOnScreenDebugMessage(...)` calls are outside the CVar gate until promoted into UI or wrapped by the helper.
@@ -601,4 +601,3 @@ FCombatTeamHelper (static helper: ShareTeamTag for same-team detection via Actor
 
 - `GetCurrentActiveMontage()` 可能返回 nullptr，即使 `IsAnyMontagePlaying()` 为 true。必须单独 null 检查。
 - `FAIMoveRequest` 默认 `bReachTestIncludesAgentRadius(true)` + `bReachTestIncludesGoalRadius(true)`。短距离导航必须 `SetReachTestIncludesAgentRadius(false)` + `SetReachTestIncludesGoalRadius(false)`，否则胶囊体半径会被加进 AcceptanceRadius。
-

@@ -82,7 +82,7 @@
 		},
 		{
 			"Name": "UnrealClaude",
-			"Enabled": false,
+			"Enabled": true,
 			"SupportedTargetPlatforms": [
 				"Win64",
 				"Linux",
@@ -111,6 +111,10 @@
 		{
 			"Name": "VibeUE",
 			"Enabled": true
+		},
+		{
+			"Name": "UnrealBridge",
+			"Enabled": false
 		}
 	],
 	"TargetPlatforms": [

@@ -6,6 +6,7 @@ Saved/
 Build/
 .vscode/
 .vs/
+.idea/
 *.sln
 *.suo
 *.user
