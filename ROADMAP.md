@@ -33,23 +33,23 @@ The player must be able to die, restart from the last checkpoint, quit, and cont
 - v1 has one automatic save slot. `New Game` initializes or replaces that slot; `Continue` is enabled only when the slot contains a valid save.
 - `ACheckpointActor` is a Soulslike bonfire/rest point. The player activates it through an explicit interaction, which saves immediately, sets the respawn anchor, restores health/stamina/potions, and resets ordinary enemies.
 - On player death, reload to the most recently activated checkpoint. Ordinary placed enemies and uncleared encounters reset; cleared encounters, dead Bosses, opened chests, collected fixed rewards, opened shortcuts, gold, owned items, and equipped items persist.
-- Rest points are the only v1 respawn and world-reset boundary, not the only time durable progress is written. Gold, owned items, shortcuts, fixed rewards, encounter clears, and Boss completion write through immediately; quitting from an active or uncleared encounter still does not save transient combat state. `Continue` returns to the latest checkpoint with that encounter restored to `Idle` and its gates open, just as after a death.
-- Boss completion saves the completed Boss state and its fixed reward while retaining the existing final checkpoint as the respawn anchor. After the completion screen returns to the main menu, `Continue` returns the player to that checkpoint with the Boss dead and its arena gate open.
+- Rest points are the only v1 respawn and world-reset boundary, not the only time durable progress is written. Gold, owned items, shortcuts, fixed rewards, encounter clears, and Boss completion write through immediately; quitting from an active or uncleared encounter still does not save transient combat state. `Continue` returns to the latest checkpoint with that encounter restored to `Idle` and its encounter boundaries open, just as after a death.
+- Boss completion saves the completed Boss state and its fixed reward while retaining the existing final checkpoint as the respawn anchor. After the completion screen returns to the main menu, `Continue` returns the player to that checkpoint with the Boss dead and its arena boundary open.
 - Gold remains the current temporary currency/reward value in v1. Do not add a second Soul currency, corpse-recovery loop, or bonfire stat-upgrade UI until the Demo loop is stable and their roles are deliberately defined.
 
 ### First Level Art And Teaching Direction
 
 - The first level is a dark, ruined cathedral-fortress: weathered outer walls and courtyards lead into a Gothic nave, side chapels, and a final altar/crypt Boss arena. This uses the castle as the level shell and the cathedral as its visual identity rather than mixing unrelated themes.
 - The immediate player objective is simple: reach and defeat the Boss who holds the cathedral-fortress. A formal quest system is not part of the Demo.
-- The intended first-clear route is start bonfire -> outer approach normal melee space -> archer pressure space -> shield elite/crypt encounter -> persistent shortcut back toward the bonfire route -> Boss fog gate and altar arena.
+- The intended first-clear route is start bonfire -> outer approach normal melee space -> archer pressure space -> shield elite/crypt encounter -> persistent shortcut back toward the bonfire route -> Boss fog boundary and altar arena.
 - Each combat space teaches one already-supported or planned response: ordinary melee teaches timing and stamina, archers teach ranged pressure and target control, the shield elite teaches guard break, enemy stance break, and front criticals, and the Boss combines those lessons without introducing an unrelated mechanic.
 
 ### Confirmed Encounter Rules
 
 - Normal patrol and ambient combat enemies are hand-placed. Their reset behavior is driven by rest/death, not by the encounter system.
 - Sealed encounters, ambushes, waves, and Boss fights are owned by `AEncounterController`. The player cannot leave an active sealed encounter.
-- On inner trigger entry, the controller spawns or activates the configured enemies; after they visibly appear, it closes all referenced `AEncounterGate` fog barriers. Defeating every participant grants the configured fixed reward and opens the gates.
-- Encounter failure means player death before `Cleared`. On the subsequent checkpoint reload, the encounter returns to `Idle`, its gates open, and it can be triggered again. A cleared encounter remains cleared across rest, death, and reload.
+- On safe inner-region entry, the controller spawns or activates the configured enemies; after they visibly appear, it closes its own temporary encounter boundaries. Defeating every participant grants the configured fixed reward and reopens those boundaries.
+- Encounter failure means player death before `Cleared`. On the subsequent checkpoint reload, the encounter returns to `Idle`, its boundaries open, and it can be triggered again. A cleared encounter remains cleared across rest, death, and reload.
 - Spawn strategy is per encounter: a single wave is a multi-wave definition with one wave; pre-placed enemies can be activated; ambushes and Bosses can spawn from placed `AEncounterSpawnPoint` actors.
 
 ### Target Architecture For The Demo
@@ -58,9 +58,9 @@ The player must be able to die, restart from the last checkpoint, quit, and cont
 - `ATestGameMode`: single-player game flow, save loading, checkpoint respawn, and level completion.
 - `UTestSaveGame`: versioned persistent state containing level ID, checkpoint ID, gold, owned item instances, equipped slots, opened shortcuts, cleared encounter IDs, opened chest/reward IDs, and Boss completion state.
 - `ACheckpointActor`: placed visual/interactable checkpoint that writes a respawn anchor; it does not become a second save manager.
-- `AEncounterController`: placed trigger that coordinates gates, fog collision, spawn points, alive combatants, completion reward, and an `EncounterId` for persistence. Its minimal state machine is `Idle -> Active -> Cleared`.
-- `AEncounterSpawnPoint`: small placed actor that supplies a spawn transform and wave membership to an encounter; it does not own encounter state or reward decisions.
-- `AEncounterGate`: visible gate/fog-wall presentation and collision controlled by its encounter. A fog wall is used for Bosses and explicit sealed encounters, never as generic level decoration.
+- `AEncounterController`: 当前是负责安全内区激活、预放置参与者、`Idle -> Active -> Cleared` 和 Controller-owned 临时碰撞/材质边界段的摆放遭遇 Owner。波次生成、奖励、持久化恢复和最终 Boss 表现仍属于后续阶段。
+- `AEncounterSpawnPoint`: 当前是只提供稳定 `SpawnPointId` 和变换的小型摆放 Actor。波次成员、敌人类选择和实际生成是未来 encounter-wave 的职责。
+- Future fog-wall Mesh, Niagara, audio, and opening presentation extend Controller-owned boundary segments. They are used for Bosses and explicit sealed encounters, never as generic level decoration.
 
 Do not add a global level-flow manager, a universal enemy director, or a Boss-specific C++ base class for the first Boss. `ATestGameMode` plus placed checkpoint and encounter Actors are enough. The first Boss should begin as a configured `AEnemy` Blueprint; introduce a dedicated Boss class or component only when phase state, arena rules, encounter UI, or lifecycle logic no longer fits `AEnemy`.
 
@@ -75,27 +75,82 @@ For the first Demo, pre-placed enemy count is small enough that full map streami
 - Do not adopt multiplayer replication, client authority, or GAS as speculative infrastructure. Each needs a concrete gameplay trigger and an approved stage plan.
 - Keep the current `AEnemy` local HFSM for melee, archer, and first caster behavior. Extend its combat range, line-of-sight, retreat, and attack-delivery configuration before considering StateTree or Behavior Tree migration.
 
+## Done Milestones
+
+Completed roadmap work is retained here as a compact, durable record. Do not return it to the active queue or repeat its planning discussion unless a new requirement explicitly reopens it.
+
+- [x] **TODO-01: Game Flow Foundation v1**
+  Delivered the single-slot save contract, `MainMenu`, checkpoint interaction and respawn, automatic death reload, Gold write-through, settings, and the first complete New Game / Continue loop. Completed in commit `9119bc2`.
+
+- [x] **TODO-02A1: Encounter Core v1**
+  Delivered the reusable C++ encounter lifecycle, pre-placed participant ownership/dormancy, safe rectangle/radial boundary activation, one-shot death completion, and the transform-only spawn-point contract. No formal map encounter, waves, rewards, or persistence behavior was authored.
+
+- [x] **TODO-02A2: Spline Boundary Authoring v1**
+  Delivered editable planar linear Spline boundaries, safe-region validation, matching runtime collision segments, a gray-white material boundary prototype, and dormant-hit-path hardening. No formal `TestMap` Controller remains after temporary fixture validation.
+
 ## TODO Queue
 
-These TODOs are accepted future work, not permission to start implementation immediately. When a TODO becomes the next stage, move it out of this queue and write its complete implementation plan in `plan.md` first. On completion, record only durable facts in `ARCHITECTURE.md`; do not turn this roadmap into a stage log.
+These TODOs are accepted future work, not permission to start implementation immediately. A queued item must be small enough to produce one independently verifiable result. When an item becomes the next stage, move only that item out of this queue and write its complete implementation plan in `plan.md` first. On completion, record stable facts in `ARCHITECTURE.md` and move the compact result into `Done Milestones`; do not turn this roadmap into a stage log.
 
-- [ ] **TODO-02: Encounter And Gate Foundation v1**
-  Add `AEncounterController`, `AEncounterSpawnPoint`, `AEncounterGate`, and persistent encounter IDs. Normal patrol enemies remain placed in the level; the controller only owns sealed fights, ambushes, wave events, and Boss activation. Spawn or activate participants before closing fog gates, forbid leaving an active sealed encounter, and reopen/reset an uncleared encounter after player death. Verify single-wave, multi-wave, pre-placed activation, completion, player death, reload, and already-cleared restore paths.
+### Encounter Boundaries
 
-- [ ] **TODO-03: Equipment And Loot Foundation v1**
-  Introduce static item definitions, runtime item instances, narrow player equipment ownership, world item pickups, and authored drop tables. Begin with sword/shield ownership, a small item pool, gold, and one equipment reward. Do not add random affixes, durability, crafting, merchants, or a grid inventory.
+- [ ] **TODO-02B: Pre-Placed Sealed Encounter v1**
+  Use the verified controller core to author one `TestMap` encounter with pre-placed participants and a Controller-owned boundary profile. On safe inner-region entry, activate participants, then close the boundary; clear opens it. Verify the player cannot leave while active. Do not add runtime spawn waves, persistence restoration, or final fog presentation here.
 
-- [ ] **TODO-04: Projectile And Ranged Combat Foundation v1**
-  Add the player bow, an aim/release input path, an archer enemy, and projectiles that reuse the same team, block, damage, line-of-sight, collision, and hit-feedback rules as melee. Keep weapon switching outside active combat for v1. While locked on, horizontal mouse movement on the existing `LookAction` must switch to the nearest valid target on the requested screen side; it uses a configurable swipe threshold, re-arm threshold, and cooldown so a continuous mouse movement cannot cycle every target. If no eligible target exists on that side, preserve the current lock. Extract only the shared hit-resolution boundary required by melee and projectile delivery; retain `AMyCharacter::TryStartAction()` as the central action arbitrator.
+- [ ] **TODO-02C: Encounter Waves And Restore v1**
+  Add configured spawn waves, active-participant tracking, clear persistence, and reload restoration. Verify a one-wave definition, a multi-wave definition, uncleared death reset to `Idle` with boundaries open, and cleared reload/Continue restoration. Fixed rewards remain an equipment-loot stage concern.
 
-- [ ] **TODO-05: Combat Punish And Defense Feedback v1**
-  Add one player imbalance state, `EAS_GuardBroken`, without adding a separate player Poise HUD. A shield hit that reduces stamina to zero or cannot pay its guard cost must consume the remaining stamina, resolve with the shield's configured blocked damage, drop guard, and enter `EAS_GuardBroken`. A normal, unblocked hit while the player is already `EAS_Exhausted` must enter that same GuardBroken state; this rule is keyed to the action state, not the current stamina value. Spending the last stamina without receiving a hit remains ordinary `EAS_Exhausted` until recovery. GuardBroken has a dedicated montage, fixed recovery window, input lock, and state-guarded timer/Notify/delegate cleanup. Complete the existing enemy `EES_StanceBreak` loop with a front critical interaction: valid stance-broken targets can be aligned through Motion Warping and take configured critical damage from an AnimNotify. Do not add backstab, a generic finisher framework, a player Poise gauge, or Boss criticals in this stage.
+### Equipment And Loot
 
-- [ ] **TODO-06: Boss And Level Slice v1**
-  Build the level route, two normal encounters, one elite encounter, shortcut, Boss fog gate, configured first Boss, completion reward, and completion screen. The first Boss begins as an `AEnemy` variant with an attack profile and encounter configuration; a dedicated Boss architecture is not part of this TODO.
+- [ ] **TODO-03A: Item Definition And Ownership v1**
+  Introduce static item definitions, runtime item-instance records, and narrow player ownership APIs for a sword, shield, and a small authored item pool. Make the SaveGame item fields real writers/readers. Do not add world pickups, drops, hot swapping, or grid inventory UI.
 
-- [ ] **TODO-07: Demo Polish And Regression v1**
-  Tune combat readability, navigation, level landmarks, sound/music, VFX, UI feedback, checkpoint/reload behavior, and visible error recovery. Establish the repeatable manual PIE regression route for the complete Demo loop.
+- [ ] **TODO-03B: Checkpoint Equipment And Pickups v1**
+  Convert one sword/shield world pickup into owned equipment and restore the loadout from save. Restrict loadout changes to checkpoint rest; keep existing Gold Treasure automatic pickup behavior unchanged. Verify pickup, rest-time equip, death, and Continue.
+
+- [ ] **TODO-03C: Authored Rewards And Drops v1**
+  Add one authored reward/drop-table path shared by encounter completion and fixed world rewards. Verify a single equipment reward and Gold write-through. Do not add random affixes, durability, crafting, merchants, or inventory sorting.
+
+### Ranged Combat
+
+- [ ] **TODO-04A: Projectile Delivery Core v1**
+  Add a projectile delivery boundary that reuses team filtering, block, damage, collision, line-of-sight, and hit feedback rules from melee. Verify an isolated projectile hit, blocked hit, missed collision, and friendly-fire rejection before adding a weapon or enemy family.
+
+- [ ] **TODO-04B: Player Bow v1**
+  Add bow ownership, checkpoint-only weapon switching, and a player aim/release path that uses the projectile core. Keep `AMyCharacter::TryStartAction()` as the action arbiter; do not add staff, mana, or free combat hot swapping.
+
+- [ ] **TODO-04C: Lock Target Switching v1**
+  While locked on, use horizontal mouse movement on the existing `LookAction` to select the nearest valid target on the requested screen side. Include a configurable swipe threshold, re-arm threshold, and cooldown; preserve the current target when no eligible target exists. This stage changes targeting only, not projectile behavior.
+
+- [ ] **TODO-04D: Archer Enemy v1**
+  Configure an archer `AEnemy` variant using the projectile core, readable line-of-sight behavior, and the existing local HFSM. Verify mixed melee/archer pressure without a Behavior Tree, StateTree, or caster system.
+
+### Combat Punish And Criticals
+
+- [ ] **TODO-05A: Player Guard Break v1**
+  Add `EAS_GuardBroken` and its dedicated montage, recovery window, input lock, and state-guarded cleanup. A shield hit that breaks stamina resolves as blocked damage, consumes remaining stamina, drops guard, then enters GuardBroken; an unblocked hit received while already `EAS_Exhausted` enters the same state. Do not add a player Poise HUD.
+
+- [ ] **TODO-05B: Front Critical v1**
+  Complete the existing enemy `EES_StanceBreak` loop with one front critical interaction. Align a valid stance-broken enemy via Motion Warping and apply configured critical damage from an AnimNotify. Do not add backstab, generic finisher infrastructure, or Boss criticals.
+
+### Level And Boss Slice
+
+- [ ] **TODO-06A: First Level Route v1**
+  Block out and author the critical route: start checkpoint, two normal combat spaces, one elite space, and one optional shortcut/reward branch. Use the completed encounter, equipment, ranged, and guard-break systems; no Boss, completion screen, or new framework in this stage.
+
+- [ ] **TODO-06B: First Boss Encounter v1**
+  Add one Boss fog-boundary presentation, configured first Boss as an `AEnemy` variant, fixed Gold plus Remnant/Emblem reward, and Boss completion persistence. Do not introduce a Boss-specific C++ base unless the existing enemy and encounter boundaries demonstrably fail.
+
+- [ ] **TODO-06C: Completion Flow v1**
+  Add a completion screen and return to `MainMenu`. `Continue` must return to the final checkpoint with the Boss defeated, reward retained, and arena boundary open.
+
+### Polish And Regression
+
+- [ ] **TODO-07A: Demo Feedback Polish v1**
+  Tune combat readability, navigation, landmarks, sound/music, VFX, UI feedback, checkpoint/reload feedback, and visible error recovery using the completed level loop. Avoid introducing new gameplay systems.
+
+- [ ] **TODO-07B: Demo Regression Route v1**
+  Establish the repeatable manual PIE matrix for the full demo: New Game, Continue, checkpoint, normal encounter reset, cleared encounter restore, equipment persistence, bow/archer, guard break/critical, Boss completion, and completion Continue. Fix regressions only; this is not a feature stage.
 
 ## Equipment And Loot Direction
 
@@ -126,6 +181,12 @@ Adoption conditions: revisit slots, sorting, storage, crafting, vendors, selling
 Recommendation: establish the one-slot checkpoint model in `TODO-01`, then keep later persistence additions versioned and narrow.
 
 Adoption conditions: expand the initial SaveGame schema only when another persistent system has a defined reset contract, stable IDs, and a player-visible reason to survive rest/death/reload. Store stable IDs and runtime item instance data, not raw pointers to world Actors or Widget state.
+
+### Persistent World IDs
+
+Recommendation: 在首个单地图 Demo 中保留作者填写、全局命名空间化的 `FName` 持久世界 ID，例如 `TestMap_CryptEliteEncounter`、`TestMap_NaveShortcut` 和 `TestMap_AltarBossEncounter`。项目确实扩展为多地图前，应优先将存档契约迁移为结构化 map-scoped 身份，例如 `{ PersistentMapId, LocalPersistentId }` 或按地图分组的持久状态，而不是无限期把两个 scope 拼进一个字符串。
+
+Adoption conditions: 在加入第二张 gameplay map 前，或在同一存档可以写入来自多张地图的 encounter/shortcut/reward/Boss 状态前，必须作出并版本化这项决策。`PersistentMapId` 必须是作者填写的稳定内容 ID，不是可变的 map package path。迁移必须更新 `SaveVersion` 并显式映射 legacy ID；绝不能从 Actor name/label、指针、运行时 GUID 或 External Actor package path 推导持久 ID。
 
 ### Enemy Profiles And Boss Boundaries
 

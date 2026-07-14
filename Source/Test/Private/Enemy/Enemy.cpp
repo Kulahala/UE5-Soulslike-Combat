@@ -3,6 +3,8 @@
 
 #include "Enemy/Enemy.h"
 
+#include "World/EncounterController.h"
+
 #include "AIController.h"
 #include "Animation/AnimInstance.h"
 #include "AttributeComponent/AttributeComponent.h"
@@ -191,6 +193,12 @@ void AEnemy::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 void AEnemy::GetHit_Implementation(const FVector& ImpactPoint, AActor* HitInstigator)
 {
+	if (bEncounterDormant)
+	{
+		ResetPendingHitContext();
+		return;
+	}
+
 	//DrawDebugSphere(this->GetWorld(), ImpactPoint, 5, 10, FColor::Red, false, 5.0f, 0, 0.5f);
 	Super::GetHit_Implementation(ImpactPoint, HitInstigator);
 	ShowHealthBar();
@@ -215,6 +223,11 @@ void AEnemy::GetHit_Implementation(const FVector& ImpactPoint, AActor* HitInstig
 float AEnemy::TakeDamage(float DamageAmount, const struct FDamageEvent& DamageEvent, class AController* EventInstigator,
                          AActor* DamageCauser)
 {
+	if (bEncounterDormant)
+	{
+		return 0.f;
+	}
+
 	Attributes->ReceiveDamage(DamageAmount);
 
 	if (!Attributes->IsAlive())
@@ -249,13 +262,99 @@ void AEnemy::Die()
 
 	// 设定销毁时间
 	SetLifeSpan(CorpseLifespan);
+
+	if (!bDeathNotificationBroadcast)
+	{
+		bDeathNotificationBroadcast = true;
+		EnemyDiedDelegate.Broadcast(this);
+	}
+}
+
+bool AEnemy::ClaimEncounterOwner(AEncounterController* NewOwner)
+{
+	if (!NewOwner)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s rejected a null encounter owner."), *GetName());
+		return false;
+	}
+
+	if (EncounterOwner && EncounterOwner != NewOwner)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s is already owned by encounter controller '%s'."),
+			*GetName(), *GetNameSafe(EncounterOwner));
+		return false;
+	}
+
+	EncounterOwner = NewOwner;
+	return true;
+}
+
+void AEnemy::ReleaseEncounterOwner(AEncounterController* CurrentOwner)
+{
+	if (EncounterOwner != CurrentOwner)
+	{
+		return;
+	}
+
+	EncounterOwner = nullptr;
+	bEncounterDormant = false;
+}
+
+void AEnemy::SetEncounterDormant(AEncounterController* CurrentOwner)
+{
+	if (EncounterOwner != CurrentOwner || EnemyState == EEnemyState::EES_Dead)
+	{
+		return;
+	}
+
+	// 先建立状态屏障，再停止 Montage，避免其结束回调重新驱动 AI。
+	bEncounterDormant = true;
+	ClearAllTimers();
+	bAttackOnCooldown = false;
+	ClearCurrentAttackConfig(false);
+	ClearPendingAttack();
+	LastBlockedPendingAttackIndex = INDEX_NONE;
+	PendingAttackRetryBlockUntil = 0.f;
+	CombatSubState = EEnemyCombatSubState::None;
+	ResetCombatReposition();
+	bSearchingLostTarget = false;
+	LastAllyAttackCheckTime = -1000.f;
+	bCachedAllyAttackingNearby = false;
+	CachedAllySuggestedWaitTime = 0.f;
+	CachedAllyCheckTarget = nullptr;
+	bPendingStanceBreak = false;
+	LastPoiseDamageInstigator = nullptr;
+	ResetPendingHitContext();
+	ResetPoise();
+	ChasingTarget = nullptr;
+
+	if (UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance())
+	{
+		AnimInstance->Montage_Stop(0.05f);
+	}
+
+	StopEnemyMovementIfPossible();
+}
+
+bool AEnemy::ActivateForEncounter(AEncounterController* CurrentOwner, AActor* InitialTarget)
+{
+	if (EncounterOwner != CurrentOwner || EnemyState == EEnemyState::EES_Dead || !IsValidCombatTarget(InitialTarget))
+	{
+		return false;
+	}
+
+	bEncounterDormant = false;
+	bAttackOnCooldown = false;
+	ChasingTarget = InitialTarget;
+	SetEnemyState(EEnemyState::EES_Chasing);
+	return true;
 }
 
 // ==================== 韧性系统 ====================
 
 void AEnemy::ApplyPoiseDamage(float Damage, AActor* DamageInstigator)
 {
-	if (EnemyState == EEnemyState::EES_Dead || EnemyState == EEnemyState::EES_StanceBreak) return;
+	if (bEncounterDormant || EnemyState == EEnemyState::EES_Dead || EnemyState == EEnemyState::EES_StanceBreak) return;
 
 	CurrentPoise = FMath::Max(0.f, CurrentPoise - Damage);
 	LastPoiseDamageInstigator = DamageInstigator;
@@ -274,6 +373,11 @@ void AEnemy::ApplyPoiseDamage(float Damage, AActor* DamageInstigator)
 
 void AEnemy::ApplyStanceBreak(float Duration, float PlayRate)
 {
+	if (bEncounterDormant)
+	{
+		return;
+	}
+
 	// 连续破防覆盖：先清旧 timer 和恢复速率
 	GetWorldTimerManager().ClearTimer(StanceBreakRecoveryTimer);
 	if (UAnimInstance* Anim = GetMesh()->GetAnimInstance())
@@ -320,7 +424,7 @@ void AEnemy::ApplyStanceBreak(float Duration, float PlayRate)
 
 void AEnemy::RecoverFromStanceBreak()
 {
-	if (EnemyState != EEnemyState::EES_StanceBreak) return;
+	if (bEncounterDormant || EnemyState != EEnemyState::EES_StanceBreak) return;
 
 	// 恢复蒙太奇速率
 	if (UAnimInstance* Anim = GetMesh()->GetAnimInstance())
@@ -369,7 +473,8 @@ void AEnemy::Attack()
 
 bool AEnemy::CanAttack() const
 {
-	return EnemyState == EEnemyState::EES_Combating && !bAttackOnCooldown && IsValidCombatTarget(ChasingTarget);
+	return !bEncounterDormant && EnemyState == EEnemyState::EES_Combating && !bAttackOnCooldown &&
+		IsValidCombatTarget(ChasingTarget);
 }
 
 void AEnemy::PerformConfiguredAttack(float DistanceToTarget)
@@ -783,6 +888,11 @@ float AEnemy::GetAttackCooldownRemaining() const
 
 void AEnemy::OnHitReactEnd()
 {
+	if (bEncounterDormant)
+	{
+		return;
+	}
+
 	// 只有在硬直状态下才恢复，防止覆盖了死亡状态
 	if (EnemyState == EEnemyState::EES_Stunned)
 	{
@@ -792,6 +902,11 @@ void AEnemy::OnHitReactEnd()
 
 void AEnemy::OnAttackEnd()
 {
+	if (bEncounterDormant)
+	{
+		return;
+	}
+
 	// 只有在攻击状态下才恢复，防止覆盖了受击状态或死亡状态
 	if (EnemyState == EEnemyState::EES_Attacking)
 	{
@@ -801,6 +916,11 @@ void AEnemy::OnAttackEnd()
 
 void AEnemy::OnAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted)
 {
+	if (bEncounterDormant)
+	{
+		return;
+	}
+
 	if (EnemyState == EEnemyState::EES_Attacking)
 	{
 		CheckCombatTarget();
@@ -809,7 +929,7 @@ void AEnemy::OnAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted)
 
 void AEnemy::OnHitReactMontageEnded(UAnimMontage* Montage, bool bInterrupted)
 {
-	if (bInterrupted) return;
+	if (bEncounterDormant || bInterrupted) return;
 	if (EnemyState == EEnemyState::EES_Stunned)
 	{
 		CheckCombatTarget();
@@ -818,6 +938,11 @@ void AEnemy::OnHitReactMontageEnded(UAnimMontage* Montage, bool bInterrupted)
 
 void AEnemy::OnAttackCooldownEnd()
 {
+	if (bEncounterDormant)
+	{
+		return;
+	}
+
 	bAttackOnCooldown = false;
 	ResetCombatReposition();
 
@@ -958,6 +1083,11 @@ FString AEnemy::GetCombatSubStateDebugText() const
 
 void AEnemy::CheckCombatTarget()
 {
+	if (bEncounterDormant)
+	{
+		return;
+	}
+
 	if (!IsValidCombatTarget(ChasingTarget))
 	{
 		ClearPendingAttack();
@@ -1078,6 +1208,11 @@ void AEnemy::SetEnemyState(EEnemyState NewState)
 
 void AEnemy::TargetPerceptionUpdated(AActor* Actor, FAIStimulus Stimulus)
 {
+	if (bEncounterDormant)
+	{
+		return;
+	}
+
 	// 只处理"看到"的瞬间
 	if (!Stimulus.WasSuccessfullySensed())
 	{
@@ -1112,6 +1247,11 @@ void AEnemy::TargetPerceptionUpdated(AActor* Actor, FAIStimulus Stimulus)
 void AEnemy::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
+
+	if (bEncounterDormant)
+	{
+		return;
+	}
 
 	if (EnemyState == EEnemyState::EES_Dead || EnemyState == EEnemyState::EES_Stunned || EnemyState ==
 		EEnemyState::EES_Attacking || EnemyState == EEnemyState::EES_StanceBreak)
@@ -1261,6 +1401,11 @@ void AEnemy::OnLostTargetSearch(float DeltaTime)
 
 void AEnemy::LostTargetSearchFinished()
 {
+	if (bEncounterDormant)
+	{
+		return;
+	}
+
 	GetWorldTimerManager().ClearTimer(LookTimer);
 	bSearchingLostTarget = false;
 	GetCharacterMovement()->bOrientRotationToMovement = true;
@@ -1482,7 +1627,7 @@ void AEnemy::UpdateCombatMovement(float DeltaTime, float DistanceToTarget, const
 
 bool AEnemy::MoveToCombatLocation(const FVector& Location)
 {
-	if (!EnemyController) return false;
+	if (bEncounterDormant || !EnemyController) return false;
 
 	FAIMoveRequest MoveRequest;
 	MoveRequest.SetGoalLocation(Location);
@@ -1512,7 +1657,7 @@ bool AEnemy::MoveToCombatLocation(const FVector& Location)
 
 bool AEnemy::MoveToCombatTarget(float AcceptanceRadiusOverride)
 {
-	if (!EnemyController || !ChasingTarget) return false;
+	if (bEncounterDormant || !EnemyController || !ChasingTarget) return false;
 
 	FAIMoveRequest MoveRequest;
 	MoveRequest.SetGoalActor(ChasingTarget);
@@ -1575,6 +1720,11 @@ void AEnemy::ClearCombatRetreatSpeedEase()
 
 void AEnemy::OnRepositionMoveCompleted(FAIRequestID RequestID, EPathFollowingResult::Type Result)
 {
+	if (bEncounterDormant)
+	{
+		return;
+	}
+
 	bRepositionInProgress = false;
 	ClearCombatRetreatSpeedEase();
 }
@@ -1591,7 +1741,7 @@ void AEnemy::StopEnemyMovementIfPossible()
 
 void AEnemy::MoveToTarget(const AActor* Target)
 {
-	if (!EnemyController || !Target)
+	if (bEncounterDormant || !EnemyController || !Target)
 	{
 		return;
 	}
@@ -1618,7 +1768,7 @@ void AEnemy::MoveToTarget(const AActor* Target)
 
 void AEnemy::MoveToLocation(const FVector& Location)
 {
-	if (!EnemyController)
+	if (bEncounterDormant || !EnemyController)
 	{
 		return;
 	}
@@ -1757,6 +1907,11 @@ void AEnemy::SetTargetedByPlayer(bool bTargeted)
 
 void AEnemy::SearchTimerFinished()
 {
+	if (bEncounterDormant)
+	{
+		return;
+	}
+
 	GetWorldTimerManager().ClearTimer(LookTimer);
 	GetCharacterMovement()->bOrientRotationToMovement = true;
 

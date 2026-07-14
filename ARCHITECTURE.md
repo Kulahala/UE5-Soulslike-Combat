@@ -38,6 +38,18 @@ Language policy: keep stable section titles and HTML anchors in English; use Chi
 - `ACheckpointActor` is a map-authored interaction and respawn anchor. Its `PersistentId` is a stable level-authoring ID, never an actor name, pointer or runtime GUID. A checkpoint that can be used as an initial or reload spawn must be unique within its map and be marked `Is Spatially Loaded = false` in a World Partition map, so GameMode can resolve it before a player-created streaming source exists.
 - `TestMap` uses `StartBonfireCheckpoint` with `PersistentId = StartBonfire` as the new-save initial respawn anchor. A `New Game` transition intentionally has no pending checkpoint and begins at the map's `PlayerStart`; after that, rest, death and `Continue` use the saved checkpoint. The visual `BP_MediumFire` remains presentation only; it does not participate in save, interaction or spawn selection.
 
+<a name="encounter-system"></a>
+## Encounter System
+
+- `AEncounterController` 是当前地图内一场封闭遭遇的原生摆放 Owner。它拥有 `EncounterId`、预放置 `AEnemy` 参与者、激活条件、`Idle -> Active -> Cleared` 生命周期、运行时边界碰撞/视觉段和参与者死亡订阅；它不拥有波次定义或生成、奖励/掉落、SaveGame 读写、可互动门或地图重载。
+- Controller 在领取参与者前验证配置。空或同地图重复的 `EncounterId`、无效参与者列表、无效边界参数或不可用的 Spline 安全区域都会输出 warning，保持边界开放，并保留所有敌人的普通 AI 行为。
+- `Idle` 领取有效预放置参与者并使其进入遭遇待命。有效玩家必须先被观察到离开安全内区，再走入该内区才可激活，因此 PIE 出生在安全内区不会立即封锁场地。`Active` 先通过既有本地 HFSM 激活所有参与者，再关闭边界；最后一名已登记的 Active 参与者死亡后只会一次性进入 `Cleared`，打开边界并释放所有权。
+- `Rectangle`、`Radial` 和 `Spline` 都是 Controller 内部的边界作者模式。Rectangle 与 Radial 使用各自配置的内部尺寸；Spline 是可编辑、平面、Linear、无自交的简单闭环。所有模式都要求玩家胶囊中心位于作者区域内，且到每一面未来墙体的距离大于 `PlayerCapsuleRadius + SealClearance`，避免边界在玩家贴边时穿过角色封锁。
+- 每条作者边界都会生成一对运行时段：`UBoxComponent` 只在 `Active` 时阻挡 `Pawn`，无碰撞 Engine Cube 视觉段与其保持同一变换。`Idle`、`Cleared`、无效配置和 `EndPlay` 时视觉隐藏且碰撞为 `NoCollision`。`M_EncounterBoundary` 是当前灰白雾幕材质原型，不是最终 Boss 雾墙美术、开关动画、音频或 Niagara 行为。
+- `AEnemy::ClaimEncounterOwner()` / `ReleaseEncounterOwner()` 防止同一参与者被多个 Controller 管理。`SetEncounterDormant()` 是遭遇层的状态屏障，不是第二套 AI：它停止移动、Montage/Timer 驱动的后续路径、战斗瞬态和陈旧导航路径。`ActivateForEncounter()` 以触发玩家为目标恢复既有 `EES_Chasing -> EES_Combating` 路径。`Die()` 只广播一次原生死亡通知；Controller 只在 `Active` 消费该通知，并在 `EndPlay` 解除回调和所有权。
+- `AEncounterSpawnPoint` 当前只提供作者填写的 `SpawnPointId`、编辑器 Arrow 和 `GetSpawnTransform()`。在后续波次阶段前，它不包含波次成员、敌人类、Controller 引用或生成逻辑。
+- `EncounterId` 是作者填写的 `FName` 持久化契约，绝不能使用 Actor object name/label、指针、运行时 GUID 或 External Actor package path。Controller 目前不会读写 `UTestSaveGame::ClearedEncounterIds` 或调用 `USoulslikeGameInstance::MarkEncounterCleared()`。该存档集合目前是全局集合，因此当持久化真正接入时，首个 Demo 要采用全局命名空间 ID，例如 `TestMap_CryptEliteEncounter`；多地图迁移决策记录在 `ROADMAP.md`。
+
 <a name="state-machine-system"></a>
 ## State Machine System (`CharacterTypes.h`)
 
@@ -267,6 +279,8 @@ AActor
 │   ├── AShield (off-hand equip, block parameters: angle/damage/stamina/speed)
 │   └── ATreasure (gold value, initialized from UTreasureData asset)
 ├── ABreakAbleActor + IHitInterface (static mesh → GeometryCollection swap on hit)
+├── AEncounterController (placed encounter lifecycle, safe activation, and runtime boundary segments)
+├── AEncounterSpawnPoint (future wave placement transform only)
 ├── Interfaces: IHitInterface (GetHit — hit reaction), IBlockableInterface (TryBlockHit — angle/stamina block check), IPickupInterface (pickup overlap callbacks)
 └── AArenaGenerator (USplineComponent + UPCGComponent for PCG-based arena spawning)
 
@@ -331,6 +345,7 @@ FCombatTeamHelper (static helper: ShareTeamTag for same-team detection via Actor
 7. **NotifyBegin** → `AWeapon::StartWeaponTrace()` (records old box positions)
 8. **NotifyTick** → `AWeapon::ExecuteWeaponTrace()` (sweeps from old→new center to prevent ghost swings)
 9. On hit:
+   - **Encounter dormancy barrier**: 来自待命敌人的 trace，或命中待命敌人的 trace，会在正常命中结算前退出。因此待命参与者不会在遭遇激活前承受伤害、韧性伤害、受击、破防或命中反馈。
    - 同阵营命中：不 `ApplyDamage`，不造成韧性伤害，但仍走 `GetHit` / `DispatchHitFeedback` 路径（击退、命中反馈、相机晃动、卡肉、本次攻击黑名单）。同阵营判定通过 `FCombatTeamHelper::ShareTeamTag()`（Weapon + Enemy 共用），当前只认 `Player` / `Enemy` 阵营 Tag 白名单，避免功能 Tag 误判同队
    - 跨阵营命中：`IBlockableInterface::TryBlockHit()` 在 `ApplyDamage` 前拦截；格挡成功：减伤 + 跳过硬直；弹反成功：瞬间清空攻击方韧性触发破防
    - `ExecuteWeaponTrace()` 通过 `FPendingHitContext` 写入每命中的上下文（instigator、knockback scale、blocked flag、stun flag），然后调用 `GetHit()`
@@ -412,6 +427,7 @@ FCombatTeamHelper (static helper: ShareTeamTag for same-team detection via Actor
 ## Enemy AI (`AEnemy`)
 
 - Controlled by `AAIController` via `EEnemyState` FSM.
+- **Encounter dormancy**: `bEncounterDormant` 是窄的遭遇状态屏障，而不是第二套 AI 框架。待命时 AI 决策、感知/目标驱动推进、移动/导航后续、Montage/Timer 回调和武器命中入口都会被拒绝；激活后回到既有本地 HFSM，而不引入 Behavior Tree 或 StateTree Owner。
 - **Perception (Sight & Hearing)**: Uses `UAIPerceptionComponent` for target detection. Sight configures `DetectionByAffiliation` for enemies, neutrals, and friendlies to bypass the need for `IGenericTeamAgentInterface`. Hearing relies on `UPawnNoiseEmitterComponent` on the player and `UAISense_Hearing::ReportNoiseEvent`. *Note: Blueprint instances must explicitly configure their Senses Config in the editor (Sight and Hearing) with `Detect Neutrals` enabled, as Blueprint CDO serialization overrides C++ `CreateDefaultSubobject` defaults.*
 - `CheckCombatTarget()` runs before per-state Tick logic: invalid **or dead** targets return to `EES_Patrolling`（via `IsValidCombatTarget()` helper）。**战斗退出滞后**：已在战斗族状态（`EES_Combating`/`EES_Attacking`/`EES_Stunned`）时，退出半径使用 `CombatingRadius + CombatExitBuffer`（默认 350），防止边界每帧在 Chasing/Combating 间抖动。
 - **Patrolling / Searching**: `OnPatrolling()` moves between `PatrolTargets`; once inside `PatrolRadius`, the enemy switches to `EES_Searching`. `OnSearching()` stops movement, starts `PatrolTimer` plus repeating `LookTimer`, and rotates toward `GenerateNewLookRotation()`.

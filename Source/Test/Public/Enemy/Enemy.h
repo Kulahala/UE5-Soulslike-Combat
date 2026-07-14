@@ -18,12 +18,15 @@ namespace EPathFollowingResult
 }
 
 class AEnemy;
+class AEncounterController;
 class UAIPerceptionComponent;
 class AAIController;
 class UHealthBarComponent;
 class UWidgetComponent;
 class UEnemyAttackConfigDataAsset;
 class UMotionWarpingComponent;
+
+DECLARE_MULTICAST_DELEGATE_OneParam(FOnEnemyDied, AEnemy*);
 
 UCLASS()
 class TEST_API AEnemy : public ABaseCharacter
@@ -51,6 +54,14 @@ public:
 	                         class AController* EventInstigator, AActor* DamageCauser) override;
 	void Die(); // 死亡演出
 
+	/* 遭遇接线 */
+	bool ClaimEncounterOwner(AEncounterController* NewOwner);
+	void ReleaseEncounterOwner(AEncounterController* CurrentOwner);
+	void SetEncounterDormant(AEncounterController* CurrentOwner);
+	bool ActivateForEncounter(AEncounterController* CurrentOwner, AActor* InitialTarget);
+	FORCEINLINE bool IsEncounterDormant() const { return bEncounterDormant; }
+	FOnEnemyDied& GetOnEnemyDied() { return EnemyDiedDelegate; }
+
 	/* 攻击 */
 	virtual void Attack() override;
 
@@ -68,7 +79,7 @@ public:
 	/* 韧性系统 */
 	void ApplyPoiseDamage(float Damage, AActor* DamageInstigator);
 	void ResetPoise();
-	bool ShouldTriggerStanceBreak() const { return bPendingStanceBreak; }
+	bool ShouldTriggerStanceBreak() const { return !bEncounterDormant && bPendingStanceBreak; }
 
 	FORCEINLINE float GetMaxPoise() const { return MaxPoise; }
 	FORCEINLINE float GetCurrentPoise() const { return CurrentPoise; }
@@ -407,6 +418,12 @@ private:
 	bool bIsTargetedByPlayer = false; // 被玩家锁定中
 	bool bPendingStanceBreak = false; // 韧性归零flag，等待GetHit后触发
 	AActor* LastPoiseDamageInstigator = nullptr; // 最后一次韧性伤害的攻击者
+
+	// 遭遇控制器只管理被显式登记的敌人；普通敌人保持原有 AI 路径。
+	AEncounterController* EncounterOwner = nullptr;
+	bool bEncounterDormant = false;
+	bool bDeathNotificationBroadcast = false;
+	FOnEnemyDied EnemyDiedDelegate;
 
 	/* 韧性系统 */
 	UPROPERTY(EditAnywhere, Category = "Combat|Poise", meta = (AllowPrivateAccess = "true", ToolTip = "最大韧性值。"))

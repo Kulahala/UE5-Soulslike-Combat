@@ -85,6 +85,10 @@ void AWeapon::StartWeaponTrace()
 void AWeapon::ExecuteWeaponTrace()
 {
 	check(BoxTrace);
+	if (const AEnemy* OwnerEnemy = Cast<AEnemy>(GetOwner()); OwnerEnemy && OwnerEnemy->IsEncounterDormant())
+	{
+		return;
+	}
 
 	FVector CurrentCenter = BoxTrace->GetComponentLocation();
 	FRotator TraceRotation = BoxTrace->GetComponentRotation();
@@ -111,6 +115,12 @@ void AWeapon::ExecuteWeaponTrace()
 	if (bHit && HitPoint.GetActor())
 	{
 		AActor* HitActor = HitPoint.GetActor();
+		if (AEnemy* Enemy = Cast<AEnemy>(HitActor); Enemy && Enemy->IsEncounterDormant())
+		{
+			// 预放置参与者在 Controller 激活前不接受本次挥砍，也不产生命中反馈。
+			IgnoreActors.AddUnique(HitActor);
+			return;
+		}
 
 		// 命中解析：同阵营判定 + 格挡结算 + 伤害计算
 		FWeaponHitResult Result = ResolveHit(HitActor, HitPoint);
