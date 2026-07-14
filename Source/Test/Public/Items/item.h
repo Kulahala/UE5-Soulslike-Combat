@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "Interfaces/InteractableInterface.h"
 #include "Interfaces/PickupInterface.h"
 #include "item.generated.h"
 
@@ -13,7 +14,7 @@ UENUM()
 enum class EItemState : int8 { EIS_Spawning, EIS_Dropped, EIS_Equipped };
 
 UCLASS()
-class TEST_API Aitem : public AActor, public IPickupInterface
+class TEST_API Aitem : public AActor, public IPickupInterface, public IInteractableInterface
 {
 	GENERATED_BODY()
 
@@ -24,6 +25,10 @@ public:
 	void StartSpawning(const FVector& Target);
 
 	virtual void OnPickup_Implementation(AActor* Picker) override;
+	virtual bool CanInteract_Implementation(AActor* Interactor) const override;
+	virtual FText GetInteractionPrompt_Implementation() const override;
+	virtual int32 GetInteractionPriority_Implementation() const override;
+	virtual void Interact_Implementation(AActor* Interactor) override;
 
 protected:
 	/* 生命周期 */

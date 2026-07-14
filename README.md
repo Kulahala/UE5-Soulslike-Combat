@@ -113,6 +113,7 @@ https://github.com/user-attachments/assets/fdd9304c-a7ea-4185-bfa1-09df583fa784
 ### 核心亮点
 
 - **状态驱动的主角战斗**：轻攻击连招、冲刺攻击、蓄力攻击、翻滚、格挡、弹反、喝药、体力耗尽、受击硬直和死亡都通过明确的动作状态守卫组织。
+- **游戏流程基础**：独立主菜单提供 New Game、Continue、Settings 和 Quit；单槽存档即时持久化 Gold，新游戏从 `PlayerStart` 出发，火堆休息、死亡和 Continue 从最后存档火堆恢复，并通过地图重载重置临时世界状态。
 - **数据驱动攻击配置**：`UAttackConfigDataAsset` 管理主角轻攻击连招、特殊攻击和蓄力攻击；`UEnemyAttackConfigDataAsset` 管理敌人招式条目，并支持为跳劈类攻击单独开启 Motion Warping。
 - **精确武器命中检测**：武器使用前一帧到当前帧的盒体扫掠，降低高速动画中的漏判。
 - **盾牌格挡与弹反**：伤害结算前先检查防御角度和体力；弹反成功会清空敌人韧性并触发破防。
@@ -131,6 +132,7 @@ https://github.com/user-attachments/assets/fdd9304c-a7ea-4185-bfa1-09df583fa784
 | 模块 | 简述 |
 |------|------|
 | 主角 | 移动、锁定、体力、攻击、翻滚、格挡、弹反、喝药、受击、死亡 |
+| 游戏流程 | 主菜单、单槽存档、火堆交互、死亡 Overlay、地图重载、Continue |
 | 战斗数据 | 主角连招/特殊/蓄力攻击配置，敌人招式条目，伤害/格挡耗体/韧性倍率，可选敌人 Motion Warping |
 | 武器 | 盒体扫掠、同阵营过滤、格挡拦截、命中反馈派发 |
 | 敌人 | 巡逻、搜索、追击、战斗局部 HFSM、冷却拉扯、攻击协调、跳劈 Motion Warping |
@@ -191,4 +193,3 @@ https://github.com/user-attachments/assets/fdd9304c-a7ea-4185-bfa1-09df583fa784
 3. 打开 `Test.sln`。
 4. 使用 **Development Editor** 配置编译 `TestEditor` 目标。
 5. 打开 `Test.uproject` 启动编辑器。
-

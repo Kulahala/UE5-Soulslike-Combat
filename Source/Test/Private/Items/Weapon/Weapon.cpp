@@ -69,7 +69,7 @@ void AWeapon::OnPickup_Implementation(AActor* Picker)
 {
 	if (AMyCharacter* Character = Cast<AMyCharacter>(Picker))
 	{
-		Equip(Character->GetMesh(), FName("RightHandSocket"), Character, Character);
+		Character->EquipWeaponFromPickup(this);
 	}
 }
 

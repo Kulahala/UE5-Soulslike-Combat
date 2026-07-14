@@ -30,6 +30,14 @@ Language policy: keep stable section titles and HTML anchors in English; use Chi
 - Targets: `TestEditor` (Editor), `SoulslikeCombat` (Game)
 - Build.cs dependencies: `Core`, `CoreUObject`, `Engine`, `InputCore`, `EnhancedInput`, `AnimGraphRuntime`, `Niagara`, `GeometryCollectionEngine`, `PCG`, `UMG`, `AIModule`, `Slate`, `SlateCore`, `MotionWarping`
 
+<a name="game-flow-foundation"></a>
+## Game Flow Foundation
+
+- `UTestSaveGame` owns durable single-slot data; `USoulslikeGameInstance` owns slot I/O and carries the target gameplay map plus pending checkpoint ID across level transitions.
+- `ATestGameMode` owns player spawn selection, checkpoint resource recovery and same-map reload. Pawn-dependent initialization happens only after `RestartPlayer()` completes, not in `HandleStartingNewPlayer`, because the latter can run before the Pawn exists.
+- `ACheckpointActor` is a map-authored interaction and respawn anchor. Its `PersistentId` is a stable level-authoring ID, never an actor name, pointer or runtime GUID. A checkpoint that can be used as an initial or reload spawn must be unique within its map and be marked `Is Spatially Loaded = false` in a World Partition map, so GameMode can resolve it before a player-created streaming source exists.
+- `TestMap` uses `StartBonfireCheckpoint` with `PersistentId = StartBonfire` as the new-save initial respawn anchor. A `New Game` transition intentionally has no pending checkpoint and begins at the map's `PlayerStart`; after that, rest, death and `Continue` use the saved checkpoint. The visual `BP_MediumFire` remains presentation only; it does not participate in save, interaction or spawn selection.
+
 <a name="state-machine-system"></a>
 ## State Machine System (`CharacterTypes.h`)
 
@@ -580,12 +588,10 @@ FCombatTeamHelper (static helper: ShareTeamTag for same-team detection via Actor
 ## Pause Menu System
 
 - **架构**：Controller 级别管理暂停状态、Widget 缓存、输入模式切换，`AMyCharacter` 无感知
-- **退出入口**：`UPauseMenuWidget` 通过 `OnQuitDelegate` 只发出 UI 请求，`ACharacterController::OnQuitRequested()` 负责解除暂停并调用 `QuitGame`
+- **退出入口**：`UPauseMenuWidget` 通过 `OnQuitDelegate` 只发出 UI 请求，`ACharacterController::OnQuitRequested()` 将活动游戏返回 `MainMenu`；只有主菜单的 Quit 调用 `QuitGame`。
 - **智能锁定处理**：暂停时检查锁定旋转完成度（角度差 < 1°保持，≥ 1°清除），必须先 `IsValid(LockedTarget)` 检查
 - **死亡时序**：`Die()` 最前面调用 `ClearPauseIfActive()` + `SetCanPause(false)`，先恢复游戏状态再处理死亡演出
-- **死亡菜单**：`AMyCharacter::Die()` 完成死亡清理和死亡蒙太奇播放后调用 `ACharacterController::ShowDeathMenu()`；Controller 切换到 UI 输入模式并显示 `UDeathMenuWidget`，按钮通过 delegate 请求重开当前关卡或退出游戏。死亡菜单不暂停世界，避免冻结死亡蒙太奇。
-
-![Death menu runtime overlay](docs/images/death-menu.png)
+- **死亡 Overlay**：`AMyCharacter::Die()` 启动死亡 Montage 后立即请求 `ATestGameMode::HandlePlayerDeath()`；GameMode 保存 Gold、通过 `ACharacterController::ShowDeathOverlay()` 显示无按钮 `WBP_DeathOverlay`，在配置的停留时间后启动相机淡黑和地图重载。该流程不等待 Death Montage 结束，避免最后一帧停留的 Montage 阻塞复活。
 
 <a name="potion-system"></a>
 ## Potion System (药瓶系统)

@@ -2,6 +2,7 @@
 
 #include "Items/Shield/Shield.h"
 
+#include "Character/MyCharacter.h"
 #include "Kismet/GameplayStatics.h"
 #include "NiagaraComponent.h"
 
@@ -14,4 +15,12 @@ void AShield::EquipToOffhand(USceneComponent* Parent, const FName& SocketName, A
 	DisablePickupCollision();
 	if (GetEffect()) GetEffect()->Deactivate();
 	if (EquipSound) UGameplayStatics::PlaySoundAtLocation(this, EquipSound, GetActorLocation());
+}
+
+void AShield::OnPickup_Implementation(AActor* Picker)
+{
+	if (AMyCharacter* Character = Cast<AMyCharacter>(Picker))
+	{
+		Character->EquipShieldFromPickup(this);
+	}
 }

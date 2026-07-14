@@ -127,6 +127,7 @@ public:
 	void AddHealth(float Amount);
 	void EnableHealthRegen();
 	void DisableHealthRegen();
+	void RestoreCheckpointResources();
 
 	FORCEINLINE bool HasPotion() const { return CurrentPotionCount > 0; }
 	FORCEINLINE int32 GetPotionCount() const { return CurrentPotionCount; }

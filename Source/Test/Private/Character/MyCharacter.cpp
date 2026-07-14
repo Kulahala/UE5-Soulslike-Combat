@@ -6,18 +6,22 @@
 #include "Combat/HitReactionConfigDataAsset.h"
 #include "Character/Components/PlayerLockOnComponent.h"
 #include "Character/Controller/CharacterController.h"
+#include "Game/TestGameMode.h"
 
 #include "Camera/CameraComponent.h"
+#include "Animation/AnimInstance.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "Items/Weapon/Weapon.h"
 #include "Items/Shield/Shield.h"
+#include "Interfaces/InteractableInterface.h"
 #include "NiagaraFunctionLibrary.h"
 #include "Components/CapsuleComponent.h"
 #include "HUD/PlayerHUDWidget.h"
 #include "AttributeComponent/AttributeComponent.h"
 #include "Enemy/Enemy.h"
 #include "Engine/Engine.h"
+#include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
 #include "Kismet/KismetMathLibrary.h"
 #include "MotionWarpingComponent.h"
@@ -105,7 +109,27 @@ void AMyCharacter::BeginPlay()
 		Attributes->SetPotionCount(3);  // 初始3个药瓶
 	}
 
-	InitializePlayerHUD();
+}
+
+void AMyCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	if (PlayerHUDWidget)
+	{
+		PlayerHUDWidget->RemoveFromParent();
+		PlayerHUDWidget = nullptr;
+	}
+
+	Super::EndPlay(EndPlayReason);
+}
+
+void AMyCharacter::PossessedBy(AController* NewController)
+{
+	Super::PossessedBy(NewController);
+
+	if (IsLocallyControlled())
+	{
+		InitializePlayerHUD();
+	}
 }
 
 void AMyCharacter::Tick(float DeltaTime)
@@ -144,6 +168,11 @@ void AMyCharacter::Tick(float DeltaTime)
 	if (bPotionOnCooldown)
 	{
 		UpdatePotionCooldownHUD();
+	}
+
+	if (!InteractableCandidates.IsEmpty() || CurrentInteractable.IsValid())
+	{
+		RefreshCurrentInteractable();
 	}
 
 	if (ActionState == EActionState::EAS_Stunning || ActionState == EActionState::EAS_Dead) return;
@@ -739,9 +768,18 @@ void AMyCharacter::Die()
 
 	PlayDeathMontage();
 
-	if (ACharacterController* CC = Cast<ACharacterController>(GetController()))
+	BeginDeathRespawnFlow();
+}
+
+void AMyCharacter::BeginDeathRespawnFlow()
+{
+	if (ATestGameMode* GameMode = GetWorld() ? GetWorld()->GetAuthGameMode<ATestGameMode>() : nullptr)
 	{
-		CC->ShowDeathMenu();
+		GameMode->HandlePlayerDeath(this);
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s died without an active ATestGameMode; automatic respawn is unavailable."), *GetName());
 	}
 }
 
@@ -1113,32 +1151,140 @@ void AMyCharacter::OnDodgeMontageEnded(UAnimMontage* Montage, bool bInterrupted)
 
 void AMyCharacter::Equip()
 {
-	if (bIsBlocking) return;
+	TryInteract();
+}
 
-	if (OverLapItem && OverLapItem->Implements<UPickupInterface>() && !OverLapItem->GetOwner())
+void AMyCharacter::TryInteract()
+{
+	if (!CanInteractWithWorld())
 	{
-		// 盾牌：挂到左手
-		if (AShield* Shield = Cast<AShield>(OverLapItem))
+		return;
+	}
+
+	RefreshCurrentInteractable();
+	AActor* InteractableActor = CurrentInteractable.Get();
+	if (!InteractableActor || !InteractableActor->Implements<UInteractableInterface>())
+	{
+		return;
+	}
+
+	if (IInteractableInterface::Execute_CanInteract(InteractableActor, this))
+	{
+		IInteractableInterface::Execute_Interact(InteractableActor, this);
+	}
+
+	RefreshCurrentInteractable();
+}
+
+bool AMyCharacter::CanInteractWithWorld() const
+{
+	return ActionState == EActionState::EAS_UnOccupied
+		&& Attributes
+		&& Attributes->IsAlive()
+		&& !GetCharacterMovement()->IsFalling();
+}
+
+void AMyCharacter::RegisterInteractable(AActor* InteractableActor)
+{
+	if (!IsValid(InteractableActor) || !InteractableActor->Implements<UInteractableInterface>())
+	{
+		return;
+	}
+
+	InteractableCandidates.AddUnique(InteractableActor);
+	RefreshCurrentInteractable();
+}
+
+void AMyCharacter::UnregisterInteractable(AActor* InteractableActor)
+{
+	InteractableCandidates.RemoveAll([InteractableActor](const TWeakObjectPtr<AActor>& Candidate)
+	{
+		return !Candidate.IsValid() || Candidate.Get() == InteractableActor;
+	});
+	RefreshCurrentInteractable();
+}
+
+bool AMyCharacter::EquipWeaponFromPickup(AWeapon* Weapon)
+{
+	if (!Weapon || WeaponState != EWeaponState::EWS_Unequipped || Weapon->GetOwner())
+	{
+		return false;
+	}
+
+	Weapon->Equip(GetMesh(), FName(TEXT("RightHandSocket")), this, this);
+	EquippedWeapon = Weapon;
+	WeaponState = EWeaponState::EWS_OneHandEquipped;
+	return true;
+}
+
+bool AMyCharacter::EquipShieldFromPickup(AShield* Shield)
+{
+	if (!Shield || EquippedShield || Shield->GetOwner())
+	{
+		return false;
+	}
+
+	Shield->EquipToOffhand(GetMesh(), Shield->GetOffhandSocketName(), this);
+	EquippedShield = Shield;
+	return true;
+}
+
+void AMyCharacter::RefreshCurrentInteractable()
+{
+	InteractableCandidates.RemoveAll([](const TWeakObjectPtr<AActor>& Candidate)
+	{
+		return !Candidate.IsValid();
+	});
+
+	AActor* BestCandidate = nullptr;
+	int32 BestPriority = TNumericLimits<int32>::Lowest();
+	float BestDistanceSquared = TNumericLimits<float>::Max();
+
+	for (const TWeakObjectPtr<AActor>& Candidate : InteractableCandidates)
+	{
+		AActor* CandidateActor = Candidate.Get();
+		if (!CandidateActor || !CandidateActor->Implements<UInteractableInterface>()
+			|| !IInteractableInterface::Execute_CanInteract(CandidateActor, this))
 		{
-			if (!EquippedShield)
-			{
-				Shield->EquipToOffhand(GetMesh(), Shield->GetOffhandSocketName(), this);
-				EquippedShield = Shield;
-			}
-			return;
+			continue;
 		}
 
-		// 武器：继续走原逻辑
-		if (WeaponState == EWeaponState::EWS_Unequipped)
+		const int32 Priority = IInteractableInterface::Execute_GetInteractionPriority(CandidateActor);
+		const float DistanceSquared = FVector::DistSquared2D(GetActorLocation(), CandidateActor->GetActorLocation());
+		if (!BestCandidate || Priority > BestPriority || (Priority == BestPriority && DistanceSquared < BestDistanceSquared))
 		{
-			AWeapon* Weapon = Cast<AWeapon>(OverLapItem);
-			IPickupInterface::Execute_OnPickup(OverLapItem, this);
-			if (Weapon)
-			{
-				EquippedWeapon = Weapon;
-			}
-			WeaponState = EWeaponState::EWS_OneHandEquipped;
+			BestCandidate = CandidateActor;
+			BestPriority = Priority;
+			BestDistanceSquared = DistanceSquared;
 		}
+	}
+
+	if (CurrentInteractable.Get() == BestCandidate)
+	{
+		return;
+	}
+
+	CurrentInteractable = BestCandidate;
+	OverLapItem = Cast<Aitem>(BestCandidate);
+	UpdateInteractionPrompt();
+}
+
+void AMyCharacter::UpdateInteractionPrompt()
+{
+	ACharacterController* CharacterController = Cast<ACharacterController>(GetController());
+	if (!CharacterController)
+	{
+		return;
+	}
+
+	AActor* InteractableActor = CurrentInteractable.Get();
+	if (InteractableActor && InteractableActor->Implements<UInteractableInterface>())
+	{
+		CharacterController->ShowInteractionPrompt(IInteractableInterface::Execute_GetInteractionPrompt(InteractableActor));
+	}
+	else
+	{
+		CharacterController->HideInteractionPrompt();
 	}
 }
 
@@ -1714,7 +1860,7 @@ void AMyCharacter::UpdateMovementSpeed()
 		GetCharacterMovement()->MaxWalkSpeed = RunSpeed * SpeedMultiplier;
 	}
 
-	if (FDebugDrawHelper::IsPlayerEnabled())
+	if (IsLocallyControlled() && FDebugDrawHelper::IsPlayerEnabled())
 	{
 		FDebugDrawHelper::Add(FString::Printf(TEXT("Speed: %.0f"), GetCharacterMovement()->MaxWalkSpeed), FColor::Cyan);  // [调试]
 	}
@@ -2183,15 +2329,17 @@ void AMyCharacter::FaceDirection2D(const FVector& FacingDirection)
 
 void AMyCharacter::InitializePlayerHUD()
 {
-	if (PlayerHUDClass)
+	if (!IsLocallyControlled() || PlayerHUDWidget || !PlayerHUDClass)
 	{
-		PlayerHUDWidget = CreateWidget<UPlayerHUDWidget>(GetWorld(), PlayerHUDClass);
-		if (PlayerHUDWidget)
-		{
-			PlayerHUDWidget->AddToViewport();
-			PlayerHUDWidget->BindToAttributes(Attributes);
-			UpdatePotionCooldownHUD();
-		}
+		return;
+	}
+
+	PlayerHUDWidget = CreateWidget<UPlayerHUDWidget>(GetWorld(), PlayerHUDClass);
+	if (PlayerHUDWidget)
+	{
+		PlayerHUDWidget->AddToViewport();
+		PlayerHUDWidget->BindToAttributes(Attributes);
+		UpdatePotionCooldownHUD();
 	}
 }
 
@@ -2210,7 +2358,7 @@ void AMyCharacter::UpdatePotionCooldownHUD() const
 
 void AMyCharacter::DrawDebugInfo() const
 {
-	if (!FDebugDrawHelper::IsPlayerEnabled()) return;
+	if (!IsLocallyControlled() || !FDebugDrawHelper::IsPlayerEnabled()) return;
 	if (!Attributes) return;
 
 	// [调试] 角色状态面板

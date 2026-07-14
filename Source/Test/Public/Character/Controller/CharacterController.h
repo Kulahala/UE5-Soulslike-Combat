@@ -10,7 +10,8 @@
 class UInputMappingContext;
 class UInputAction;
 class UPauseMenuWidget;
-class UDeathMenuWidget;
+class UDeathOverlayWidget;
+class UInteractionPromptWidget;
 
 /**
  * 
@@ -33,7 +34,7 @@ protected:
 	void Input_Look(const FInputActionValue& Value);
 	void Input_Jump();
 	void Input_StopJumping();
-	void Input_Equip();
+	void Input_Interact();
 	void Input_AttackPressed();
 	void Input_AttackReleased();
 	void Input_SprintStart();
@@ -61,8 +62,8 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input", meta = (ToolTip = "跳跃输入动作。"))
 	UInputAction* JumpAction;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input", meta = (ToolTip = "拾取/装备输入动作。"))
-	UInputAction* EquipAction;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input", meta = (ToolTip = "世界交互输入动作。"))
+	UInputAction* InteractAction;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input", meta = (ToolTip = "攻击输入动作。"))
 	UInputAction* AttackAction;
@@ -101,7 +102,7 @@ private:
 	bool bDebugBlockHeld = false;
 	float DebugAttackExpireTime = 0.f;
 	float DebugJumpExpireTime = 0.f;
-	float DebugEquipExpireTime = 0.f;
+	float DebugInteractExpireTime = 0.f;
 	float DebugLockOnExpireTime = 0.f;
 	float DebugParryExpireTime = 0.f;
 	float DebugDodgeExpireTime = 0.f;
@@ -117,25 +118,26 @@ private:
 	UPROPERTY()
 	UPauseMenuWidget* PauseMenuWidget = nullptr;
 
-	UPROPERTY(EditDefaultsOnly, Category = "UI", meta = (ToolTip = "死亡菜单Widget类（蓝图子类）"))
-	TSubclassOf<UDeathMenuWidget> DeathMenuClass;
+	UPROPERTY(EditDefaultsOnly, Category = "UI", meta = (ToolTip = "交互提示 Widget 类（蓝图子类）。"))
+	TSubclassOf<UInteractionPromptWidget> InteractionPromptClass;
 
 	UPROPERTY()
-	UDeathMenuWidget* DeathMenuWidget = nullptr;
+	UInteractionPromptWidget* InteractionPromptWidget = nullptr;
+
+	UPROPERTY(EditDefaultsOnly, Category = "UI", meta = (ToolTip = "被动死亡 Overlay Widget 类（蓝图子类）。"))
+	TSubclassOf<UDeathOverlayWidget> DeathOverlayClass;
+
+	UPROPERTY()
+	UDeathOverlayWidget* DeathOverlayWidget = nullptr;
 
 	void TogglePause();
+	void RestoreGameplayInput();
 
 	UFUNCTION()
 	void OnResumeRequested();
 
 	UFUNCTION()
 	void OnQuitRequested();
-
-	UFUNCTION()
-	void OnRestartRequested();
-
-	UFUNCTION()
-	void OnDeathQuitRequested();
 
 public:
 	FString GetDebugInputText() const;
@@ -144,5 +146,8 @@ public:
 	bool IsPaused() const { return bIsPaused; }
 	void SetCanPause(bool bCanPauseNew) { bCanPause = bCanPauseNew; }
 	void ClearPauseIfActive();
-	void ShowDeathMenu();
+	void ShowInteractionPrompt(const FText& PromptText);
+	void HideInteractionPrompt();
+	void ShowDeathOverlay();
+	void PrepareForMapTransition();
 };

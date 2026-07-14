@@ -11,8 +11,10 @@
 #include "MyCharacter.generated.h"
 
 class Aitem;
+class AController;
 class AEnemy;
 class AShield;
+class AWeapon;
 class USpringArmComponent;
 class UCameraComponent;
 class UPlayerHUDWidget;
@@ -23,6 +25,7 @@ class UAttackConfigDataAsset;
 class UHitReactionConfigDataAsset;
 class USoundBase;
 class UAnimInstance;
+class UAnimMontage;
 class UMotionWarpingComponent;
 class UPawnNoiseEmitterComponent;
 struct FPlayerAttackMotionWarpingConfig;
@@ -36,6 +39,8 @@ public:
 	/* 生命周期 */
 	AMyCharacter();
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+	virtual void PossessedBy(AController* NewController) override;
 	virtual void Tick(float DeltaTime) override;
 
 	/* 战斗 */
@@ -77,6 +82,12 @@ public:
 
 	/* 装备 */
 	virtual void Equip() override;
+	void TryInteract();
+	bool CanInteractWithWorld() const;
+	void RegisterInteractable(AActor* InteractableActor);
+	void UnregisterInteractable(AActor* InteractableActor);
+	bool EquipWeaponFromPickup(AWeapon* Weapon);
+	bool EquipShieldFromPickup(AShield* Shield);
 
 	/* 药瓶系统 */
 	void UsePotion();
@@ -230,6 +241,9 @@ private:
 	bool CanDodge() const;
 	FVector ComputeDodgeDirection() const;
 	FName SelectDodgeSection(const FVector& WorldDirection) const;
+	void RefreshCurrentInteractable();
+	void UpdateInteractionPrompt();
+	void BeginDeathRespawnFlow();
 
 	/* 相机组件 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true", ToolTip = "玩家相机。"))
@@ -248,8 +262,8 @@ private:
 	UPawnNoiseEmitterComponent* NoiseEmitterComponent;
 
 	/* HUD */
-	// 玩家 HUD 控件类，BeginPlay 时创建并绑定到视口
-	UPROPERTY(EditDefaultsOnly, Category = "HUD", meta = (ToolTip = "玩家 HUD 控件类，BeginPlay 时创建并绑定到视口。"))
+	// 玩家 HUD 控件类，本地玩家被控制器 Possess 后创建并绑定到视口
+	UPROPERTY(EditDefaultsOnly, Category = "HUD", meta = (ToolTip = "玩家 HUD 控件类，本地玩家被控制器 Possess 后创建并绑定到视口。"))
 	TSubclassOf<UPlayerHUDWidget> PlayerHUDClass;
 
 	UPROPERTY()
@@ -270,6 +284,9 @@ private:
 	// 当前重叠的可拾取物品
 	UPROPERTY(VisibleInstanceOnly, Category = "State", meta = (AllowPrivateAccess = "true", ToolTip = "当前重叠的可拾取物品。"))
 	Aitem* OverLapItem;
+
+	TArray<TWeakObjectPtr<AActor>> InteractableCandidates;
+	TWeakObjectPtr<AActor> CurrentInteractable;
 
 	UPROPERTY(BlueprintReadOnly, Category = "State", meta = (AllowPrivateAccess = "true", ToolTip = "当前是否处于冲刺状态。"))
 	bool bIsSprinting = false;

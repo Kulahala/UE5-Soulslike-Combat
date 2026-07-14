@@ -86,15 +86,9 @@ void Aitem::Tick(float DeltaTime)
 void Aitem::SphereOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp,
                           int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
 {
-	AMyCharacter* SlashCharacter = Cast<AMyCharacter>(OtherActor);
-	if (SlashCharacter)
+	if (AMyCharacter* SlashCharacter = Cast<AMyCharacter>(OtherActor))
 	{
-		// 无主武器优先：当前 OverLapItem 有主人而自己没有时，覆盖
-		Aitem* Current = SlashCharacter->GetEquippedItem();
-		if (!Current || !GetOwner() || Current->GetOwner())
-		{
-			SlashCharacter->SetEquippedItem(this);
-		}
+		SlashCharacter->RegisterInteractable(this);
 	}
 }
 
@@ -104,10 +98,7 @@ void Aitem::SphereEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* O
 {
 	if (AMyCharacter* SlashCharacter = Cast<AMyCharacter>(OtherActor))
 	{
-		if (SlashCharacter->GetEquippedItem() == this)
-		{
-			SlashCharacter->SetEquippedItem(nullptr);
-		}
+		SlashCharacter->UnregisterInteractable(this);
 	}
 }
 
@@ -135,4 +126,29 @@ void Aitem::StartSpawning(const FVector& Target)
 void Aitem::OnPickup_Implementation(AActor* Picker)
 {
 	// 默认空实现，由 Weapon/Treasure/Shield 等子类重写
+}
+
+bool Aitem::CanInteract_Implementation(AActor* Interactor) const
+{
+	return Interactor && !GetOwner() && ItemState == EItemState::EIS_Dropped;
+}
+
+FText Aitem::GetInteractionPrompt_Implementation() const
+{
+	return FText::FromString(TEXT("拾取"));
+}
+
+int32 Aitem::GetInteractionPriority_Implementation() const
+{
+	return 10;
+}
+
+void Aitem::Interact_Implementation(AActor* Interactor)
+{
+	if (!CanInteract_Implementation(Interactor))
+	{
+		return;
+	}
+
+	IPickupInterface::Execute_OnPickup(this, Interactor);
 }

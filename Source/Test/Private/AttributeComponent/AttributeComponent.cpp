@@ -114,6 +114,21 @@ void UAttributeComponent::DisableHealthRegen()
 	bHealthRegenActive = false;
 }
 
+void UAttributeComponent::RestoreCheckpointResources()
+{
+	CurrentHealth = MaxHealth;
+	CurrentStamina = MaxStamina;
+	CurrentPotionCount = MaxPotionCount;
+	StaminaRegenCooldown = 0.f;
+	bStaminaRegenPaused = false;
+	bStaminaJustDepleted = false;
+	StaminaRegenMultiplier = 1.f;
+
+	OnHealthChanged.Broadcast(GetHealthPercent());
+	OnStaminaChanged.Broadcast(GetStaminaPercent());
+	OnPotionCountChanged.Broadcast(CurrentPotionCount, MaxPotionCount);
+}
+
 bool UAttributeComponent::UsePotion()
 {
 	if (CurrentPotionCount > 0)

@@ -5,11 +5,15 @@
 #include "EnhancedInputSubsystems.h"
 #include "Character/MyCharacter.h"
 #include "GameFramework/CharacterMovementComponent.h"
-#include "HUD/DeathMenuWidget.h"
+#include "Game/SoulslikeGameInstance.h"
+#include "Game/TestGameMode.h"
+#include "Engine/World.h"
+#include "HUD/DeathOverlayWidget.h"
+#include "HUD/InteractionPromptWidget.h"
 #include "HUD/PauseMenuWidget.h"
 #include "Blueprint/UserWidget.h"
 #include "Kismet/GameplayStatics.h"
-#include "Kismet/KismetSystemLibrary.h"
+#include "Settings/TestGameUserSettings.h"
 #include "Enemy/Enemy.h" 
 
 void ACharacterController::BeginPlay()
@@ -24,6 +28,8 @@ void ACharacterController::BeginPlay()
 		}
 	}
 
+	RestoreGameplayInput();
+
 	// 创建并缓存暂停菜单Widget
 	if (IsLocalPlayerController() && PauseMenuClass)
 	{
@@ -35,18 +41,14 @@ void ACharacterController::BeginPlay()
 		}
 	}
 
-	if (IsLocalPlayerController() && DeathMenuClass)
+	if (IsLocalPlayerController() && InteractionPromptClass)
 	{
-		DeathMenuWidget = CreateWidget<UDeathMenuWidget>(this, DeathMenuClass);
-		if (DeathMenuWidget)
-		{
-			DeathMenuWidget->OnRestartDelegate.AddDynamic(this, &ACharacterController::OnRestartRequested);
-			DeathMenuWidget->OnQuitDelegate.AddDynamic(this, &ACharacterController::OnDeathQuitRequested);
-		}
+		InteractionPromptWidget = CreateWidget<UInteractionPromptWidget>(this, InteractionPromptClass);
 	}
-	else if (IsLocalPlayerController())
+
+	if (IsLocalPlayerController() && DeathOverlayClass)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("%s: DeathMenuClass is not set. Death screen will not appear on player death."), *GetName());
+		DeathOverlayWidget = CreateWidget<UDeathOverlayWidget>(this, DeathOverlayClass);
 	}
 }
 
@@ -64,7 +66,7 @@ void ACharacterController::SetupInputComponent()
 		EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Started, this, &ACharacterController::Input_Jump);
 		EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Completed, this, &ACharacterController::Input_StopJumping);
 
-		EnhancedInputComponent->BindAction(EquipAction, ETriggerEvent::Started, this, &ACharacterController::Input_Equip);
+		EnhancedInputComponent->BindAction(InteractAction, ETriggerEvent::Started, this, &ACharacterController::Input_Interact);
 		EnhancedInputComponent->BindAction(AttackAction, ETriggerEvent::Started, this, &ACharacterController::Input_AttackPressed);
 		EnhancedInputComponent->BindAction(AttackAction, ETriggerEvent::Completed, this, &ACharacterController::Input_AttackReleased);
 		EnhancedInputComponent->BindAction(AttackAction, ETriggerEvent::Canceled, this, &ACharacterController::Input_AttackReleased);
@@ -158,6 +160,14 @@ void ACharacterController::Input_Look(const FInputActionValue& Value)
 	if (APawn* ControlledPawn = GetPawn())
 	{
 		FVector2D LookAxisVector = Value.Get<FVector2D>();
+		if (const UTestGameUserSettings* UserSettings = UTestGameUserSettings::GetTestGameUserSettings())
+		{
+			LookAxisVector *= UserSettings->GetLookSensitivity();
+			if (UserSettings->GetInvertY())
+			{
+				LookAxisVector.Y *= -1.f;
+			}
+		}
 
 		ControlledPawn->AddControllerYawInput(LookAxisVector.X);
 		ControlledPawn->AddControllerPitchInput(LookAxisVector.Y);
@@ -183,13 +193,13 @@ void ACharacterController::Input_StopJumping()
 	}
 }
 
-void ACharacterController::Input_Equip()
+void ACharacterController::Input_Interact()
 {
 	if (AMyCharacter* MyCharacter = GetMyCharacter())
 	{
-		MyCharacter->Equip();
+		MyCharacter->TryInteract();
 	}
-	DebugEquipExpireTime = GetWorld()->GetTimeSeconds() + 0.15f;  // [调试]
+	DebugInteractExpireTime = GetWorld()->GetTimeSeconds() + 0.15f;  // [调试]
 }
 
 void ACharacterController::Input_AttackPressed()
@@ -368,10 +378,7 @@ void ACharacterController::TogglePause()
 		// 恢复游戏
 		UGameplayStatics::SetGamePaused(GetWorld(), false);
 
-		// 切换回游戏输入模式
-		FInputModeGameOnly InputMode;
-		SetInputMode(InputMode);
-		bShowMouseCursor = false;
+		RestoreGameplayInput();
 
 		// 隐藏暂停菜单
 		if (PauseMenuWidget)
@@ -391,37 +398,16 @@ void ACharacterController::OnResumeRequested()
 
 void ACharacterController::OnQuitRequested()
 {
-	if (bIsPaused)
+	if (ATestGameMode* GameMode = GetWorld() ? GetWorld()->GetAuthGameMode<ATestGameMode>() : nullptr)
 	{
-		UGameplayStatics::SetGamePaused(GetWorld(), false);
+		GameMode->RequestReturnToMainMenu(this);
+		return;
 	}
 
-	UKismetSystemLibrary::QuitGame(this, this, EQuitPreference::Quit, false);
-}
-
-void ACharacterController::OnRestartRequested()
-{
-	if (!GetWorld()) return;
-
-	UGameplayStatics::SetGamePaused(GetWorld(), false);
-	bShowMouseCursor = false;
-
-	if (DeathMenuWidget)
+	if (USoulslikeGameInstance* GameInstance = GetGameInstance<USoulslikeGameInstance>())
 	{
-		DeathMenuWidget->RemoveFromParent();
+		GameInstance->ReturnToMainMenu();
 	}
-
-	FInputModeGameOnly InputMode;
-	SetInputMode(InputMode);
-
-	const FName CurrentLevelName(*UGameplayStatics::GetCurrentLevelName(this, true));
-	UGameplayStatics::OpenLevel(this, CurrentLevelName);
-}
-
-void ACharacterController::OnDeathQuitRequested()
-{
-	UGameplayStatics::SetGamePaused(GetWorld(), false);
-	UKismetSystemLibrary::QuitGame(this, this, EQuitPreference::Quit, false);
 }
 
 void ACharacterController::ClearPauseIfActive()
@@ -432,31 +418,75 @@ void ACharacterController::ClearPauseIfActive()
 	}
 }
 
-void ACharacterController::ShowDeathMenu()
+void ACharacterController::ShowInteractionPrompt(const FText& PromptText)
 {
-	bCanPause = false;
-
-	if (bIsPaused)
+	if (!InteractionPromptWidget)
 	{
-		ClearPauseIfActive();
+		return;
 	}
 
-	if (!DeathMenuWidget) return;
-
-	FInputModeUIOnly InputMode;
-	InputMode.SetWidgetToFocus(DeathMenuWidget->TakeWidget());
-	SetInputMode(InputMode);
-	bShowMouseCursor = true;
-
-	if (!DeathMenuWidget->IsInViewport())
+	InteractionPromptWidget->SetPromptText(PromptText);
+	if (!InteractionPromptWidget->IsInViewport())
 	{
-		DeathMenuWidget->AddToViewport(2);
+		InteractionPromptWidget->AddToViewport(1);
+	}
+}
+
+void ACharacterController::HideInteractionPrompt()
+{
+	if (InteractionPromptWidget)
+	{
+		InteractionPromptWidget->RemoveFromParent();
+	}
+}
+
+void ACharacterController::ShowDeathOverlay()
+{
+	bCanPause = false;
+	ClearPauseIfActive();
+	HideInteractionPrompt();
+
+	if (!DeathOverlayWidget)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s: DeathOverlayClass is not configured."), *GetName());
+		return;
+	}
+
+	if (!DeathOverlayWidget->IsInViewport())
+	{
+		DeathOverlayWidget->AddToViewport(2);
+	}
+	DeathOverlayWidget->PlayDeathOverlayIn();
+}
+
+void ACharacterController::PrepareForMapTransition()
+{
+	ClearPauseIfActive();
+	HideInteractionPrompt();
+	RestoreGameplayInput();
+
+	if (DeathOverlayWidget && DeathOverlayWidget->IsInViewport())
+	{
+		DeathOverlayWidget->PlayDeathOverlayOut();
 	}
 }
 
 AMyCharacter* ACharacterController::GetMyCharacter() const
 {
 	return Cast<AMyCharacter>(GetPawn());
+}
+
+void ACharacterController::RestoreGameplayInput()
+{
+	if (!IsLocalPlayerController())
+	{
+		return;
+	}
+
+	bShowMouseCursor = false;
+
+	FInputModeGameOnly InputMode;
+	SetInputMode(InputMode);
 }
 
 FString ACharacterController::GetDebugInputText() const
@@ -470,7 +500,7 @@ FString ACharacterController::GetDebugInputText() const
 
 	if (Now < DebugAttackExpireTime) Result += TEXT("Attack ");
 	if (Now < DebugJumpExpireTime)   Result += TEXT("Jump ");
-	if (Now < DebugEquipExpireTime)  Result += TEXT("Equip ");
+	if (Now < DebugInteractExpireTime)  Result += TEXT("Interact ");
 	if (Now < DebugLockOnExpireTime) Result += TEXT("LockOn ");
 	if (Now < DebugParryExpireTime) Result += TEXT("Parry ");
 	if (Now < DebugDodgeExpireTime) Result += TEXT("Dodge ");

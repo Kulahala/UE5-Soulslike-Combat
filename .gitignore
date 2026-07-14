@@ -20,6 +20,7 @@ Build/
 plugins/
 
 # AI CLI Configs
+.codex/
 .codegraph/
 .serena/
 compile_commands.json
