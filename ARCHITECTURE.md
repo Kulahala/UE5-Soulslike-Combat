@@ -36,7 +36,28 @@ Language policy: keep stable section titles and HTML anchors in English; use Chi
 - `UTestSaveGame` owns durable single-slot data; `USoulslikeGameInstance` owns slot I/O and carries the target gameplay map plus pending checkpoint ID across level transitions.
 - `ATestGameMode` owns player spawn selection, checkpoint resource recovery and same-map reload. Pawn-dependent initialization happens only after `RestartPlayer()` completes, not in `HandleStartingNewPlayer`, because the latter can run before the Pawn exists.
 - `ACheckpointActor` is a map-authored interaction and respawn anchor. Its `PersistentId` is a stable level-authoring ID, never an actor name, pointer or runtime GUID. A checkpoint that can be used as an initial or reload spawn must be unique within its map and be marked `Is Spatially Loaded = false` in a World Partition map, so GameMode can resolve it before a player-created streaming source exists.
-- `TestMap` uses `StartBonfireCheckpoint` with `PersistentId = StartBonfire` as the new-save initial respawn anchor. A `New Game` transition intentionally has no pending checkpoint and begins at the map's `PlayerStart`; after that, rest, death and `Continue` use the saved checkpoint. The visual `BP_MediumFire` remains presentation only; it does not participate in save, interaction or spawn selection.
+- `TestMap` uses `StartBonfireCheckpoint` with `PersistentId = StartBonfire` as the new-save durable respawn anchor. A `New Game` transition intentionally carries no transient pending checkpoint and begins at the map's `PlayerStart`, but the newly created save already records `StartBonfire`; every death resolves that durable ID, including death before the first rest. Rest and `Continue` also use the saved checkpoint. The visual `BP_MediumFire` remains presentation only; it does not participate in save, interaction or spawn selection.
+
+<a name="current-player-asset-topology"></a>
+## Current Player Asset Topology
+
+- `BP_DarkKnight` is the current playable-character Blueprint and derives from `AMyCharacter`. It owns the current character-specific visual and authored configuration; `AMyCharacter` owns reusable player gameplay behavior, including attributes, action state, lock-on, combat entry points, and `UItemOwnershipComponent`.
+- `BP_Weapon` is the current DarkKnight sword world-pickup and runtime weapon Blueprint. It derives from `AWeapon` and uses `SM_DKM_Sword` from the Dark Knight asset set.
+- `BP_Weapon_Paladin` is a separate `BP_Weapon` child used for an alternate Medieval Sword presentation (`SM_Sword_08`). It is not the current DarkKnight sword and must not be selected as that item's `RuntimeItemActorClass` merely because it is another `AWeapon`-derived Blueprint.
+- `BP_Shield` is the current DarkKnight shield world-pickup and runtime shield Blueprint.
+- Durable item identity is independent of its presentation class: a `DefinitionId` records what the player owns, while a definition's `RuntimeItemActorClass` chooses the actor created by the later equipment-materialization stage. Do not derive a `DefinitionId` from an Actor name, mesh origin, or temporary presentation Blueprint.
+
+<a name="item-ownership-persistence"></a>
+## Item Ownership And Persistence
+
+- `UItemDefinitionDataAsset` is the static item contract: a stable author-authored `DefinitionId`, display text, `EItemEquipmentSlot`, and a future `RuntimeItemActorClass`. Equippable MainHand definitions must resolve to `AWeapon`; OffHand definitions must resolve to `AShield`.
+- `BP_DarkKnight` owns the active player catalog through `UItemOwnershipComponent.DefinitionCatalog`. The current authored definitions are `DA_Item_DarkKnightSword` (`Item_DarkKnightSword`, MainHand, `BP_Weapon`) and `DA_Item_DarkKnightShield` (`Item_DarkKnightShield`, OffHand, `BP_Shield`). The catalog rejects invalid or duplicate `DefinitionId` values locally before a Pawn accepts saved records.
+- `FTestItemInstanceRecord` is an owned runtime instance record: its `InstanceId` is a generated stable save identity, separate from `DefinitionId`, world Actor names, pointers, Actor GUIDs, and presentation classes. `FTestEquipmentSlotRecord` maps the semantic MainHand/OffHand slot to an owned instance ID. Both arrays live durably in `UTestSaveGame`.
+- `UItemOwnershipComponent` is the spawned Pawn's validated cache. It restores only records whose definition, instance ID, quantity, upgrade level, and slot compatibility are valid; malformed, duplicate, unknown, or incompatible records emit warnings and are ignored for that Pawn without rewriting the original save.
+- `USoulslikeGameInstance` is the only authority that mutates durable item arrays. `AddOwnedItemInstance()` and `SetEquippedItemSlot()` write through `SaveNow()` and restore their prior in-memory array if writing fails. Components never access mutable `CurrentSaveGame` state directly, then update their local cache only after GameInstance success.
+- `ATestGameMode::RestorePlayerFromSave()` restores resources and Gold first, then asks `AMyCharacter` to rebuild its item-ownership cache. This makes rest reload, death reload, and `Continue` independent of a previous Pawn instance.
+- `TODO-03A` is data-only: it does not create, attach, destroy, equip, or otherwise mutate `AWeapon` / `AShield` Actors or combat state. `TODO-03B` owns converting world pickups into owned records, checkpoint-time loadout selection, and visible equipment materialization/restoration.
+- `ItemDebugGrant`, `ItemDebugEquip`, and `ItemDebugDump` are non-Shipping console validation commands. They persist/debug data records only and are not player-facing inventory UI.
 
 <a name="encounter-system"></a>
 ## Encounter System

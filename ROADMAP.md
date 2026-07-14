@@ -88,25 +88,31 @@ Completed roadmap work is retained here as a compact, durable record. Do not ret
 - [x] **TODO-02A2: Spline Boundary Authoring v1**
   Delivered editable planar linear Spline boundaries, safe-region validation, matching runtime collision segments, a gray-white material boundary prototype, and dormant-hit-path hardening. No formal `TestMap` Controller remains after temporary fixture validation.
 
+- [x] **TODO-03A: Item Definition And Ownership v1**
+  Delivered static item definitions, per-Pawn owned-instance and equipment-slot caches, GameInstance-mediated transactional SaveGame writes, and semantic restore on every spawned Pawn. User validation covered Grant/Equip, rest reload, death reload, `Continue`, a fresh PIE session, and New Game reset. This data-only stage intentionally does not materialize, attach, or remove weapon/shield Actors.
+
 ## TODO Queue
 
-These TODOs are accepted future work, not permission to start implementation immediately. A queued item must be small enough to produce one independently verifiable result. When an item becomes the next stage, move only that item out of this queue and write its complete implementation plan in `plan.md` first. On completion, record stable facts in `ARCHITECTURE.md` and move the compact result into `Done Milestones`; do not turn this roadmap into a stage log.
+These TODOs are accepted future work, not permission to start implementation immediately. A queued item must be small enough to produce one independently verifiable result. Queue position follows prerequisites, validation dependencies, and the player-facing loop rather than numeric ID or append order. When an item becomes the next stage, move only that item out of this queue and write its complete implementation plan in `plan.md` first. On completion, record stable facts in `ARCHITECTURE.md` and move the compact result into `Done Milestones`; do not turn this roadmap into a stage log.
+
+### Equipment Ownership
+
+- [ ] **TODO-03B: Checkpoint Equipment And Pickups v1**
+  Convert one sword/shield world pickup into owned equipment and restore the loadout from save. Restrict loadout changes to checkpoint rest; keep existing Gold Treasure automatic pickup behavior unchanged. Verify pickup, rest-time equip, death, and Continue.
+
+The completed `TODO-03A` data layer now makes saved item identity and slots stable across reloads. `TODO-03B` must connect that data to world pickup conversion and visible equipment before the first formal Encounter, because fire rest and gameplay reload currently recreate map-owned sword/shield Actors.
 
 ### Encounter Boundaries
 
 - [ ] **TODO-02B: Pre-Placed Sealed Encounter v1**
   Use the verified controller core to author one `TestMap` encounter with pre-placed participants and a Controller-owned boundary profile. On safe inner-region entry, activate participants, then close the boundary; clear opens it. Verify the player cannot leave while active. Do not add runtime spawn waves, persistence restoration, or final fog presentation here.
 
-- [ ] **TODO-02C: Encounter Waves And Restore v1**
-  Add configured spawn waves, active-participant tracking, clear persistence, and reload restoration. Verify a one-wave definition, a multi-wave definition, uncleared death reset to `Idle` with boundaries open, and cleared reload/Continue restoration. Fixed rewards remain an equipment-loot stage concern.
+- [ ] **TODO-02C: Encounter Waves, Clear Persistence, And Restore v1**
+  Add configured spawn waves, active-participant tracking, `EncounterId -> ClearedEncounterIds` write-through, and reload/Continue restoration. Verify a one-wave definition, a multi-wave definition, uncleared death reset to `Idle` with boundaries open, and cleared reload/Continue restoration. Fixed rewards remain an equipment-loot stage concern.
 
-### Equipment And Loot
+`TODO-02C` owns only Controller-managed encounter persistence. It is not a final catch-all migration for pickups, equipment, shortcuts, rewards, or Boss state. Each durable feature must add its own read/write path when its stable ID and reset contract are implemented, so that feature can be validated in the player loop that introduces it. `TODO-07B` is the final cross-system Demo regression route; it verifies completed persistence paths together and fixes regressions, but does not defer their original implementation.
 
-- [ ] **TODO-03A: Item Definition And Ownership v1**
-  Introduce static item definitions, runtime item-instance records, and narrow player ownership APIs for a sword, shield, and a small authored item pool. Make the SaveGame item fields real writers/readers. Do not add world pickups, drops, hot swapping, or grid inventory UI.
-
-- [ ] **TODO-03B: Checkpoint Equipment And Pickups v1**
-  Convert one sword/shield world pickup into owned equipment and restore the loadout from save. Restrict loadout changes to checkpoint rest; keep existing Gold Treasure automatic pickup behavior unchanged. Verify pickup, rest-time equip, death, and Continue.
+### Authored Rewards And Drops
 
 - [ ] **TODO-03C: Authored Rewards And Drops v1**
   Add one authored reward/drop-table path shared by encounter completion and fixed world rewards. Verify a single equipment reward and Gold write-through. Do not add random affixes, durability, crafting, merchants, or inventory sorting.

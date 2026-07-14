@@ -16,6 +16,31 @@
 #include "Settings/TestGameUserSettings.h"
 #include "Enemy/Enemy.h" 
 
+namespace
+{
+	FString BuildSavedItemOwnershipDebugSummary(const TArray<FTestItemInstanceRecord>& ItemRecords,
+	                                           const TArray<FTestEquipmentSlotRecord>& SlotRecords)
+	{
+		FString Result = FString::Printf(TEXT("Saved item ownership: %d instance(s), %d equipped slot(s)."),
+			ItemRecords.Num(), SlotRecords.Num());
+
+		for (const FTestItemInstanceRecord& ItemRecord : ItemRecords)
+		{
+			Result += FString::Printf(TEXT("\n  Item Instance=%s Definition=%s Quantity=%d Upgrade=%d"),
+				*ItemRecord.InstanceId.ToString(), *ItemRecord.DefinitionId.ToString(),
+				ItemRecord.Quantity, ItemRecord.UpgradeLevel);
+		}
+
+		for (const FTestEquipmentSlotRecord& SlotRecord : SlotRecords)
+		{
+			Result += FString::Printf(TEXT("\n  Slot=%s Instance=%s"),
+				*SlotRecord.SlotId.ToString(), *SlotRecord.ItemInstanceId.ToString());
+		}
+
+		return Result;
+	}
+}
+
 void ACharacterController::BeginPlay()
 {
 	Super::BeginPlay();
@@ -474,6 +499,73 @@ void ACharacterController::PrepareForMapTransition()
 AMyCharacter* ACharacterController::GetMyCharacter() const
 {
 	return Cast<AMyCharacter>(GetPawn());
+}
+
+void ACharacterController::ItemDebugGrant(FName DefinitionId)
+{
+#if UE_BUILD_SHIPPING
+	UE_LOG(LogTemp, Warning, TEXT("ItemDebugGrant is unavailable in Shipping builds."));
+#else
+	AMyCharacter* PlayerCharacter = GetMyCharacter();
+	if (!PlayerCharacter)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("ItemDebugGrant failed: no AMyCharacter is possessed."));
+		return;
+	}
+
+	FName InstanceId = NAME_None;
+	if (PlayerCharacter->TryGrantOwnedItem(DefinitionId, InstanceId))
+	{
+		UE_LOG(LogTemp, Display, TEXT("ItemDebugGrant succeeded: DefinitionId='%s', InstanceId='%s'."),
+			*DefinitionId.ToString(), *InstanceId.ToString());
+	}
+#endif
+}
+
+void ACharacterController::ItemDebugEquip(FName InstanceId)
+{
+#if UE_BUILD_SHIPPING
+	UE_LOG(LogTemp, Warning, TEXT("ItemDebugEquip is unavailable in Shipping builds."));
+#else
+	AMyCharacter* PlayerCharacter = GetMyCharacter();
+	if (!PlayerCharacter)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("ItemDebugEquip failed: no AMyCharacter is possessed."));
+		return;
+	}
+
+	if (PlayerCharacter->TryEquipOwnedItem(InstanceId))
+	{
+		UE_LOG(LogTemp, Display, TEXT("ItemDebugEquip succeeded for InstanceId='%s'."), *InstanceId.ToString());
+	}
+#endif
+}
+
+void ACharacterController::ItemDebugDump()
+{
+#if UE_BUILD_SHIPPING
+	UE_LOG(LogTemp, Warning, TEXT("ItemDebugDump is unavailable in Shipping builds."));
+#else
+	if (const AMyCharacter* PlayerCharacter = GetMyCharacter())
+	{
+		UE_LOG(LogTemp, Display, TEXT("%s"), *PlayerCharacter->GetItemOwnershipDebugSummary());
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("ItemDebugDump: no AMyCharacter is possessed."));
+	}
+
+	USoulslikeGameInstance* GameInstance = GetGameInstance<USoulslikeGameInstance>();
+	TArray<FTestItemInstanceRecord> SavedItemRecords;
+	TArray<FTestEquipmentSlotRecord> SavedSlotRecords;
+	if (!GameInstance || !GameInstance->GetSavedItemOwnership(SavedItemRecords, SavedSlotRecords))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("ItemDebugDump: no usable saved item ownership is available."));
+		return;
+	}
+
+	UE_LOG(LogTemp, Display, TEXT("%s"), *BuildSavedItemOwnershipDebugSummary(SavedItemRecords, SavedSlotRecords));
+#endif
 }
 
 void ACharacterController::RestoreGameplayInput()

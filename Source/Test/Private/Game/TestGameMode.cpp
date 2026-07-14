@@ -151,6 +151,16 @@ void ATestGameMode::HandlePlayerDeath(AMyCharacter* Player)
 		return;
 	}
 
+	const FName SavedCheckpointId = GameInstance->GetLastCheckpointId();
+	if (SavedCheckpointId == NAME_None)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Death respawn failed: the current save has no checkpoint ID."));
+		return;
+	}
+
+	// New Game deliberately enters through PlayerStart, but death must always use the durable respawn anchor.
+	GameInstance->PrepareGameplayTransition(GetCurrentGameplayMapName(), SavedCheckpointId);
+
 	bTransitionInProgress = true;
 	CapturePlayerGold();
 
@@ -237,6 +247,8 @@ void ATestGameMode::RestorePlayerFromSave(AMyCharacter* Player)
 	Attributes->RestoreCheckpointResources();
 	Attributes->SetGold(SaveGame->Gold);
 	bRestoringPlayerState = false;
+
+	Player->RestoreItemOwnershipFromSave(SaveGame);
 }
 
 void ATestGameMode::CapturePlayerGold()

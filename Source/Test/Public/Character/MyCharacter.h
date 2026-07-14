@@ -20,6 +20,7 @@ class UCameraComponent;
 class UPlayerHUDWidget;
 class UCameraShakeBase;
 class UPlayerLockOnComponent;
+class UItemOwnershipComponent;
 class UComboDataAsset;
 class UAttackConfigDataAsset;
 class UHitReactionConfigDataAsset;
@@ -28,6 +29,7 @@ class UAnimInstance;
 class UAnimMontage;
 class UMotionWarpingComponent;
 class UPawnNoiseEmitterComponent;
+class UTestSaveGame;
 struct FPlayerAttackMotionWarpingConfig;
 
 UCLASS()
@@ -88,6 +90,12 @@ public:
 	void UnregisterInteractable(AActor* InteractableActor);
 	bool EquipWeaponFromPickup(AWeapon* Weapon);
 	bool EquipShieldFromPickup(AShield* Shield);
+
+	/* 物品所有权：本阶段只处理数据，不实体化或附着装备 Actor。 */
+	bool RestoreItemOwnershipFromSave(const UTestSaveGame* SaveGame);
+	bool TryGrantOwnedItem(FName DefinitionId, FName& OutInstanceId);
+	bool TryEquipOwnedItem(FName InstanceId);
+	FString GetItemOwnershipDebugSummary() const;
 
 	/* 药瓶系统 */
 	void UsePotion();
@@ -255,6 +263,9 @@ private:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true", ToolTip = "玩家锁定组件，负责锁定状态、目标筛选和参数持有。"))
 	UPlayerLockOnComponent* LockOnComponent;
 
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true", ToolTip = "玩家已拥有物品与数据装备槽缓存；持久化写入由 GameInstance 负责。"))
+	UItemOwnershipComponent* ItemOwnershipComponent;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true", ToolTip = "Motion Warping 组件，用于锁定攻击在蒙太奇窗口内做短距离目标修正。"))
 	UMotionWarpingComponent* MotionWarpingComponent;
 
@@ -413,6 +424,7 @@ public:
 	FORCEINLINE EActionState GetActionState() const { return ActionState; }
 	FORCEINLINE bool IsBlocking() const { return bIsBlocking; }
 	FORCEINLINE AShield* GetEquippedShield() const { return EquippedShield; }
+	FORCEINLINE UItemOwnershipComponent* GetItemOwnershipComponent() const { return ItemOwnershipComponent; }
 
 private:
 	virtual UHitReactionConfigDataAsset* GetReactionConfig() const override

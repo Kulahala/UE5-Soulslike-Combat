@@ -87,6 +87,140 @@ void USoulslikeGameInstance::UpdateGold(int32 NewGold)
 	SaveNow();
 }
 
+bool USoulslikeGameInstance::AddOwnedItemInstance(const FTestItemInstanceRecord& ItemRecord)
+{
+	if (!EnsureCurrentSaveLoaded() || !CurrentSaveGame || !CurrentSaveGame->IsUsable())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("AddOwnedItemInstance failed: no usable current save."));
+		return false;
+	}
+
+	if (ItemRecord.DefinitionId == NAME_None || ItemRecord.InstanceId == NAME_None || ItemRecord.Quantity <= 0 ||
+		ItemRecord.UpgradeLevel < 0)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("AddOwnedItemInstance rejected invalid item record."));
+		return false;
+	}
+
+	const bool bDuplicateInstanceId = CurrentSaveGame->ItemInstances.ContainsByPredicate(
+		[&ItemRecord](const FTestItemInstanceRecord& ExistingRecord)
+		{
+			return ExistingRecord.InstanceId == ItemRecord.InstanceId;
+		});
+	if (bDuplicateInstanceId)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("AddOwnedItemInstance rejected duplicate InstanceId '%s'."),
+			*ItemRecord.InstanceId.ToString());
+		return false;
+	}
+
+	CurrentSaveGame->ItemInstances.Add(ItemRecord);
+	if (SaveNow())
+	{
+		return true;
+	}
+
+	CurrentSaveGame->ItemInstances.Pop();
+	return false;
+}
+
+bool USoulslikeGameInstance::SetEquippedItemSlot(FName SlotId, FName ItemInstanceId)
+{
+	if (SlotId == NAME_None)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("SetEquippedItemSlot rejected an empty SlotId."));
+		return false;
+	}
+
+	if (!EnsureCurrentSaveLoaded() || !CurrentSaveGame || !CurrentSaveGame->IsUsable())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("SetEquippedItemSlot failed: no usable current save."));
+		return false;
+	}
+
+	if (ItemInstanceId != NAME_None)
+	{
+		const bool bOwnedInstanceExists = CurrentSaveGame->ItemInstances.ContainsByPredicate(
+			[ItemInstanceId](const FTestItemInstanceRecord& ItemRecord)
+			{
+				return ItemRecord.InstanceId == ItemInstanceId;
+			});
+		if (!bOwnedInstanceExists)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("SetEquippedItemSlot rejected unknown InstanceId '%s'."),
+				*ItemInstanceId.ToString());
+			return false;
+		}
+	}
+
+	const int32 ExistingSlotIndex = CurrentSaveGame->EquippedSlots.IndexOfByPredicate(
+		[SlotId](const FTestEquipmentSlotRecord& SlotRecord)
+		{
+			return SlotRecord.SlotId == SlotId;
+		});
+
+	if (ItemInstanceId == NAME_None && ExistingSlotIndex == INDEX_NONE)
+	{
+		return true;
+	}
+
+	if (ItemInstanceId != NAME_None)
+	{
+		const bool bAlreadyEquippedInOtherSlot = CurrentSaveGame->EquippedSlots.ContainsByPredicate(
+			[SlotId, ItemInstanceId](const FTestEquipmentSlotRecord& SlotRecord)
+			{
+				return SlotRecord.SlotId != SlotId && SlotRecord.ItemInstanceId == ItemInstanceId;
+			});
+		if (bAlreadyEquippedInOtherSlot)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("SetEquippedItemSlot rejected instance '%s' already assigned to another slot."),
+				*ItemInstanceId.ToString());
+			return false;
+		}
+	}
+
+	TArray<FTestEquipmentSlotRecord> PreviousSlots = CurrentSaveGame->EquippedSlots;
+	if (ItemInstanceId == NAME_None)
+	{
+		CurrentSaveGame->EquippedSlots.RemoveAt(ExistingSlotIndex);
+	}
+	else if (ExistingSlotIndex != INDEX_NONE)
+	{
+		CurrentSaveGame->EquippedSlots[ExistingSlotIndex].ItemInstanceId = ItemInstanceId;
+	}
+	else
+	{
+		FTestEquipmentSlotRecord NewSlotRecord;
+		NewSlotRecord.SlotId = SlotId;
+		NewSlotRecord.ItemInstanceId = ItemInstanceId;
+		CurrentSaveGame->EquippedSlots.Add(NewSlotRecord);
+	}
+
+	if (SaveNow())
+	{
+		return true;
+	}
+
+	CurrentSaveGame->EquippedSlots = MoveTemp(PreviousSlots);
+	return false;
+}
+
+bool USoulslikeGameInstance::GetSavedItemOwnership(TArray<FTestItemInstanceRecord>& OutItemInstances,
+	                                                  TArray<FTestEquipmentSlotRecord>& OutEquippedSlots) const
+{
+	OutItemInstances.Reset();
+	OutEquippedSlots.Reset();
+
+	if (!CurrentSaveGame || !CurrentSaveGame->IsUsable())
+	{
+		return false;
+	}
+
+	OutItemInstances = CurrentSaveGame->ItemInstances;
+	OutEquippedSlots = CurrentSaveGame->EquippedSlots;
+	return true;
+}
+
 void USoulslikeGameInstance::SetRespawnCheckpoint(FName GameplayMapName, FName CheckpointId)
 {
 	if (GameplayMapName == NAME_None || CheckpointId == NAME_None)

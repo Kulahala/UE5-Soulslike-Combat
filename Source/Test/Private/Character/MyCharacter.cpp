@@ -6,6 +6,7 @@
 #include "Combat/HitReactionConfigDataAsset.h"
 #include "Character/Components/PlayerLockOnComponent.h"
 #include "Character/Controller/CharacterController.h"
+#include "Game/SoulslikeGameInstance.h"
 #include "Game/TestGameMode.h"
 
 #include "Camera/CameraComponent.h"
@@ -14,6 +15,7 @@
 #include "GameFramework/SpringArmComponent.h"
 #include "Items/Weapon/Weapon.h"
 #include "Items/Shield/Shield.h"
+#include "Items/ItemOwnershipComponent.h"
 #include "Interfaces/InteractableInterface.h"
 #include "NiagaraFunctionLibrary.h"
 #include "Components/CapsuleComponent.h"
@@ -55,6 +57,7 @@ AMyCharacter::AMyCharacter()
 	Camera->SetupAttachment(SpringArm);
 
 	LockOnComponent = CreateDefaultSubobject<UPlayerLockOnComponent>(TEXT("LockOnComponent"));
+	ItemOwnershipComponent = CreateDefaultSubobject<UItemOwnershipComponent>(TEXT("ItemOwnershipComponent"));
 
 	MotionWarpingComponent = CreateDefaultSubobject<UMotionWarpingComponent>(TEXT("MotionWarpingComponent"));
 	NoiseEmitterComponent = CreateDefaultSubobject<UPawnNoiseEmitterComponent>(TEXT("NoiseEmitterComponent"));
@@ -1227,6 +1230,49 @@ bool AMyCharacter::EquipShieldFromPickup(AShield* Shield)
 	Shield->EquipToOffhand(GetMesh(), Shield->GetOffhandSocketName(), this);
 	EquippedShield = Shield;
 	return true;
+}
+
+bool AMyCharacter::RestoreItemOwnershipFromSave(const UTestSaveGame* SaveGame)
+{
+	if (!ItemOwnershipComponent)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s: ItemOwnershipComponent is not available."), *GetName());
+		return false;
+	}
+
+	return ItemOwnershipComponent->RestoreFromSave(SaveGame);
+}
+
+bool AMyCharacter::TryGrantOwnedItem(FName DefinitionId, FName& OutInstanceId)
+{
+	OutInstanceId = NAME_None;
+	if (!ItemOwnershipComponent)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Grant owned item failed: ItemOwnershipComponent is not available."));
+		return false;
+	}
+
+	USoulslikeGameInstance* GameInstance = GetGameInstance<USoulslikeGameInstance>();
+	return ItemOwnershipComponent->TryGrantDefinition(DefinitionId, GameInstance, OutInstanceId);
+}
+
+bool AMyCharacter::TryEquipOwnedItem(FName InstanceId)
+{
+	if (!ItemOwnershipComponent)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Equip owned item failed: ItemOwnershipComponent is not available."));
+		return false;
+	}
+
+	USoulslikeGameInstance* GameInstance = GetGameInstance<USoulslikeGameInstance>();
+	return ItemOwnershipComponent->TryEquipInstance(InstanceId, GameInstance);
+}
+
+FString AMyCharacter::GetItemOwnershipDebugSummary() const
+{
+	return ItemOwnershipComponent
+		? ItemOwnershipComponent->BuildDebugSummary()
+		: TEXT("Runtime item ownership: ItemOwnershipComponent is unavailable.");
 }
 
 void AMyCharacter::RefreshCurrentInteractable()

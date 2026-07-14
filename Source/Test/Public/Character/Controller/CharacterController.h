@@ -143,6 +143,16 @@ public:
 	FString GetDebugInputText() const;
 	class AMyCharacter* GetMyCharacter() const;
 
+	// 非 Shipping 的物品存档验收入口；不创建 UI 或修改正式输入映射。
+	UFUNCTION(Exec)
+	void ItemDebugGrant(FName DefinitionId);
+
+	UFUNCTION(Exec)
+	void ItemDebugEquip(FName InstanceId);
+
+	UFUNCTION(Exec)
+	void ItemDebugDump();
+
 	bool IsPaused() const { return bIsPaused; }
 	void SetCanPause(bool bCanPauseNew) { bCanPause = bCanPauseNew; }
 	void ClearPauseIfActive();

@@ -4,9 +4,8 @@
 
 #include "CoreMinimal.h"
 #include "Engine/GameInstance.h"
+#include "Save/TestSaveGame.h"
 #include "SoulslikeGameInstance.generated.h"
-
-class UTestSaveGame;
 
 /** 单槽存档、菜单转场上下文与耐久进度写入的唯一入口。 */
 UCLASS()
@@ -32,6 +31,10 @@ public:
 
 	bool SaveNow();
 	void UpdateGold(int32 NewGold);
+	bool AddOwnedItemInstance(const FTestItemInstanceRecord& ItemRecord);
+	bool SetEquippedItemSlot(FName SlotId, FName ItemInstanceId);
+	bool GetSavedItemOwnership(TArray<FTestItemInstanceRecord>& OutItemInstances,
+	                           TArray<FTestEquipmentSlotRecord>& OutEquippedSlots) const;
 	void SetRespawnCheckpoint(FName GameplayMapName, FName CheckpointId);
 	void PrepareGameplayTransition(FName GameplayMapName, FName CheckpointId);
 	void InvalidateCurrentSave(const FString& Reason);
@@ -42,7 +45,7 @@ public:
 	void MarkEncounterCleared(FName PersistentId);
 	void MarkBossCompleted(FName PersistentId);
 
-	FORCEINLINE UTestSaveGame* GetCurrentSaveGame() const { return CurrentSaveGame; }
+	FORCEINLINE const UTestSaveGame* GetCurrentSaveGame() const { return CurrentSaveGame; }
 	FORCEINLINE FName GetPendingCheckpointId() const { return PendingCheckpointId; }
 	FORCEINLINE FName GetPendingGameplayMapName() const { return PendingGameplayMapName; }
 
