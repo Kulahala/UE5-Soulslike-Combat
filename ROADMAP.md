@@ -107,6 +107,11 @@ Completed roadmap work is retained here as a compact, durable record. Do not ret
 
 These TODOs are accepted future work, not permission to start implementation immediately. A queued item must be small enough to produce one independently verifiable result. Queue position follows prerequisites, validation dependencies, and the player-facing loop rather than numeric ID or append order. When an item becomes the next stage, move only that item out of this queue and write its complete implementation plan in `plan.md` first. On completion, record stable facts in `ARCHITECTURE.md` and move the compact result into `Done Milestones`; do not turn this roadmap into a stage log.
 
+### Pickup Feedback And First-Equip
+
+- [ ] **TODO-03B-C2: Pickup Feedback And Empty-Slot Auto-Equip v1**
+  After C1, add a definition-owned `PickupSound` while retaining `AWeapon` / `AShield` actor-owned `EquipSound`. A successfully claimed MainHand or OffHand fixed world pickup may immediately materialize only when its compatible slot is empty; it must atomically save the new instance, claimed reward ID, and equipped slot. The automatic first-equip plays only the pickup sound, never replaces an occupied slot, and does not create field loadout selection or a backpack UI. Verify empty-slot sword/shield pickup, occupied-slot collection, rest/death/Continue restoration, and each failure downgrade.
+
 ### Encounter Boundaries
 
 - [ ] **TODO-02B: Pre-Placed Sealed Encounter v1**
@@ -177,7 +182,7 @@ This is a small durable register for non-blocking review findings that can affec
 - Use a runtime item-instance data structure for ownership, quantity, rolled affixes, durability or upgrade level if those become real gameplay. Do not encode mutable item state back into a shared definition DataAsset.
 - World pickup Actors are presentation and interaction endpoints. They carry or resolve a drop result, validate collection, then transfer the item record into player-owned gameplay state. They are not the permanent inventory database.
 - Keep inventory/equipment APIs narrow. Start with actual player needs such as equip, unequip, add/remove a pickup, and query an equipped item. Add save/restore only with the checkpoint and persistence stage. Avoid a generic item service or universal interface until multiple unrelated systems truly need the same operation.
-- In v1, weapon and shield loadout changes happen only while resting at a checkpoint. Pickups enter ownership immediately, but equipment is not hot-swapped from the pause menu or during an encounter. Revisit broader equipment access only with a real inventory stage.
+- Manual weapon and shield loadout changes remain restricted to resting at a checkpoint. `TODO-03B-C2` is a narrow first-equip exception: a newly claimed fixed world pickup may fill only its empty compatible slot, without replacing an existing item or exposing field selection. Do not add pause-menu or encounter-time hot-swapping before a real backpack stage.
 - Gold remains a scalar player attribute/reward value. It should not be forced into the item-instance model merely because both are rewards.
 - Every drop source should use one authored table or explicit reward definition. Do not scatter weighted random selection through enemy, chest, and level Blueprints.
 
@@ -189,11 +194,11 @@ Recommendation: retain the current combat pipeline until a real ability/status s
 
 Adoption conditions: evaluate GAS only when several independently authored skills, stackable buffs/debuffs, elemental status effects, reusable cooldown/cost rules, or designer-authored effect combinations cause the existing C++ and DataAsset model to duplicate gameplay-rule code. A GAS stage must define migration ownership and remove the replaced path; it must not leave two damage/effect pipelines active.
 
-### Full Inventory, Crafting, And Merchants
+### Backpack, Full Inventory, Crafting, And Merchants
 
-Recommendation: implement equipment and drops first, then widen into a full inventory only when player choices require it.
+Recommendation: preserve checkpoint-limited manual loadout changes and the narrow empty-slot first-equip rule; do not add a backpack or field loadout UI merely to expose the current fixed sword and shield.
 
-Adoption conditions: revisit slots, sorting, storage, crafting, vendors, selling, or trading when the player can carry multiple unequipped items, stack consumables, compare equipment, retain loot across checkpoints, or spend resources in more than one system. Do not add grid inventory UI merely to display a small fixed equipment set.
+Adoption conditions: create a backpack/loadout stage when the player carries multiple meaningful unequipped items, needs comparison or sorting, has stackable consumables, or has a player-visible reason to change equipment away from a bonfire. That stage must decide in-combat restrictions, input, UI focus, selection confirmation, and persistence before it moves manual loadout access out of fire services. Crafting, vendors, selling, storage, or trading each need their own gameplay reason; do not add grid inventory UI merely to display a small fixed equipment set.
 
 ### Save And Checkpoint Expansion
 
