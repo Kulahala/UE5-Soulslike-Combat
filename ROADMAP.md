@@ -110,20 +110,7 @@ Completed roadmap work is retained here as a compact, durable record. Do not ret
 
 These TODOs are accepted future work, not permission to start implementation immediately. A queued item must be small enough to produce one independently verifiable result. Queue position follows prerequisites, validation dependencies, and the player-facing loop rather than numeric ID or append order. When an item becomes the next stage, move only that item out of this queue and write its complete implementation plan in `plan.md` first. On completion, record stable facts in `ARCHITECTURE.md` and move the compact result into `Done Milestones`; do not turn this roadmap into a stage log.
 
-### Encounter Boundaries
-
-- [ ] **TODO-02B: Pre-Placed Sealed Encounter v1**
-  Use the verified controller core to author one `TestMap` encounter with pre-placed participants and a Controller-owned boundary profile. On safe inner-region entry, activate participants, then close the boundary; clear opens it. Verify the player cannot leave while active. Do not add runtime spawn waves, persistence restoration, or final fog presentation here.
-
-- [ ] **TODO-02C: Encounter Waves, Clear Persistence, And Restore v1**
-  Add configured spawn waves, active-participant tracking, `EncounterId -> ClearedEncounterIds` write-through, and reload/Continue restoration. Verify a one-wave definition, a multi-wave definition, uncleared death reset to `Idle` with boundaries open, and cleared reload/Continue restoration. Fixed rewards remain an equipment-loot stage concern.
-
-`TODO-02C` owns only Controller-managed encounter persistence. It is not a final catch-all migration for pickups, equipment, shortcuts, rewards, or Boss state. Each durable feature must add its own read/write path when its stable ID and reset contract are implemented, so that feature can be validated in the player loop that introduces it. `TODO-07B` is the final cross-system Demo regression route; it verifies completed persistence paths together and fixes regressions, but does not defer their original implementation.
-
-### Authored Rewards And Drops
-
-- [ ] **TODO-03C: Authored Rewards And Drops v1**
-  Add one authored reward/drop-table path shared by encounter completion and fixed world rewards. Verify a single equipment reward and Gold write-through. Do not add random affixes, durability, crafting, merchants, or inventory sorting.
+**Encounter authoring decision:** reusable Controller behavior and Spline authoring were already proven by `TODO-02A1/A2`. The former standalone `TODO-02B` is deliberately not marked Done and is absorbed as a mandatory adoption condition of `TODO-06A`: do not place a permanent `TestMap` encounter solely to repeat core validation. `TODO-02C` waits until that first permanent map-owned Controller exists.
 
 ### Ranged Combat
 
@@ -150,7 +137,17 @@ These TODOs are accepted future work, not permission to start implementation imm
 ### Level And Boss Slice
 
 - [ ] **TODO-06A: First Level Route v1**
-  Block out and author the critical route: start checkpoint, two normal combat spaces, one elite space, and one optional shortcut/reward branch. Use the completed encounter, equipment, ranged, and guard-break systems; no Boss, completion screen, or new framework in this stage.
+  Block out and author the critical route: start checkpoint, two normal combat spaces, one elite space, and one optional shortcut/reward branch. This stage absorbs the former `TODO-02B`: author the first permanent `AEncounterController` in a normal combat space with a stable `EncounterId`, closed Spline boundary, and pre-placed participants, then validate `Idle -> Active -> Cleared` in the real level. Use the completed encounter, equipment, ranged, and guard-break systems; do not add waves, encounter persistence, Boss content, a completion screen, or a new framework here.
+
+### Encounter Persistence And Rewards
+
+- [ ] **TODO-02C: Encounter Waves, Clear Persistence, And Restore v1**
+  Prerequisite: `TODO-06A` has authored and validated its first permanent Controller-owned encounter. Add configured spawn waves, active-participant tracking, `EncounterId -> ClearedEncounterIds` write-through, and reload/Continue restoration. Verify a one-wave definition, a multi-wave definition, uncleared death reset to `Idle` with boundaries open, and cleared reload/Continue restoration. Fixed rewards remain an equipment-loot stage concern.
+
+`TODO-02C` owns only Controller-managed encounter persistence. It is not a final catch-all migration for pickups, equipment, shortcuts, rewards, or Boss state. Each durable feature must add its own read/write path when its stable ID and reset contract are implemented, so that feature can be validated in the player loop that introduces it. `TODO-07B` is the final cross-system Demo regression route; it verifies completed persistence paths together and fixes regressions, but does not defer their original implementation.
+
+- [ ] **TODO-03C: Authored Rewards And Drops v1**
+  Prerequisite: `TODO-02C` has a durable clear event in the first authored level. Add one authored reward/drop-table path shared by encounter completion and fixed world rewards. Verify a single equipment reward and Gold write-through. Do not add random affixes, durability, crafting, merchants, or inventory sorting.
 
 - [ ] **TODO-06B: First Boss Encounter v1**
   Add one Boss fog-boundary presentation, configured first Boss as an `AEnemy` variant, fixed Gold plus Remnant/Emblem reward, and Boss completion persistence. Do not introduce a Boss-specific C++ base unless the existing enemy and encounter boundaries demonstrably fail.
