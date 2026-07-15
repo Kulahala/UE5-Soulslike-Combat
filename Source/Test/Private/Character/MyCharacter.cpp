@@ -1256,6 +1256,19 @@ bool AMyCharacter::TryGrantOwnedItem(FName DefinitionId, FName& OutInstanceId)
 	return ItemOwnershipComponent->TryGrantDefinition(DefinitionId, GameInstance, OutInstanceId);
 }
 
+bool AMyCharacter::TryClaimWorldItemPickup(FName PersistentId, FName ItemDefinitionId, FName& OutInstanceId)
+{
+	OutInstanceId = NAME_None;
+	if (!ItemOwnershipComponent)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Claim world item failed: ItemOwnershipComponent is not available."));
+		return false;
+	}
+
+	USoulslikeGameInstance* GameInstance = GetGameInstance<USoulslikeGameInstance>();
+	return ItemOwnershipComponent->TryClaimWorldItem(PersistentId, ItemDefinitionId, GameInstance, OutInstanceId);
+}
+
 bool AMyCharacter::TryEquipOwnedItem(FName InstanceId)
 {
 	if (!ItemOwnershipComponent)

@@ -2,6 +2,8 @@
 
 #include "Character/MyCharacter.h"
 #include "Components/SphereComponent.h"
+#include "EngineUtils.h"
+#include "Game/SoulslikeGameInstance.h"
 #include "NiagaraComponent.h"
 
 // ==================== 生命周期 ====================
@@ -37,6 +39,7 @@ void Aitem::BeginPlay()
 
 	Sphere->OnComponentEndOverlap.AddDynamic(this, &Aitem::SphereEndOverlap);
 	Sphere->OnComponentBeginOverlap.AddDynamic(this, &Aitem::SphereOverlap);
+	InitializePersistentWorldPickup();
 }
 
 void Aitem::Tick(float DeltaTime)
@@ -130,7 +133,8 @@ void Aitem::OnPickup_Implementation(AActor* Picker)
 
 bool Aitem::CanInteract_Implementation(AActor* Interactor) const
 {
-	return Interactor && !GetOwner() && ItemState == EItemState::EIS_Dropped;
+	return Interactor && !GetOwner() && ItemState == EItemState::EIS_Dropped
+		&& (!RequiresPersistentWorldClaim() || bPersistentWorldPickupAvailable);
 }
 
 FText Aitem::GetInteractionPrompt_Implementation() const
@@ -151,4 +155,83 @@ void Aitem::Interact_Implementation(AActor* Interactor)
 	}
 
 	IPickupInterface::Execute_OnPickup(this, Interactor);
+}
+
+bool Aitem::TryClaimPersistentWorldPickup(AMyCharacter* Picker)
+{
+	if (!Picker || !RequiresPersistentWorldClaim() || !bPersistentWorldPickupAvailable)
+	{
+		return false;
+	}
+
+	FName InstanceId = NAME_None;
+	if (!Picker->TryClaimWorldItemPickup(PersistentId, ItemDefinitionId, InstanceId))
+	{
+		return false;
+	}
+
+	Picker->UnregisterInteractable(this);
+	DisablePickupCollision();
+	SetActorEnableCollision(false);
+	SetActorHiddenInGame(true);
+	if (Effect)
+	{
+		Effect->Deactivate();
+	}
+
+	Destroy();
+	return true;
+}
+
+void Aitem::InitializePersistentWorldPickup()
+{
+	if (!RequiresPersistentWorldClaim() || GetOwner())
+	{
+		return;
+	}
+
+	if (PersistentId == NAME_None || ItemDefinitionId == NAME_None)
+	{
+		bPersistentWorldPickupAvailable = false;
+		UE_LOG(LogTemp, Warning, TEXT("World item pickup '%s' requires both PersistentId and ItemDefinitionId."), *GetName());
+		return;
+	}
+
+	if (HasDuplicatePersistentWorldPickupId())
+	{
+		bPersistentWorldPickupAvailable = false;
+		UE_LOG(LogTemp, Warning, TEXT("World item pickup '%s' has duplicate PersistentId '%s' in this map."),
+			*GetName(), *PersistentId.ToString());
+		return;
+	}
+
+	if (USoulslikeGameInstance* GameInstance = GetGameInstance<USoulslikeGameInstance>();
+		GameInstance && GameInstance->HasClaimedReward(PersistentId))
+	{
+		Destroy();
+	}
+}
+
+bool Aitem::HasDuplicatePersistentWorldPickupId() const
+{
+	if (!GetWorld() || PersistentId == NAME_None)
+	{
+		return false;
+	}
+
+	for (TActorIterator<Aitem> It(GetWorld()); It; ++It)
+	{
+		const Aitem* Candidate = *It;
+		if (!Candidate || Candidate == this || Candidate->GetOwner() || !Candidate->RequiresPersistentWorldClaim())
+		{
+			continue;
+		}
+
+		if (Candidate->PersistentId == PersistentId)
+		{
+			return true;
+		}
+	}
+
+	return false;
 }

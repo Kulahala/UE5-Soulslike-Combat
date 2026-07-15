@@ -91,16 +91,19 @@ Completed roadmap work is retained here as a compact, durable record. Do not ret
 - [x] **TODO-03A: Item Definition And Ownership v1**
   Delivered static item definitions, per-Pawn owned-instance and equipment-slot caches, GameInstance-mediated transactional SaveGame writes, and semantic restore on every spawned Pawn. User validation covered Grant/Equip, rest reload, death reload, `Continue`, a fresh PIE session, and New Game reset. This data-only stage intentionally does not materialize, attach, or remove weapon/shield Actors.
 
+- [x] **TODO-03B-A: World Pickup Conversion v1**
+  Delivered persistent authored world pickup conversion for the fixed `TestMap` DarkKnight sword and shield. Successful `E` collection atomically writes one owned item instance plus its claimed-reward ID, then removes the world Actor; death reload, fire reload, `Continue`, and New Game reset were user-validated. The stage deliberately leaves equipment slots, materialized weapon/shield Actors, pickup UI, and audio unchanged.
+
 ## TODO Queue
 
 These TODOs are accepted future work, not permission to start implementation immediately. A queued item must be small enough to produce one independently verifiable result. Queue position follows prerequisites, validation dependencies, and the player-facing loop rather than numeric ID or append order. When an item becomes the next stage, move only that item out of this queue and write its complete implementation plan in `plan.md` first. On completion, record stable facts in `ARCHITECTURE.md` and move the compact result into `Done Milestones`; do not turn this roadmap into a stage log.
 
 ### Equipment Ownership
 
-- [ ] **TODO-03B: Checkpoint Equipment And Pickups v1**
-  Convert one sword/shield world pickup into owned equipment and restore the loadout from save. Restrict loadout changes to checkpoint rest; keep existing Gold Treasure automatic pickup behavior unchanged. Verify pickup, rest-time equip, death, and Continue.
+- [ ] **TODO-03B-B: Bonfire Loadout And Materialization v1**
+  Restrict MainHand/OffHand selection to checkpoint rest, then create, attach, clear, and restore the selected weapon/shield Actor loadout. Verify combat availability, death, fire reload, Continue, and New Game reset.
 
-The completed `TODO-03A` data layer now makes saved item identity and slots stable across reloads. `TODO-03B` must connect that data to world pickup conversion and visible equipment before the first formal Encounter, because fire rest and gameplay reload currently recreate map-owned sword/shield Actors.
+The completed `TODO-03A` and `TODO-03B-A` layers make saved item identity stable and remove fixed map-owned sword/shield lifetime from the player loop. `TODO-03B-B` now connects those owned records to a checkpoint-limited visible equipment loadout before the first formal Encounter.
 
 ### Encounter Boundaries
 
@@ -157,6 +160,14 @@ The completed `TODO-03A` data layer now makes saved item identity and slots stab
 
 - [ ] **TODO-07B: Demo Regression Route v1**
   Establish the repeatable manual PIE matrix for the full demo: New Game, Continue, checkpoint, normal encounter reset, cleared encounter restore, equipment persistence, bow/archer, guard break/critical, Boss completion, and completion Continue. Fix regressions only; this is not a feature stage.
+
+## Known Risks And Validation Debt
+
+This is a small durable register for non-blocking review findings that can affect a later stage or release decision. Each entry states the affected boundary, current evidence, and the condition that requires resolution. It is not a second TODO queue: a blocker must be fixed in its current stage, transient working notes stay in `plan.md`, and an entry becomes a TODO only when its resolution has a defined implementation or validation stage.
+
+- **Save write-failure injection is source-reviewed, not fault-injected in PIE.** `AddOwnedItemInstanceAndClaimReward()` copies and restores both `ItemInstances` and `ClaimedRewardIds` when `SaveNow()` fails, and the world Actor is removed only after that transaction succeeds. Normal pickup persistence is user-validated, but the underlying `SaveGameToSlot()` failure branch has not been forced at runtime. **Resolution condition:** before changing `SaveNow()` or another atomic persistence transaction, and no later than `TODO-07B`, run a controlled fault-injection or equivalent writable-save-path failure check that proves both arrays and the world Actor remain unchanged.
+
+- **World-pickup invalid-authoring downgrade is source-reviewed, not fixture-validated.** Missing/duplicate `PersistentId` and unknown `ItemDefinitionId` paths warn and prevent an invalid reward from being granted; the valid sword/shield path is user-validated. **Resolution condition:** before `TODO-03C` adds another persistent fixed reward or drop source, create an unsaved temporary fixture for missing ID, duplicate ID, and unknown definition cases, then verify warnings, no duplicate item record, and no erroneous Actor removal.
 
 ## Equipment And Loot Direction
 

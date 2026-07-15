@@ -8,6 +8,7 @@
 #include "Interfaces/PickupInterface.h"
 #include "item.generated.h"
 
+class AMyCharacter;
 class USphereComponent;
 
 UENUM()
@@ -43,6 +44,8 @@ protected:
 	virtual void SphereOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
 
 	void DisablePickupCollision();
+	virtual bool RequiresPersistentWorldClaim() const { return false; }
+	bool TryClaimPersistentWorldPickup(AMyCharacter* Picker);
 
 	/* 抛物线参数 */
 	// 抛物线持续时间
@@ -71,6 +74,12 @@ protected:
 	EItemState ItemState = EItemState::EIS_Dropped;
 
 private:
+	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Persistent Pickup", meta = (AllowPrivateAccess = "true", ToolTip = "固定世界拾取物的稳定关卡作者 ID；不可使用 Actor 名称或运行时 GUID。"))
+	FName PersistentId = NAME_None;
+
+	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Persistent Pickup", meta = (AllowPrivateAccess = "true", ToolTip = "该世界拾取物授予的稳定 Item Definition ID。"))
+	FName ItemDefinitionId = NAME_None;
+
 	/* 组件 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true", ToolTip = "根场景组件。"))
 	USceneComponent* Root;
@@ -92,6 +101,10 @@ private:
 	/* 浮动内部 */
 	float RunningTime = 0.f;
 	FVector StartLocation; // 记录初始位置，作为浮动的基准点
+	bool bPersistentWorldPickupAvailable = true;
+
+	void InitializePersistentWorldPickup();
+	bool HasDuplicatePersistentWorldPickupId() const;
 
 public:
 	FORCEINLINE UStaticMeshComponent* GetMesh() const { return Mesh; }

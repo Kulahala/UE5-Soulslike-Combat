@@ -21,6 +21,6 @@ void AShield::OnPickup_Implementation(AActor* Picker)
 {
 	if (AMyCharacter* Character = Cast<AMyCharacter>(Picker))
 	{
-		Character->EquipShieldFromPickup(this);
+		TryClaimPersistentWorldPickup(Character);
 	}
 }

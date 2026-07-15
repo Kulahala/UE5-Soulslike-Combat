@@ -17,6 +17,7 @@ class TEST_API AShield : public Aitem
 public:
 	void EquipToOffhand(USceneComponent* Parent, const FName& SocketName, AActor* NewOwner);
 	virtual void OnPickup_Implementation(AActor* Picker) override;
+	virtual bool RequiresPersistentWorldClaim() const override { return true; }
 
 	/* Getters */
 	FORCEINLINE float GetBlockHalfAngleDegrees() const { return BlockHalfAngleDegrees; }

@@ -55,6 +55,7 @@ For complex multi-file C++, Blueprint/UMG, content, architecture, source-plus-as
 - If a promoted roadmap task is paused or rejected, return it to `TODO Queue` or a Recommendation with its current reason.
 - After approved validation and review, move a completed roadmap stage from `TODO Queue` to `Done Milestones`, mark it `[x]`, and retain only its compact durable result and completion commit. Do not recreate its plan unless a new requirement explicitly reopens it.
 - A Recommendation must name a concrete adoption condition. Do not promote optional ideas to TODOs or introduce a framework merely because it might be useful later.
+- `ROADMAP.md` owns `Known Risks And Validation Debt`: record a non-blocking stage-end gap there only when it has a concrete affected boundary, current evidence, technical or player impact, resolution/adoption condition, and a next owning stage or release gate. Do not use it as an unbounded warning list or a substitute TODO queue. Blockers must be fixed in the current stage; transient coordination notes stay in `plan.md`; resolved entries are removed or summarized in the relevant Done Milestone.
 - Before a commit, check whether `README.md`, `ARCHITECTURE.md`, `ROADMAP.md`, and `AGENTS.md` need updates; change only documents whose scope actually changed.
 
 ## Live Editor And MCP

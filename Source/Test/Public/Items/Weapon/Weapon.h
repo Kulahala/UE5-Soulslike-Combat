@@ -21,6 +21,7 @@ public:
 
 	// IPickupInterface
 	virtual void OnPickup_Implementation(AActor* Picker) override;
+	virtual bool RequiresPersistentWorldClaim() const override { return true; }
 
 	// 武器碰撞检测
 	void StartWeaponTrace();  // 开始检测：重置旧位置

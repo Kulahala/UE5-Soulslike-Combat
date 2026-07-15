@@ -32,6 +32,7 @@ public:
 	bool SaveNow();
 	void UpdateGold(int32 NewGold);
 	bool AddOwnedItemInstance(const FTestItemInstanceRecord& ItemRecord);
+	bool AddOwnedItemInstanceAndClaimReward(const FTestItemInstanceRecord& ItemRecord, FName RewardId);
 	bool SetEquippedItemSlot(FName SlotId, FName ItemInstanceId);
 	bool GetSavedItemOwnership(TArray<FTestItemInstanceRecord>& OutItemInstances,
 	                           TArray<FTestEquipmentSlotRecord>& OutEquippedSlots) const;
@@ -42,6 +43,7 @@ public:
 
 	void MarkShortcutOpened(FName PersistentId);
 	void MarkRewardClaimed(FName PersistentId);
+	bool HasClaimedReward(FName PersistentId);
 	void MarkEncounterCleared(FName PersistentId);
 	void MarkBossCompleted(FName PersistentId);
 

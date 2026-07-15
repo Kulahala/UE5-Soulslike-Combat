@@ -124,6 +124,55 @@ bool USoulslikeGameInstance::AddOwnedItemInstance(const FTestItemInstanceRecord&
 	return false;
 }
 
+bool USoulslikeGameInstance::AddOwnedItemInstanceAndClaimReward(const FTestItemInstanceRecord& ItemRecord,
+	                                                                FName RewardId)
+{
+	if (!EnsureCurrentSaveLoaded() || !CurrentSaveGame || !CurrentSaveGame->IsUsable())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("AddOwnedItemInstanceAndClaimReward failed: no usable current save."));
+		return false;
+	}
+
+	if (RewardId == NAME_None || ItemRecord.DefinitionId == NAME_None || ItemRecord.InstanceId == NAME_None
+		|| ItemRecord.Quantity <= 0 || ItemRecord.UpgradeLevel < 0)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("AddOwnedItemInstanceAndClaimReward rejected invalid reward or item record."));
+		return false;
+	}
+
+	if (CurrentSaveGame->ClaimedRewardIds.Contains(RewardId))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Reward '%s' has already been claimed."), *RewardId.ToString());
+		return false;
+	}
+
+	const bool bDuplicateInstanceId = CurrentSaveGame->ItemInstances.ContainsByPredicate(
+		[&ItemRecord](const FTestItemInstanceRecord& ExistingRecord)
+		{
+			return ExistingRecord.InstanceId == ItemRecord.InstanceId;
+		});
+	if (bDuplicateInstanceId)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("AddOwnedItemInstanceAndClaimReward rejected duplicate InstanceId '%s'."),
+			*ItemRecord.InstanceId.ToString());
+		return false;
+	}
+
+	const TArray<FTestItemInstanceRecord> PreviousItems = CurrentSaveGame->ItemInstances;
+	const TSet<FName> PreviousClaimedRewards = CurrentSaveGame->ClaimedRewardIds;
+	CurrentSaveGame->ItemInstances.Add(ItemRecord);
+	CurrentSaveGame->ClaimedRewardIds.Add(RewardId);
+
+	if (SaveNow())
+	{
+		return true;
+	}
+
+	CurrentSaveGame->ItemInstances = PreviousItems;
+	CurrentSaveGame->ClaimedRewardIds = PreviousClaimedRewards;
+	return false;
+}
+
 bool USoulslikeGameInstance::SetEquippedItemSlot(FName SlotId, FName ItemInstanceId)
 {
 	if (SlotId == NAME_None)
@@ -291,6 +340,16 @@ void USoulslikeGameInstance::MarkRewardClaimed(FName PersistentId)
 	{
 		AddPersistentId(CurrentSaveGame->ClaimedRewardIds, PersistentId, TEXT("reward"));
 	}
+}
+
+bool USoulslikeGameInstance::HasClaimedReward(FName PersistentId)
+{
+	if (PersistentId == NAME_None || !EnsureCurrentSaveLoaded() || !CurrentSaveGame || !CurrentSaveGame->IsUsable())
+	{
+		return false;
+	}
+
+	return CurrentSaveGame->ClaimedRewardIds.Contains(PersistentId);
 }
 
 void USoulslikeGameInstance::MarkEncounterCleared(FName PersistentId)

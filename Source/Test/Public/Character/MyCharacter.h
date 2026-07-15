@@ -94,6 +94,7 @@ public:
 	/* 物品所有权：本阶段只处理数据，不实体化或附着装备 Actor。 */
 	bool RestoreItemOwnershipFromSave(const UTestSaveGame* SaveGame);
 	bool TryGrantOwnedItem(FName DefinitionId, FName& OutInstanceId);
+	bool TryClaimWorldItemPickup(FName PersistentId, FName ItemDefinitionId, FName& OutInstanceId);
 	bool TryEquipOwnedItem(FName InstanceId);
 	FString GetItemOwnershipDebugSummary() const;
 

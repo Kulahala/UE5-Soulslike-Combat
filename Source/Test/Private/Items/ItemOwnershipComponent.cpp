@@ -128,6 +128,41 @@ bool UItemOwnershipComponent::TryGrantDefinition(FName DefinitionId, USoulslikeG
 	return true;
 }
 
+bool UItemOwnershipComponent::TryClaimWorldItem(FName PersistentId, FName DefinitionId,
+	                                                USoulslikeGameInstance* GameInstance, FName& OutInstanceId)
+{
+	OutInstanceId = NAME_None;
+	BuildDefinitionCatalog();
+
+	if (!GameInstance || PersistentId == NAME_None)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Claim world item failed: no GameInstance or PersistentId."));
+		return false;
+	}
+
+	if (!GetDefinition(DefinitionId))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Claim world item failed: DefinitionId '%s' is not in this player's catalog."),
+			*DefinitionId.ToString());
+		return false;
+	}
+
+	FTestItemInstanceRecord NewRecord;
+	NewRecord.DefinitionId = DefinitionId;
+	NewRecord.InstanceId = GenerateUniqueInstanceId();
+	NewRecord.Quantity = 1;
+	NewRecord.UpgradeLevel = 0;
+
+	if (!GameInstance->AddOwnedItemInstanceAndClaimReward(NewRecord, PersistentId))
+	{
+		return false;
+	}
+
+	OwnedItemInstances.Add(NewRecord);
+	OutInstanceId = NewRecord.InstanceId;
+	return true;
+}
+
 bool UItemOwnershipComponent::TryEquipInstance(FName InstanceId, USoulslikeGameInstance* GameInstance)
 {
 	BuildDefinitionCatalog();
