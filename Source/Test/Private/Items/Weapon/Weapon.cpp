@@ -3,13 +3,11 @@
 #include "Items/Weapon/Weapon.h"
 #include "Character/BaseCharacter.h"
 #include "Character/MyCharacter.h"
-#include "Combat/CombatTeamHelper.h"
+#include "Combat/CombatHitResolver.h"
 #include "Enemy/Enemy.h"
 #include "Components/BoxComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "Kismet/KismetSystemLibrary.h"
-#include "Interfaces/HitInterface.h"
-#include "Interfaces/BlockableInterface.h"
 #include "Utils/DebugDrawHelper.h"
 #include "NiagaraComponent.h"
 #include "GameFramework/PlayerController.h"
@@ -144,25 +142,46 @@ void AWeapon::ExecuteWeaponTrace()
 	if (bHit && HitPoint.GetActor())
 	{
 		AActor* HitActor = HitPoint.GetActor();
-		if (AEnemy* Enemy = Cast<AEnemy>(HitActor); Enemy && Enemy->IsEncounterDormant())
+		float IncomingDamage = Damage;
+		float PoiseDamage = 0.f;
+		bool bApplyPoiseDamage = false;
+		float BlockStaminaDamageMultiplier = 1.f;
+		bool bCanBeParried = true;
+
+		if (ABaseCharacter* Attacker = Cast<ABaseCharacter>(GetOwner()))
+		{
+			IncomingDamage *= Attacker->GetAttackDamageMultiplier();
+			PoiseDamage = Attacker->GetCurrentPoiseDamage();
+			bApplyPoiseDamage = true;
+			BlockStaminaDamageMultiplier = Attacker->GetBlockStaminaDamageMultiplier();
+			bCanBeParried = Attacker->CanCurrentAttackBeParried();
+		}
+
+		FCombatHitRequest Request;
+		Request.Attacker = GetOwner();
+		Request.DamageCauser = this;
+		Request.EventInstigator = GetInstigatorController();
+		Request.HitActor = HitActor;
+		Request.HitResult = HitPoint;
+		Request.IncomingDamage = IncomingDamage;
+		Request.PoiseDamage = PoiseDamage;
+		Request.bApplyPoiseDamage = bApplyPoiseDamage;
+		Request.BlockStaminaDamageMultiplier = BlockStaminaDamageMultiplier;
+		Request.bCanBeParried = bCanBeParried;
+
+		const FCombatHitResult Result = FCombatHitResolver::ResolveAndApply(Request);
+		if (Result.bSuppressed)
 		{
 			// 预放置参与者在 Controller 激活前不接受本次挥砍，也不产生命中反馈。
 			IgnoreActors.AddUnique(HitActor);
 			return;
 		}
 
-		// 命中解析：同阵营判定 + 格挡结算 + 伤害计算
-		FWeaponHitResult Result = ResolveHit(HitActor, HitPoint);
-
-		// 非同阵营才扣血
-		if (!Result.bSameTeam)
-		{
-			UGameplayStatics::ApplyDamage(HitActor, Result.FinalDamage, GetInstigatorController(), this,
-			                              UDamageType::StaticClass());
-		}
-
-		// 反馈派发：上下文写入 + 受击反应 + 相机震动 + 卡肉 + 黑名单
-		DispatchHitFeedback(HitActor, HitPoint, Result);
+		// 武器专属表现仍由武器拥有，避免投射物继承相机震动、卡肉或挥砍黑名单。
+		CameraShake();
+		SetEnableHitStop(true);
+		HitStop(HitActor);
+		IgnoreActors.AddUnique(HitActor);
 	}
 }
 
@@ -179,115 +198,6 @@ void AWeapon::BuildIgnoreList(TArray<AActor*>& OutActors)
 	{
 		OutActors.AddUnique(ToIgnore);
 	}
-}
-
-AWeapon::FWeaponHitResult AWeapon::ResolveHit(AActor* HitActor, const FHitResult& HitPoint)
-{
-	FWeaponHitResult Result;
-	float BaseDamage = Damage;
-
-	if (ABaseCharacter* Attacker = Cast<ABaseCharacter>(GetOwner()))
-	{
-		BaseDamage *= Attacker->GetAttackDamageMultiplier();
-	}
-	Result.FinalDamage = BaseDamage;
-
-	// 同类豁免：武器持有者和命中目标共享标签
-	if (FCombatTeamHelper::ShareTeamTag(GetOwner(), HitActor))
-	{
-		Result.bSameTeam = true;
-		return Result;
-	}
-
-	// 格挡判定（仅跨阵营）
-	if (IBlockableInterface* Blockable = Cast<IBlockableInterface>(HitActor))
-	{
-		FBlockResult BlockResult = Blockable->TryBlockHit(
-			HitPoint.ImpactPoint, BaseDamage, GetOwner(), this);
-		if (BlockResult.bBlocked)
-		{
-			Result.FinalDamage = BlockResult.DamageAfterBlock;
-			Result.bPlayNormalHitReact = BlockResult.bPlayNormalHitReact;
-			Result.KnockbackScale = BaseDamage > 0.f ? BlockResult.DamageAfterBlock / BaseDamage : 0.f;
-			Result.bApplyStun = BlockResult.bPlayNormalHitReact;
-		}
-		if (BlockResult.bParried)
-		{
-			Result.bParried = true;
-		}
-	}
-
-	return Result;
-}
-
-void AWeapon::DispatchHitFeedback(AActor* HitActor, const FHitResult& HitPoint, const FWeaponHitResult& Result)
-{
-	/*
-	 * 命中反馈分层：
-	 * ResolveHit() 只决定同队/格挡/弹反/最终伤害；这里统一派发反馈和破防。
-	 * 同队命中不扣血，格挡可跳过普通硬直，但 GetHit、击退、相机震动、卡肉和黑名单仍需要走。
-	 */
-	// 应用韧性伤害（仅跨阵营 + 非破防状态）
-	if (!Result.bSameTeam)
-	{
-		if (AEnemy* Enemy = Cast<AEnemy>(HitActor))
-		{
-			if (ABaseCharacter* Attacker = Cast<ABaseCharacter>(GetOwner()))
-			{
-				Enemy->ApplyPoiseDamage(Attacker->GetCurrentPoiseDamage(), Attacker);
-			}
-		}
-	}
-
-	// 弹反路径：瞬间清空攻击方敌人的韧性
-	if (Result.bParried)
-	{
-		if (AEnemy* AttackerEnemy = Cast<AEnemy>(GetOwner()))
-		{
-			AttackerEnemy->ApplyPoiseDamage(AttackerEnemy->GetCurrentPoise(), HitActor);
-		}
-	}
-
-	// 写入命中上下文（所有命中，含格挡）
-	if (ABaseCharacter* HitChar = Cast<ABaseCharacter>(HitActor))
-	{
-		HitChar->CachePendingHitContext(GetOwner(), Result.KnockbackScale, !Result.bPlayNormalHitReact, Result.bApplyStun);
-	}
-
-	// 受击反应+特效：所有命中都走 GetHit（内部按上下文分流）
-	if (HitActor->Implements<UHitInterface>())
-	{
-		IHitInterface::Execute_GetHit(HitActor, HitPoint.ImpactPoint, GetOwner());
-	}
-
-	// GetHit 之后检查破防flag — 弹反和普通命中都使用敌人自己的参数
-	if (Result.bParried)
-	{
-		// 弹反破防：对攻击方敌人触发
-		if (AEnemy* AttackerEnemy = Cast<AEnemy>(GetOwner()))
-		{
-			if (AttackerEnemy->ShouldTriggerStanceBreak())
-			{
-				AttackerEnemy->ApplyStanceBreak(AttackerEnemy->GetStanceBreakDuration(), AttackerEnemy->GetStanceBreakPlayRate());
-			}
-		}
-	}
-	else if (AEnemy* Enemy = Cast<AEnemy>(HitActor))
-	{
-		// 普通韧性破防：对受击方敌人触发
-		if (Enemy->ShouldTriggerStanceBreak())
-		{
-			Enemy->ApplyStanceBreak(Enemy->GetStanceBreakDuration(), Enemy->GetStanceBreakPlayRate());
-		}
-	}
-
-	CameraShake();
-
-	SetEnableHitStop(true);
-	HitStop(HitActor);
-
-	// 击中一次后加入黑名单，防止同一刀造成多次伤害（同类也加入，避免每帧重复判断）
-	IgnoreActors.AddUnique(HitActor);
 }
 
 // ==================== 卡肉感 ====================

@@ -4,6 +4,9 @@
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "Character/MyCharacter.h"
+#include "Combat/CombatProjectile.h"
+#include "Components/CapsuleComponent.h"
+#include "Engine/TargetPoint.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Game/SoulslikeGameInstance.h"
 #include "Game/TestGameMode.h"
@@ -21,6 +24,34 @@
 
 namespace
 {
+	constexpr float ProjectileDebugSpawnClearance = 30.f;
+	constexpr float ProjectileDebugSelfSourceDistance = 600.f;
+	constexpr float ProjectileDebugSelfSpeed = 600.f;
+
+	ATargetPoint* SpawnProjectileDebugSource(UWorld* World, const FVector& Location, const FRotator& Rotation,
+		const FName TeamTag)
+	{
+		if (!World)
+		{
+			return nullptr;
+		}
+
+		FActorSpawnParameters SpawnParameters;
+		SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		ATargetPoint* Source = World->SpawnActor<ATargetPoint>(ATargetPoint::StaticClass(), Location, Rotation,
+			SpawnParameters);
+		if (!Source)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("ProjectileDebugFireSelf failed to create a temporary source."));
+			return nullptr;
+		}
+
+		Source->Tags.AddUnique(TeamTag);
+		Source->SetActorEnableCollision(false);
+		Source->SetLifeSpan(4.f);
+		return Source;
+	}
+
 	FString BuildSavedItemOwnershipDebugSummary(const TArray<FTestItemInstanceRecord>& ItemRecords,
 	                                           const TArray<FTestEquipmentSlotRecord>& SlotRecords,
 	                                           const TSet<FName>& ClaimedRewardIds)
@@ -756,6 +787,113 @@ void ACharacterController::ItemDebugFailNextClaimSave()
 	{
 		UE_LOG(LogTemp, Display,
 			TEXT("ItemDebugFailNextClaimSave armed: the next valid fixed-item claim will simulate a save failure."));
+	}
+#endif
+}
+
+void ACharacterController::ProjectileDebugFire()
+{
+#if UE_BUILD_SHIPPING
+	UE_LOG(LogTemp, Warning, TEXT("ProjectileDebugFire is unavailable in Shipping builds."));
+#else
+	AMyCharacter* PlayerCharacter = GetMyCharacter();
+	UWorld* World = GetWorld();
+	if (!PlayerCharacter || !World)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("ProjectileDebugFire failed: no possessed AMyCharacter or World is available."));
+		return;
+	}
+
+	const FVector LaunchDirection = GetControlRotation().Vector().GetSafeNormal();
+	if (LaunchDirection.IsNearlyZero())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("ProjectileDebugFire failed: player view direction is zero."));
+		return;
+	}
+
+	const UCapsuleComponent* Capsule = PlayerCharacter->GetCapsuleComponent();
+	const float CapsuleHalfHeight = Capsule ? Capsule->GetScaledCapsuleHalfHeight() : 96.f;
+	FProjectileLaunchParams LaunchParams;
+	LaunchParams.Attacker = PlayerCharacter;
+	LaunchParams.EventInstigator = this;
+	// 不能从第三人称相机世界位置直接生成：镜头仰角接近 90 度时可能落入玩家胶囊。
+	LaunchParams.SpawnLocation = PlayerCharacter->GetActorLocation()
+		+ LaunchDirection * (CapsuleHalfHeight + ProjectileDebugSpawnClearance);
+	LaunchParams.LaunchDirection = LaunchDirection;
+
+	if (ACombatProjectile* Projectile = ACombatProjectile::SpawnConfiguredProjectile(World,
+		ACombatProjectile::StaticClass(), LaunchParams))
+	{
+		UE_LOG(LogTemp, Display, TEXT("ProjectileDebugFire launched '%s' from the player view."), *Projectile->GetName());
+	}
+#endif
+}
+
+void ACharacterController::ProjectileDebugFireSelf(FName SourceTeam)
+{
+#if UE_BUILD_SHIPPING
+	UE_LOG(LogTemp, Warning, TEXT("ProjectileDebugFireSelf is unavailable in Shipping builds."));
+#else
+	AMyCharacter* PlayerCharacter = GetMyCharacter();
+	UWorld* World = GetWorld();
+	if (!PlayerCharacter || !World)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("ProjectileDebugFireSelf failed: no possessed AMyCharacter or World is available."));
+		return;
+	}
+
+	const FString SourceTeamText = SourceTeam.ToString();
+	FName TeamTag;
+	if (SourceTeamText.Equals(TEXT("Enemy"), ESearchCase::IgnoreCase))
+	{
+		TeamTag = FName(TEXT("Enemy"));
+	}
+	else if (SourceTeamText.Equals(TEXT("Player"), ESearchCase::IgnoreCase))
+	{
+		TeamTag = FName(TEXT("Player"));
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("ProjectileDebugFireSelf expects Enemy or Player, received '%s'."),
+			*SourceTeam.ToString());
+		return;
+	}
+
+	const UCapsuleComponent* Capsule = PlayerCharacter->GetCapsuleComponent();
+	const float CapsuleHalfHeight = Capsule ? Capsule->GetScaledCapsuleHalfHeight() : 96.f;
+	FVector PlayerForward = PlayerCharacter->GetActorForwardVector().GetSafeNormal2D();
+	if (PlayerForward.IsNearlyZero())
+	{
+		PlayerForward = GetControlRotation().Vector().GetSafeNormal2D();
+	}
+	if (PlayerForward.IsNearlyZero())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("ProjectileDebugFireSelf failed: player forward direction is zero."));
+		return;
+	}
+
+	const FVector TargetLocation = PlayerCharacter->GetActorLocation() + FVector(0.f, 0.f, CapsuleHalfHeight * 0.5f);
+	const FVector SourceLocation = TargetLocation + PlayerForward * ProjectileDebugSelfSourceDistance;
+	const FVector LaunchDirection = (TargetLocation - SourceLocation).GetSafeNormal();
+	ATargetPoint* Source = SpawnProjectileDebugSource(World, SourceLocation, LaunchDirection.Rotation(), TeamTag);
+	if (!Source)
+	{
+		return;
+	}
+
+	FProjectileLaunchParams LaunchParams;
+	LaunchParams.Attacker = Source;
+	LaunchParams.SpawnLocation = SourceLocation;
+	LaunchParams.LaunchDirection = LaunchDirection;
+	LaunchParams.bOverrideDeliveryConfig = true;
+	LaunchParams.DeliveryConfigOverride.InitialSpeed = ProjectileDebugSelfSpeed;
+	LaunchParams.DeliveryConfigOverride.MaxSpeed = ProjectileDebugSelfSpeed;
+
+	if (ACombatProjectile* Projectile = ACombatProjectile::SpawnConfiguredProjectile(World,
+		ACombatProjectile::StaticClass(), LaunchParams))
+	{
+		UE_LOG(LogTemp, Display, TEXT("ProjectileDebugFireSelf launched '%s' with source team '%s'."),
+			*Projectile->GetName(), *TeamTag.ToString());
 	}
 #endif
 }

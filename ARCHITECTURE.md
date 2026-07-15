@@ -371,23 +371,29 @@ FCombatTeamHelper (static helper: ShareTeamTag for same-team detection via Actor
 6. `PlayAttackMontage(SectionName)` plays normal/combo attack animation from `AttackConfig->LightAttackCombo->ComboMontage` with `UAnimNotifyState_WeaponCollision` + `UAnimNotifyState_ComboWindow` baked in
 7. **NotifyBegin** → `AWeapon::StartWeaponTrace()` (records old box positions)
 8. **NotifyTick** → `AWeapon::ExecuteWeaponTrace()` (sweeps from old→new center to prevent ghost swings)
-9. On hit:
-   - **Encounter dormancy barrier**: 来自待命敌人的 trace，或命中待命敌人的 trace，会在正常命中结算前退出。因此待命参与者不会在遭遇激活前承受伤害、韧性伤害、受击、破防或命中反馈。
-   - 同阵营命中：不 `ApplyDamage`，不造成韧性伤害，但仍走 `GetHit` / `DispatchHitFeedback` 路径（击退、命中反馈、相机晃动、卡肉、本次攻击黑名单）。同阵营判定通过 `FCombatTeamHelper::ShareTeamTag()`（Weapon + Enemy 共用），当前只认 `Player` / `Enemy` 阵营 Tag 白名单，避免功能 Tag 误判同队
-   - 跨阵营命中：`IBlockableInterface::TryBlockHit()` 在 `ApplyDamage` 前拦截；格挡成功：减伤 + 跳过硬直；弹反成功：瞬间清空攻击方韧性触发破防
-   - `ExecuteWeaponTrace()` 通过 `FPendingHitContext` 写入每命中的上下文（instigator、knockback scale、blocked flag、stun flag），然后调用 `GetHit()`
-   - `ABaseCharacter::GetHit_Implementation()` 消费 context 驱动击退/受击反应，子类（`AMyCharacter`、`AEnemy`）在各自硬直逻辑后清空 context
-   - `ExecuteWeaponTrace()` 分解为 `BuildIgnoreList()`、`ResolveHit()`、`DispatchHitFeedback()` 三步，不要膨胀为通用战斗管线
-   - **韧性伤害应用**：`DispatchHitFeedback()` 在 `GetHit()` 之前对敌人应用韧性伤害（`Enemy->ApplyPoiseDamage(Attacker->GetCurrentPoiseDamage(), Attacker)`），韧性归零时设置 `bPendingStanceBreak` flag
-   - **弹反分支**：弹反成功时对攻击方敌人调用 `ApplyPoiseDamage(GetCurrentPoise())`（瞬间清空韧性），然后在 `GetHit()` 之后检查 `ShouldTriggerStanceBreak()` 触发破防
-   - **破防触发**：`GetHit()` 之后检查 `bPendingStanceBreak` flag，弹反路径对攻击方（`GetOwner()`）触发，普通命中对受击方（`HitActor`）触发
-   - **Damage / Block Stamina Multipliers**: `ResolveHit()` 在格挡判定前应用 `BaseCharacter->GetAttackDamageMultiplier()` 计算实际伤害；格挡耗体不再按伤害缩放，而由 `AShield::BlockStaminaCost × Attacker->GetBlockStaminaDamageMultiplier()` 决定，让盾牌类型和敌人招式分别控制防御压力
-   - **Poise Damage Multiplier**: 连招系统同时计算 `CurrentPoiseDamage = BasePoiseDamage × PoiseDamageMultiplier`，冲刺攻击使用独立倍率，蓄力攻击按持有时长在 1.0 到 `ChargedAttack.MaxPoiseDamageMultiplier` 间插值
-10. HitStop + CameraShake（所有命中都触发）
+9. A confirmed weapon sweep builds an `FCombatHitRequest` and calls the shared `FCombatHitResolver::ResolveAndApply()`.
+   - **Encounter dormancy barrier**: 待命敌人作为攻击方或受击方时，resolver 在正常结算前抑制本次命中。因此待命参与者不会在遭遇激活前承受伤害、韧性伤害、受击、破防或命中反馈。
+   - `FCombatHitResolver` owns the common order: team filter → `IBlockableInterface::TryBlockHit(Request)` → `ApplyDamage` → enemy poise → parry attacker poise → `FPendingHitContext` → `GetHit()` → stance-break check. `FCombatHitRequest` carries the resolved damage, poise, block-stamina multiplier, parry eligibility and hit context for this one delivery.
+   - 同阵营命中：不 `ApplyDamage`，不造成韧性伤害，但仍写入 context 并派发 `GetHit()`。同阵营判定通过 `FCombatTeamHelper::ShareTeamTag()`，当前只认 `Player` / `Enemy` 阵营 Tag 白名单，避免功能 Tag 误判同队。
+   - 跨阵营命中：格挡成功时减伤并跳过普通硬直；弹反成功时清空攻击方敌人韧性，再在 `GetHit()` 后检查破防。
+   - `ABaseCharacter::GetHit_Implementation()` 消费 context 驱动击退/受击反应，子类（`AMyCharacter`、`AEnemy`）在各自硬直逻辑后清空 context。
+   - **Damage / Block Stamina Multipliers**: 近战在创建 request 时将 `BaseCharacter->GetAttackDamageMultiplier()`、`GetBlockStaminaDamageMultiplier()`、当前韧性伤害和不可弹反标记快照进去；格挡耗体由 `AShield::BlockStaminaCost × Request.BlockStaminaDamageMultiplier` 决定。
+   - **Poise / stance break**: the resolver applies target poise before `GetHit()`; parry clears the attacker enemy's poise, then the resolver checks `ShouldTriggerStanceBreak()` after `GetHit()` so `EES_StanceBreak` is not overwritten by ordinary stun.
+10. `AWeapon` retains only melee-specific post-resolution behavior: CameraShake, HitStop and the per-swing `IgnoreActors` blacklist. These do not belong to the resolver or projectile delivery.
 11. **NotifyEnd** → clears `IgnoreActors` blacklist
 12. **Combo Window**: `AnimNotifyState_ComboWindow` marks input-buffer timing; `Input_AttackPressed()` sets `bComboInputReceived` during the window before any charged timer starts
 13. **Combo Branch Point**: `UAnimNotify_ComboBranchPoint` is the single normal continuation point. It closes the current combo window, consumes `bComboInputReceived`, and if a next segment exists and the player is not entering exhaustion, jumps to the next attack section without restarting the montage. If no input is buffered, the montage continues into the current section's `end` recovery.
 14. `OnAttackMontageEnded` delegate fires → recovery helpers clear charged input / restore rotation / handle delayed exhaustion → `ResetCombo()`, restore `EAS_UnOccupied` or `EAS_Exhausted`, resume stamina regen
+
+<a name="projectile-delivery-core"></a>
+## Projectile Delivery Core
+
+- `FCombatHitRequest` / `FCombatHitResult` and the pure C++ `FCombatHitResolver` are the shared confirmed-hit boundary for melee and projectile delivery. Delivery code owns collision, one-hit policy and delivery-specific presentation; the resolver owns the common combat result and must not acquire weapon input, AI, save, UI or map ownership.
+- `ACombatProjectile` is a zero-gravity, non-homing, non-bouncing `USphereComponent` + `UProjectileMovementComponent` delivery Actor. Its query-only sphere blocks `WorldStatic`, `WorldDynamic`, `Pawn`, `PhysicsBody` and `Destructible`; the first blocking sweep stops the projectile. A wall hit naturally resolves before a target behind the wall.
+- `FProjectileDeliveryConfig` is copied to `ActiveDeliveryConfig` before flight begins. Damage, poise damage, block-stamina multiplier, parry eligibility, speed, radius and lifetime are immutable for that projectile instance; the default is 3000 cm/s with a 3 s lifetime. Expiry destroys the projectile without damage or hit feedback.
+- `SpawnConfiguredProjectile()` uses deferred spawn and sets Owner/Instigator before `BeginPlay`. `BeginPlay` validates the launch snapshot, ignores the attacker/instigator for movement, enables collision and activates movement. `OnProjectileStopped()` closes collision, guards against a second resolution, then destroys the Actor after its one outcome; `EndPlay` removes the stop delegate.
+- A projectile enters `FCombatHitResolver` only when its blocking `HitActor` implements `IHitInterface`. World geometry and non-combat Actors still stop and destroy the projectile but cannot receive `ApplyDamage`, poise, hit context or `GetHit` side effects. `AEnemy`, `AMyCharacter` and `ABreakAbleActor` remain valid recipients through their existing hit-interface path.
+- `ProjectileDebugFire` and `ProjectileDebugFireSelf <Enemy|Player>` are non-Shipping C++ validation commands only. They do not add a bow, input mapping, map Actor, save state, visual asset or ranged AI. The normal debug command derives direction from control rotation but starts outside the controlled capsule; a real future bow should use an authored muzzle/socket location instead.
 
 <a name="player-action-recovery-helpers"></a>
 ## Player Action Recovery Helpers
@@ -420,8 +426,8 @@ FCombatTeamHelper (static helper: ShareTeamTag for same-team detection via Actor
 
 ## Hit Knockback（受击后退）
 
-- `ABaseCharacter` 通过 `FPendingHitContext` + `BaseHitKnockbackDistance` + `HitKnockbackDuration` + `TickHitKnockback()` 共享短距离武器命中击退。
-- 击退是**武器命中反馈**，非通用伤害反馈：陷阱/DOT 只调 `TakeDamage()` 不自动触发。
+- `ABaseCharacter` 通过 `FPendingHitContext` + `BaseHitKnockbackDistance` + `HitKnockbackDuration` + `TickHitKnockback()` 共享短距离战斗命中击退。
+- 击退是 **resolver 派发的战斗命中反馈**，非通用 `TakeDamage()` 反馈：投射物和武器命中会写入 context，陷阱/DOT 不自动触发。
 - 默认值：`AMyCharacter` 10cm，`AEnemy` 5cm。
 - 运动曲线：quadratic ease-out，通过 `AddActorWorldOffset(..., true, &Hit)` sweep 位移，可被墙挡住。
 - 新命中覆盖旧击退；零缩放命中（如满格挡）清除进行中的击退。
@@ -522,8 +528,8 @@ FCombatTeamHelper (static helper: ShareTeamTag for same-team detection via Actor
 - `AShield` — 副手装备，参数载体：`BlockHalfAngleDegrees`(角度)、`BlockedDamageMultiplier`(减伤)、`BlockStaminaCost`(每次格挡基础耗体)、`BlockMoveSpeedMultiplier`(移速)。
 - 按住防御：`bBlockInputHeld` + `bIsBlocking` 双标志，不新增 `EActionState`，防御中 `ActionState` 保持 `EAS_UnOccupied`。
 - 防御恢复体力倍率：`UPlayerActionConfigDataAsset::Block.StaminaRegenMultiplier` 控制举盾期间自然恢复速度，默认 `0.7`；进入 Block 时写入 `UAttributeComponent`，退出/打断 Block 时恢复为 `1.0`。
-- `TryBlockHit()` 判定链：存活 → 方向(`DotProduct` vs `Cos(HalfAngle)`) → 体力成本检查 → 扣体力 + 减伤。
-- 格挡拦截点：`Weapon::ExecuteWeaponTrace()` 命中后、`ApplyDamage()` 前，仅跨阵营触发。格挡成功时 `bPlayNormalHitReact = false` 跳过受击硬直。
+- `TryBlockHit(const FCombatHitRequest&)` 判定链：存活 → 方向(`DotProduct` vs `Cos(HalfAngle)`) → request 中的弹反许可/体力成本检查 → 扣体力 + 减伤。它只读取本次命中快照，不从攻击者的瞬时招式字段反推参数。
+- 格挡拦截点：`FCombatHitResolver` 在 `ApplyDamage()` 前、仅跨阵营触发。格挡成功时 `bPlayNormalHitReact = false` 跳过受击硬直；该路径被近战和投射物共同复用。
 - 防御转主动动作：`Dodge` / `Parry` 可从 `bIsBlocking` 子状态启动；启动前 `InterruptBlock(false)` 停止 Block Montage 但保留右键 held 意图，便于动作结束后恢复举盾。
 
 <a name="poise-stance-break-system"></a>
@@ -535,7 +541,7 @@ FCombatTeamHelper (static helper: ShareTeamTag for same-team detection via Actor
 - **韧性机制**：敌人持有隐藏韧性条（`MaxPoise` 默认 10，`CurrentPoise` 运行时值），每次受击扣除韧性伤害（`BasePoiseDamage × PoiseDamageMultiplier`），韧性归零触发破防硬直（`EES_StanceBreak`）。
 - **破防触发**：
   - **延迟触发机制**：`ApplyPoiseDamage()` 韧性归零时设置 `bPendingStanceBreak` flag，不立即触发破防
-  - **触发时机**：`DispatchHitFeedback()` 在 `GetHit()` 之后检查 flag，避免 `EES_StanceBreak` 被 `EES_Stunned` 覆盖
+  - **触发时机**：`FCombatHitResolver` 在 `GetHit()` 之后检查 flag，避免 `EES_StanceBreak` 被 `EES_Stunned` 覆盖
   - **弹反路径**：弹反成功时调用 `ApplyPoiseDamage(GetCurrentPoise())`（瞬间清空韧性），对攻击方敌人（`GetOwner()`）触发破防
   - **普通路径**：普通命中累积韧性伤害，对受击方敌人（`HitActor`）触发破防
 - **破防效果**：停止当前蒙太奇，设置 `EES_StanceBreak` 状态，播放方向性受击反应，慢放蒙太奇（使用敌人自己的参数，默认 0.3x），启动恢复计时器（默认 2.0s）。
@@ -545,7 +551,7 @@ FCombatTeamHelper (static helper: ShareTeamTag for same-team detection via Actor
 
 - **架构**：基于盾牌的主动防御机制，独立于格挡系统。弹反成功时瞬间清空攻击方韧性触发破防。
 - **状态管理**：`bIsParrying`（蒙太奇播放中）、`bParryActive`（激活窗口开启，由 `UAnimNotifyState_ParryActive` 控制）、`bParryOnCooldown`（冷却期）
-- **判定流程**：敌人攻击命中玩家 → `TryBlockHit()` 检查 `bParryActive` + 方向 + 攻击方当前招式是否允许弹反 → 弹反成功扣除 `ParryStaminaCost`，返回 `bParried=true` → 对攻击方调用 `ApplyPoiseDamage(GetCurrentPoise())` → 触发破防。`FEnemyAttackEntry::bCannotBeParried` 只禁止主动弹反成功，不禁止普通举盾格挡；不可弹反招式命中弹反窗口时按失败弹反处理。
+- **Parry flow**: `TryBlockHit(Request)` checks `bParryActive`, direction and `Request.bCanBeParried`; a success returns `bParried=true`, then the resolver clears the attacking enemy's poise and triggers stance break. `FEnemyAttackEntry::bCannotBeParried` denies only active parry success, not ordinary shield blocking; an unparryable hit inside a parry window follows the failed-parry path.
 
 <a name="lock-on-system"></a>
 ## Lock-On System (`AMyCharacter` + `UPlayerLockOnComponent`)

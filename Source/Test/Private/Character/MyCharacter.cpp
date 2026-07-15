@@ -3,6 +3,7 @@
 #include "Character/MyCharacter.h"
 #include "Combat/ComboDataAsset.h"
 #include "Combat/AttackConfigDataAsset.h"
+#include "Combat/CombatHitTypes.h"
 #include "Combat/HitReactionConfigDataAsset.h"
 #include "Character/Components/PlayerLockOnComponent.h"
 #include "Character/Controller/CharacterController.h"
@@ -903,11 +904,13 @@ void AMyCharacter::TryResumeBlock()
 	TryStartAction(EPlayerActionType::Block);
 }
 
-FBlockResult AMyCharacter::TryBlockHit(const FVector& ImpactPoint, float IncomingDamage,
-                                        AActor* Attacker, AActor* DamageCauser)
+FBlockResult AMyCharacter::TryBlockHit(const FCombatHitRequest& Request)
 {
 	FBlockResult Result;
-	Result.DamageAfterBlock = IncomingDamage;
+	Result.DamageAfterBlock = Request.IncomingDamage;
+	const FVector ImpactPoint = Request.HitResult.ImpactPoint;
+	AActor* Attacker = Request.Attacker;
+	AActor* DamageCauser = Request.DamageCauser;
 
 	// 弹反分支优先（弹反期间不可格挡）
 	if (bIsParrying)
@@ -927,8 +930,7 @@ FBlockResult AMyCharacter::TryBlockHit(const FVector& ImpactPoint, float Incomin
 				if (Dot < CosHalf) return Result; // 角度不匹配，弹反失败
 			}
 
-			const ABaseCharacter* AttackerCharacter = Cast<ABaseCharacter>(Attacker);
-			if (AttackerCharacter && !AttackerCharacter->CanCurrentAttackBeParried())
+			if (!Request.bCanBeParried)
 			{
 				return Result; // 该招式不可弹反，按失败弹反处理
 			}
@@ -963,16 +965,12 @@ FBlockResult AMyCharacter::TryBlockHit(const FVector& ImpactPoint, float Incomin
 	float CosHalf = FMath::Cos(FMath::DegreesToRadians(EquippedShield->GetBlockHalfAngleDegrees()));
 	if (Dot < CosHalf) return Result;
 
-	const ABaseCharacter* AttackerCharacter = Cast<ABaseCharacter>(Attacker);
-	const float BlockStaminaDamageMultiplier = AttackerCharacter
-		                                           ? AttackerCharacter->GetBlockStaminaDamageMultiplier()
-		                                           : 1.f;
-	float StaminaCost = EquippedShield->GetBlockStaminaCost() * BlockStaminaDamageMultiplier;
-	if (Attributes->GetCurrentStamina() < StaminaCost) return Result;
+		const float StaminaCost = EquippedShield->GetBlockStaminaCost() * Request.BlockStaminaDamageMultiplier;
+		if (Attributes->GetCurrentStamina() < StaminaCost) return Result;
 
-	Attributes->UseStamina(StaminaCost);
-	Result.bBlocked = true;
-	Result.DamageAfterBlock = IncomingDamage * EquippedShield->GetBlockedDamageMultiplier();
+		Attributes->UseStamina(StaminaCost);
+		Result.bBlocked = true;
+		Result.DamageAfterBlock = Request.IncomingDamage * EquippedShield->GetBlockedDamageMultiplier();
 	Result.bPlayNormalHitReact = false;
 	LastDamageFlashScale = EquippedShield->GetBlockedDamageMultiplier();  // 染红按减伤率缩放
 

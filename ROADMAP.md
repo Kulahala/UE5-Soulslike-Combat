@@ -106,6 +106,9 @@ Completed roadmap work is retained here as a compact, durable record. Do not ret
 - [x] **TODO-03B-C2: Pickup Feedback And Empty-Slot Auto-Equip v1**
   Delivered definition-owned pickup audio and a candidate-first fixed-world claim that atomically persists the new instance, reward ID, and only an empty compatible equipment slot. Automatic first-equip is silent apart from the pickup sound, never replaces an occupied slot, and leaves the world Actor intact when candidate preparation or persistence fails. User compilation and PIE validation passed; normal and adversarial review found no transaction, sound-routing, or materialization lifecycle defect.
 
+- [x] **TODO-04A: Projectile Delivery Core v1**
+  Delivered the pure C++ `FCombatHitRequest` / `FCombatHitResult` resolver shared by melee and projectile delivery, plus a zero-gravity, first-blocking-hit `ACombatProjectile` with immutable launch configuration, deferred Owner/Instigator setup, bounded lifetime and non-Shipping PIE commands. The resolver preserves current team, block/parry, damage, poise, hit-context, `GetHit` and stance-break ordering; `AWeapon` retains CameraShake, HitStop and per-swing de-duplication. Projectiles resolve only `IHitInterface` recipients, so ordinary blocking Actors only stop and destroy them. User compilation and PIE validation covered enemy hit, wall priority, block, same-team feedback, timeout, reload cleanup, the capsule-overlap spawn fix and the non-combat-Actor gate. No bow, ranged input, archer AI, assets, map content or persistence was added. The multi-projectile collision-policy decision remains in Known Risks. Completed in this commit.
+
 ## TODO Queue
 
 These TODOs are accepted future work, not permission to start implementation immediately. A queued item must be small enough to produce one independently verifiable result. Queue position follows prerequisites, validation dependencies, and the player-facing loop rather than numeric ID or append order. When an item becomes the next stage, move only that item out of this queue and write its complete implementation plan in `plan.md` first. On completion, record stable facts in `ARCHITECTURE.md` and move the compact result into `Done Milestones`; do not turn this roadmap into a stage log.
@@ -113,9 +116,6 @@ These TODOs are accepted future work, not permission to start implementation imm
 **Encounter authoring decision:** reusable Controller behavior and Spline authoring were already proven by `TODO-02A1/A2`. The former standalone `TODO-02B` is deliberately not marked Done and is absorbed as a mandatory adoption condition of `TODO-06A`: do not place a permanent `TestMap` encounter solely to repeat core validation. `TODO-02C` waits until that first permanent map-owned Controller exists.
 
 ### Ranged Combat
-
-- [ ] **TODO-04A: Projectile Delivery Core v1**
-  Add a projectile delivery boundary that reuses team filtering, block, damage, collision, line-of-sight, and hit feedback rules from melee. Verify an isolated projectile hit, blocked hit, missed collision, and friendly-fire rejection before adding a weapon or enemy family.
 
 - [ ] **TODO-04B: Player Bow v1**
   Add bow ownership, checkpoint-only weapon switching, and a player aim/release path that uses the projectile core. Keep `AMyCharacter::TryStartAction()` as the action arbiter; do not add staff, mana, or free combat hot swapping.
@@ -170,6 +170,8 @@ This is a small durable register for non-blocking review findings that can affec
 - **Scalar Gold and generic persistent-marker writers do not yet expose write failure as a failed operation.** `UpdateGold()` changes the in-memory Gold value before ignoring `SaveNow()`'s result; `AddPersistentId()` adds its `FName` then returns success without checking that result. Fixed world-pickup, equipment-slot, and checkpoint transactions have dedicated rollback paths, so this does not invalidate the current B1 flow or the existing equipment transaction boundary that B2 will reuse. **Resolution condition:** before `TODO-02C` or `TODO-03C` makes a `MarkShortcutOpened()` / `MarkEncounterCleared()` / `MarkBossCompleted()` result gate a world Actor removal, boundary opening, reward, or other irreversible presentation, standardize these APIs on explicit failure results and defined rollback/retry behavior, then cover the branch with controlled save-write failure injection.
 
 - **World-pickup invalid-authoring downgrade is source-reviewed, not fixture-validated.** Missing/duplicate `PersistentId` and unknown `ItemDefinitionId` paths warn and prevent an invalid reward from being granted; the valid sword/shield path is user-validated. **Resolution condition:** before `TODO-03C` adds another persistent fixed reward or drop source, create an unsaved temporary fixture for missing ID, duplicate ID, and unknown definition cases, then verify warnings, no duplicate item record, and no erroneous Actor removal.
+
+- **Projectile-to-projectile collision policy is undecided.** `ACombatProjectile` uses `ECC_WorldDynamic` and blocks `ECC_WorldDynamic`, so two live projectiles will currently stop each other when their swept paths intersect. The single-shot `TODO-04A` debug fixture does not establish whether this is desired gameplay. **Resolution condition:** before `TODO-04B` accepts repeated player shots with more than one projectile alive, and in any case before `TODO-04D` introduces mixed player/enemy fire, decide whether projectiles should collide or pass through; implement the selected filtering without losing wall and combat-target blocking, then validate simultaneous shots.
 
 ## Equipment And Loot Direction
 

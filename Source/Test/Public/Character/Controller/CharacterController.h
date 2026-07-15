@@ -183,6 +183,13 @@ public:
 	UFUNCTION(Exec)
 	void ItemDebugFailNextClaimSave();
 
+	// 非 Shipping 的投射物验收入口；不创建正式输入映射或地图内容。
+	UFUNCTION(Exec)
+	void ProjectileDebugFire();
+
+	UFUNCTION(Exec)
+	void ProjectileDebugFireSelf(FName SourceTeam);
+
 	bool IsPaused() const { return bIsPaused; }
 	void SetCanPause(bool bCanPauseNew) { bCanPause = bCanPauseNew; }
 	void ClearPauseIfActive();

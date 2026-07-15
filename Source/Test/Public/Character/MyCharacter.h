@@ -33,6 +33,7 @@ class UTestSaveGame;
 class UItemDefinitionDataAsset;
 enum class EItemEquipmentSlot : uint8;
 struct FPlayerAttackMotionWarpingConfig;
+struct FCombatHitRequest;
 
 UCLASS()
 class TEST_API AMyCharacter : public ABaseCharacter, public IBlockableInterface
@@ -117,8 +118,7 @@ public:
 	void InterruptBlock(bool bClearHeld);
 	void TryResumeBlock();
 	bool CanStartBlock() const;
-	virtual FBlockResult TryBlockHit(const FVector& ImpactPoint, float IncomingDamage,
-	                                 AActor* Attacker, AActor* DamageCauser) override;
+	virtual FBlockResult TryBlockHit(const FCombatHitRequest& Request) override;
 
 	/* 弹反 */
 	void Input_Parry();

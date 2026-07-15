@@ -4,6 +4,8 @@
 #include "UObject/Interface.h"
 #include "BlockableInterface.generated.h"
 
+struct FCombatHitRequest;
+
 USTRUCT(BlueprintType)
 struct FBlockResult
 {
@@ -33,6 +35,5 @@ class TEST_API IBlockableInterface
 	GENERATED_BODY()
 
 public:
-	virtual FBlockResult TryBlockHit(const FVector& ImpactPoint, float IncomingDamage,
-	                                 AActor* Attacker, AActor* DamageCauser) = 0;
+	virtual FBlockResult TryBlockHit(const FCombatHitRequest& Request) = 0;
 };

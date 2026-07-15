@@ -30,17 +30,6 @@ public:
 	void ExecuteWeaponTrace(); // 执行检测：每帧调用
 	void ClearIgnoreActors() { IgnoreActors.Empty(); }  // 清空黑名单（受控接口）
 
-	// 命中解析结果（内部用）
-	struct FWeaponHitResult
-	{
-		float FinalDamage = 0.f;
-		bool bPlayNormalHitReact = true;
-		float KnockbackScale = 1.f;
-		bool bApplyStun = true;
-		bool bSameTeam = false;
-		bool bParried = false;
-	};
-
 protected:
 	/* 拾取 */
 	// 装备武器时播放的音效
@@ -89,18 +78,6 @@ private:
 	FRotator TraceRotationOld;
 
 	void BuildIgnoreList(TArray<AActor*>& OutActors);
-	/**
-	 * 解析一次武器命中。
-	 * HitActor 是本次扫掠命中的 Actor，HitPoint 保留 ImpactPoint/法线等信息。
-	 * 返回值只描述伤害与反馈决策，不直接播放反馈或修改受击者状态。
-	 */
-	FWeaponHitResult ResolveHit(AActor* HitActor, const FHitResult& HitPoint);
-	/**
-	 * 派发一次命中反馈。
-	 * Result 必须来自 ResolveHit()；该函数负责写入 PendingHitContext、触发 GetHit、处理破防、卡肉和黑名单。
-	 */
-	void DispatchHitFeedback(AActor* HitActor, const FHitResult& HitPoint, const FWeaponHitResult& Result);
-
 	// 武器基础伤害，格挡时按 BlockedDamageMultiplier 缩放
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat", meta = (AllowPrivateAccess = "true", ToolTip = "武器基础伤害，格挡时按盾牌 BlockedDamageMultiplier 缩放。"))
 	float Damage = 10.f;
