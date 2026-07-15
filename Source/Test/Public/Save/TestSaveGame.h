@@ -45,7 +45,7 @@ class TEST_API UTestSaveGame : public USaveGame
 	GENERATED_BODY()
 
 public:
-	static constexpr int32 CurrentSaveVersion = 1;
+	static constexpr int32 CurrentSaveVersion = 2;
 
 	UPROPERTY(SaveGame, VisibleAnywhere, BlueprintReadOnly, Category = "Save")
 	int32 SaveVersion = CurrentSaveVersion;
@@ -58,6 +58,9 @@ public:
 
 	UPROPERTY(SaveGame, VisibleAnywhere, BlueprintReadOnly, Category = "Save")
 	FName LastCheckpointId = NAME_None;
+
+	UPROPERTY(SaveGame, VisibleAnywhere, BlueprintReadOnly, Category = "Checkpoint")
+	TSet<FName> ActivatedCheckpointIds;
 
 	UPROPERTY(SaveGame, VisibleAnywhere, BlueprintReadOnly, Category = "Progress")
 	int32 Gold = 0;
@@ -83,5 +86,6 @@ public:
 
 	void InitializeNewSave(FName InitialMapName, FName InitialCheckpointId);
 	bool IsCompatible() const;
-	bool IsUsable() const;
+	bool IsPersistable() const;
+	bool HasRespawnAnchor() const;
 };

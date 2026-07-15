@@ -36,7 +36,8 @@ public:
 	bool SetEquippedItemSlot(FName SlotId, FName ItemInstanceId);
 	bool GetSavedItemOwnership(TArray<FTestItemInstanceRecord>& OutItemInstances,
 	                           TArray<FTestEquipmentSlotRecord>& OutEquippedSlots) const;
-	void SetRespawnCheckpoint(FName GameplayMapName, FName CheckpointId);
+	bool ActivateCheckpointAndSetRespawn(FName GameplayMapName, FName CheckpointId);
+	bool HasActivatedCheckpoint(FName CheckpointId);
 	void PrepareGameplayTransition(FName GameplayMapName, FName CheckpointId);
 	void InvalidateCurrentSave(const FString& Reason);
 	void ReturnToMainMenu();
@@ -70,6 +71,4 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category = "Maps", meta = (ToolTip = "主菜单地图名。资产路径由地图名解析，不保存到 SaveGame。"))
 	FName MainMenuMapName = FName(TEXT("MainMenu"));
 
-	UPROPERTY(EditDefaultsOnly, Category = "Maps", meta = (ToolTip = "新档初始复活火堆的稳定 PersistentId；首次进入地图仍从 PlayerStart 出生。"))
-	FName DefaultStartCheckpointId = FName(TEXT("StartBonfire"));
 };

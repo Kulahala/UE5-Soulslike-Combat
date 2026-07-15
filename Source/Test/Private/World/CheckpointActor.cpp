@@ -7,6 +7,7 @@
 #include "Components/SphereComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/World.h"
+#include "Game/SoulslikeGameInstance.h"
 #include "Game/TestGameMode.h"
 
 ACheckpointActor::ACheckpointActor()
@@ -50,11 +51,20 @@ void ACheckpointActor::BeginPlay()
 bool ACheckpointActor::CanInteract_Implementation(AActor* Interactor) const
 {
 	const AMyCharacter* Player = Cast<AMyCharacter>(Interactor);
-	return PersistentId != NAME_None && Player && Player->CanInteractWithWorld();
+	const ATestGameMode* GameMode = GetWorld() ? GetWorld()->GetAuthGameMode<ATestGameMode>() : nullptr;
+	return GameMode && GameMode->CanUseCheckpoint(this, Player);
 }
 
 FText ACheckpointActor::GetInteractionPrompt_Implementation() const
 {
+	if (USoulslikeGameInstance* GameInstance = GetGameInstance<USoulslikeGameInstance>())
+	{
+		if (GameInstance->HasActivatedCheckpoint(PersistentId))
+		{
+			return FText::FromString(TEXT("使用火堆"));
+		}
+	}
+
 	return FText::FromString(TEXT("休息"));
 }
 
@@ -72,7 +82,7 @@ void ACheckpointActor::Interact_Implementation(AActor* Interactor)
 		return;
 	}
 
-	GameMode->RequestRestAtCheckpoint(this, Player);
+	GameMode->RequestUseCheckpoint(this, Player);
 }
 
 FTransform ACheckpointActor::GetSpawnTransform() const

@@ -9,6 +9,8 @@
 
 class UInputMappingContext;
 class UInputAction;
+class ACheckpointActor;
+class UBonfireMenuWidget;
 class UPauseMenuWidget;
 class UDeathOverlayWidget;
 class UInteractionPromptWidget;
@@ -130,14 +132,30 @@ private:
 	UPROPERTY()
 	UDeathOverlayWidget* DeathOverlayWidget = nullptr;
 
+	UPROPERTY(EditDefaultsOnly, Category = "UI", meta = (ToolTip = "火堆服务菜单 Widget 类（蓝图子类）。"))
+	TSubclassOf<UBonfireMenuWidget> BonfireMenuClass;
+
+	UPROPERTY()
+	UBonfireMenuWidget* BonfireMenuWidget = nullptr;
+
+	TWeakObjectPtr<ACheckpointActor> ActiveBonfireCheckpoint;
+	bool bBonfireMenuOpen = false;
+
 	void TogglePause();
 	void RestoreGameplayInput();
+	void DismissBonfireMenu(bool bRestoreGameplayInput);
 
 	UFUNCTION()
 	void OnResumeRequested();
 
 	UFUNCTION()
 	void OnQuitRequested();
+
+	UFUNCTION()
+	void OnBonfireRestRequested();
+
+	UFUNCTION()
+	void OnBonfireLeaveRequested();
 
 public:
 	FString GetDebugInputText() const;
@@ -160,4 +178,6 @@ public:
 	void HideInteractionPrompt();
 	void ShowDeathOverlay();
 	void PrepareForMapTransition();
+	bool OpenBonfireMenu(ACheckpointActor* Checkpoint);
+	void CloseBonfireMenu();
 };

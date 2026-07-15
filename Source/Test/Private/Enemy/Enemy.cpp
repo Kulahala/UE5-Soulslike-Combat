@@ -350,6 +350,18 @@ bool AEnemy::ActivateForEncounter(AEncounterController* CurrentOwner, AActor* In
 	return true;
 }
 
+bool AEnemy::IsEngagingActor(const AActor* Actor) const
+{
+	if (!IsValid(Actor) || bEncounterDormant || EnemyState == EEnemyState::EES_Dead || ChasingTarget != Actor)
+	{
+		return false;
+	}
+
+	return EnemyState == EEnemyState::EES_Chasing || EnemyState == EEnemyState::EES_Combating
+		|| EnemyState == EEnemyState::EES_Attacking || EnemyState == EEnemyState::EES_Stunned
+		|| EnemyState == EEnemyState::EES_StanceBreak;
+}
+
 // ==================== 韧性系统 ====================
 
 void AEnemy::ApplyPoiseDamage(float Damage, AActor* DamageInstigator)

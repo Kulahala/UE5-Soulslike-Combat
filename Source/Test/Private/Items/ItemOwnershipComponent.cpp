@@ -20,9 +20,9 @@ bool UItemOwnershipComponent::RestoreFromSave(const UTestSaveGame* SaveGame)
 	EquippedSlots.Reset();
 	BuildDefinitionCatalog();
 
-	if (!SaveGame || !SaveGame->IsUsable())
+	if (!SaveGame || !SaveGame->IsPersistable())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("Item ownership restore skipped: no usable save is available."));
+		UE_LOG(LogTemp, Warning, TEXT("Item ownership restore skipped: no persistable save is available."));
 		return false;
 	}
 

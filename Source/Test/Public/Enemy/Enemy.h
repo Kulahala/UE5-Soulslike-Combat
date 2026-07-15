@@ -91,6 +91,7 @@ public:
 
 	/* Getters */
 	FORCEINLINE EEnemyState GetEnemyState() const { return EnemyState; }
+	bool IsEngagingActor(const AActor* Actor) const;
 
 	/* 受击/死亡配置 */
 	virtual UHitReactionConfigDataAsset* GetReactionConfig() const override;

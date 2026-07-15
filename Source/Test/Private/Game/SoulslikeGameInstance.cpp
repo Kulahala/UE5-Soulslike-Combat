@@ -15,7 +15,7 @@ void USoulslikeGameInstance::Init()
 
 bool USoulslikeGameInstance::HasValidContinue()
 {
-	return EnsureCurrentSaveLoaded() && CurrentSaveGame && CurrentSaveGame->IsUsable();
+	return EnsureCurrentSaveLoaded() && CurrentSaveGame && CurrentSaveGame->HasRespawnAnchor();
 }
 
 bool USoulslikeGameInstance::HasExistingSave() const
@@ -31,17 +31,29 @@ bool USoulslikeGameInstance::StartNewGame(FName GameplayMapName)
 		return false;
 	}
 
-	CurrentSaveGame = NewObject<UTestSaveGame>(this);
-	CurrentSaveGame->InitializeNewSave(GameplayMapName, DefaultStartCheckpointId);
+	UTestSaveGame* PreviousSaveGame = CurrentSaveGame;
+	const FName PreviousPendingCheckpointId = PendingCheckpointId;
+	const FName PreviousPendingGameplayMapName = PendingGameplayMapName;
+	const bool bPreviousAttemptedSaveLoad = bAttemptedSaveLoad;
+
+	UTestSaveGame* NewSaveGame = NewObject<UTestSaveGame>(this);
+	NewSaveGame->InitializeNewSave(GameplayMapName, NAME_None);
+
+	CurrentSaveGame = NewSaveGame;
 	bAttemptedSaveLoad = true;
-	// 新游戏从关卡 PlayerStart 开始；默认火堆只作为新档的首个复活锚点。
-	PrepareGameplayTransition(GameplayMapName, NAME_None);
 
 	if (!SaveNow())
 	{
+		CurrentSaveGame = PreviousSaveGame;
+		PendingCheckpointId = PreviousPendingCheckpointId;
+		PendingGameplayMapName = PreviousPendingGameplayMapName;
+		bAttemptedSaveLoad = bPreviousAttemptedSaveLoad;
+		UE_LOG(LogTemp, Warning, TEXT("StartNewGame failed: the previous in-memory save was restored."));
 		return false;
 	}
 
+	// 新游戏先建立可写进度记录；首次实际激活火堆前不提供 Continue 或重生锚点。
+	PrepareGameplayTransition(GameplayMapName, NAME_None);
 	OpenGameplayMap();
 	return true;
 }
@@ -61,9 +73,9 @@ bool USoulslikeGameInstance::ContinueGame()
 
 bool USoulslikeGameInstance::SaveNow()
 {
-	if (!CurrentSaveGame || !CurrentSaveGame->IsUsable())
+	if (!CurrentSaveGame || !CurrentSaveGame->IsPersistable())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("SaveNow skipped: current save is not usable."));
+		UE_LOG(LogTemp, Warning, TEXT("SaveNow skipped: current save is not persistable."));
 		return false;
 	}
 
@@ -78,7 +90,7 @@ bool USoulslikeGameInstance::SaveNow()
 
 void USoulslikeGameInstance::UpdateGold(int32 NewGold)
 {
-	if (!EnsureCurrentSaveLoaded() || !CurrentSaveGame || !CurrentSaveGame->IsUsable())
+	if (!EnsureCurrentSaveLoaded() || !CurrentSaveGame || !CurrentSaveGame->IsPersistable())
 	{
 		return;
 	}
@@ -89,7 +101,7 @@ void USoulslikeGameInstance::UpdateGold(int32 NewGold)
 
 bool USoulslikeGameInstance::AddOwnedItemInstance(const FTestItemInstanceRecord& ItemRecord)
 {
-	if (!EnsureCurrentSaveLoaded() || !CurrentSaveGame || !CurrentSaveGame->IsUsable())
+	if (!EnsureCurrentSaveLoaded() || !CurrentSaveGame || !CurrentSaveGame->IsPersistable())
 	{
 		UE_LOG(LogTemp, Warning, TEXT("AddOwnedItemInstance failed: no usable current save."));
 		return false;
@@ -127,7 +139,7 @@ bool USoulslikeGameInstance::AddOwnedItemInstance(const FTestItemInstanceRecord&
 bool USoulslikeGameInstance::AddOwnedItemInstanceAndClaimReward(const FTestItemInstanceRecord& ItemRecord,
 	                                                                FName RewardId)
 {
-	if (!EnsureCurrentSaveLoaded() || !CurrentSaveGame || !CurrentSaveGame->IsUsable())
+	if (!EnsureCurrentSaveLoaded() || !CurrentSaveGame || !CurrentSaveGame->IsPersistable())
 	{
 		UE_LOG(LogTemp, Warning, TEXT("AddOwnedItemInstanceAndClaimReward failed: no usable current save."));
 		return false;
@@ -181,7 +193,7 @@ bool USoulslikeGameInstance::SetEquippedItemSlot(FName SlotId, FName ItemInstanc
 		return false;
 	}
 
-	if (!EnsureCurrentSaveLoaded() || !CurrentSaveGame || !CurrentSaveGame->IsUsable())
+	if (!EnsureCurrentSaveLoaded() || !CurrentSaveGame || !CurrentSaveGame->IsPersistable())
 	{
 		UE_LOG(LogTemp, Warning, TEXT("SetEquippedItemSlot failed: no usable current save."));
 		return false;
@@ -260,7 +272,7 @@ bool USoulslikeGameInstance::GetSavedItemOwnership(TArray<FTestItemInstanceRecor
 	OutItemInstances.Reset();
 	OutEquippedSlots.Reset();
 
-	if (!CurrentSaveGame || !CurrentSaveGame->IsUsable())
+	if (!CurrentSaveGame || !CurrentSaveGame->IsPersistable())
 	{
 		return false;
 	}
@@ -270,28 +282,44 @@ bool USoulslikeGameInstance::GetSavedItemOwnership(TArray<FTestItemInstanceRecor
 	return true;
 }
 
-void USoulslikeGameInstance::SetRespawnCheckpoint(FName GameplayMapName, FName CheckpointId)
+bool USoulslikeGameInstance::ActivateCheckpointAndSetRespawn(FName GameplayMapName, FName CheckpointId)
 {
 	if (GameplayMapName == NAME_None || CheckpointId == NAME_None)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("SetRespawnCheckpoint rejected an empty map or checkpoint ID."));
-		return;
+		UE_LOG(LogTemp, Warning, TEXT("ActivateCheckpointAndSetRespawn rejected an empty map or checkpoint ID."));
+		return false;
 	}
 
-	if (!EnsureCurrentSaveLoaded() || !CurrentSaveGame || !CurrentSaveGame->IsUsable())
+	if (!EnsureCurrentSaveLoaded() || !CurrentSaveGame || !CurrentSaveGame->IsPersistable())
 	{
-		CurrentSaveGame = NewObject<UTestSaveGame>(this);
-		CurrentSaveGame->InitializeNewSave(GameplayMapName, CheckpointId);
-		bAttemptedSaveLoad = true;
+		UE_LOG(LogTemp, Warning, TEXT("ActivateCheckpointAndSetRespawn failed: no persistable current save."));
+		return false;
 	}
-	else
+
+	const FName PreviousMapName = CurrentSaveGame->MapName;
+	const FName PreviousCheckpointId = CurrentSaveGame->LastCheckpointId;
+	const TSet<FName> PreviousActivatedCheckpointIds = CurrentSaveGame->ActivatedCheckpointIds;
+
+	CurrentSaveGame->MapName = GameplayMapName;
+	CurrentSaveGame->LastCheckpointId = CheckpointId;
+	CurrentSaveGame->ActivatedCheckpointIds.Add(CheckpointId);
+
+	if (!SaveNow())
 	{
-		CurrentSaveGame->MapName = GameplayMapName;
-		CurrentSaveGame->LastCheckpointId = CheckpointId;
+		CurrentSaveGame->MapName = PreviousMapName;
+		CurrentSaveGame->LastCheckpointId = PreviousCheckpointId;
+		CurrentSaveGame->ActivatedCheckpointIds = PreviousActivatedCheckpointIds;
+		return false;
 	}
 
 	PrepareGameplayTransition(GameplayMapName, CheckpointId);
-	SaveNow();
+	return true;
+}
+
+bool USoulslikeGameInstance::HasActivatedCheckpoint(FName CheckpointId)
+{
+	return CheckpointId != NAME_None && EnsureCurrentSaveLoaded() && CurrentSaveGame
+		&& CurrentSaveGame->IsPersistable() && CurrentSaveGame->ActivatedCheckpointIds.Contains(CheckpointId);
 }
 
 void USoulslikeGameInstance::PrepareGameplayTransition(FName GameplayMapName, FName CheckpointId)
@@ -344,7 +372,7 @@ void USoulslikeGameInstance::MarkRewardClaimed(FName PersistentId)
 
 bool USoulslikeGameInstance::HasClaimedReward(FName PersistentId)
 {
-	if (PersistentId == NAME_None || !EnsureCurrentSaveLoaded() || !CurrentSaveGame || !CurrentSaveGame->IsUsable())
+	if (PersistentId == NAME_None || !EnsureCurrentSaveLoaded() || !CurrentSaveGame || !CurrentSaveGame->IsPersistable())
 	{
 		return false;
 	}
@@ -391,10 +419,15 @@ bool USoulslikeGameInstance::LoadExistingSave()
 		return false;
 	}
 
-	if (!CurrentSaveGame->IsUsable())
+	if (!CurrentSaveGame->IsPersistable())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("Save slot '%s' is invalid, incompatible, or missing a respawn anchor. Continue is disabled."), *SaveSlotName);
+		UE_LOG(LogTemp, Warning, TEXT("Save slot '%s' is invalid or incompatible. Continue is disabled."), *SaveSlotName);
 		return false;
+	}
+
+	if (!CurrentSaveGame->HasRespawnAnchor())
+	{
+		UE_LOG(LogTemp, Display, TEXT("Save slot '%s' has persistent progress but no activated checkpoint. Continue is disabled."), *SaveSlotName);
 	}
 
 	return true;
@@ -407,6 +440,12 @@ bool USoulslikeGameInstance::EnsureCurrentSaveLoaded()
 
 bool USoulslikeGameInstance::AddPersistentId(TSet<FName>& TargetSet, FName PersistentId, const TCHAR* Context)
 {
+	if (!CurrentSaveGame || !CurrentSaveGame->IsPersistable())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Cannot persist %s: no persistable current save."), Context);
+		return false;
+	}
+
 	if (PersistentId == NAME_None)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("Cannot persist an empty %s ID."), Context);

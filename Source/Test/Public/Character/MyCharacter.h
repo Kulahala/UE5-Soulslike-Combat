@@ -88,6 +88,9 @@ public:
 	bool CanInteractWithWorld() const;
 	void RegisterInteractable(AActor* InteractableActor);
 	void UnregisterInteractable(AActor* InteractableActor);
+	void SetBonfireServiceProtection(bool bEnabled);
+	void RefreshInteractionPrompt();
+	FORCEINLINE bool IsBonfireServiceProtected() const { return bBonfireServiceProtected; }
 	bool EquipWeaponFromPickup(AWeapon* Weapon);
 	bool EquipShieldFromPickup(AShield* Shield);
 
@@ -321,6 +324,9 @@ private:
 	/* 翻滚 */
 	float DodgeStaminaCost = 15.f;
 	bool bDodgeInvulnerable = false;
+
+	// 火堆服务菜单期间的短暂运行态；不属于可持久化或战斗 FSM 状态。
+	bool bBonfireServiceProtected = false;
 
 	/* 药瓶 */
 	bool bPotionOnCooldown = false;

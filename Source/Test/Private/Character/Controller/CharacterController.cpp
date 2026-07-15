@@ -8,6 +8,7 @@
 #include "Game/SoulslikeGameInstance.h"
 #include "Game/TestGameMode.h"
 #include "Engine/World.h"
+#include "HUD/BonfireMenuWidget.h"
 #include "HUD/DeathOverlayWidget.h"
 #include "HUD/InteractionPromptWidget.h"
 #include "HUD/PauseMenuWidget.h"
@@ -15,6 +16,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "Settings/TestGameUserSettings.h"
 #include "Enemy/Enemy.h" 
+#include "World/CheckpointActor.h"
 
 namespace
 {
@@ -63,6 +65,16 @@ void ACharacterController::BeginPlay()
 		{
 			PauseMenuWidget->OnResumeDelegate.AddDynamic(this, &ACharacterController::OnResumeRequested);
 			PauseMenuWidget->OnQuitDelegate.AddDynamic(this, &ACharacterController::OnQuitRequested);
+		}
+	}
+
+	if (IsLocalPlayerController() && BonfireMenuClass)
+	{
+		BonfireMenuWidget = CreateWidget<UBonfireMenuWidget>(this, BonfireMenuClass);
+		if (BonfireMenuWidget)
+		{
+			BonfireMenuWidget->OnRestRequested.AddDynamic(this, &ACharacterController::OnBonfireRestRequested);
+			BonfireMenuWidget->OnLeaveRequested.AddDynamic(this, &ACharacterController::OnBonfireLeaveRequested);
 		}
 	}
 
@@ -443,6 +455,90 @@ void ACharacterController::ClearPauseIfActive()
 	}
 }
 
+bool ACharacterController::OpenBonfireMenu(ACheckpointActor* Checkpoint)
+{
+	if (!IsLocalPlayerController() || bBonfireMenuOpen || !Checkpoint || !BonfireMenuWidget)
+	{
+		return false;
+	}
+
+	AMyCharacter* PlayerCharacter = GetMyCharacter();
+	if (!PlayerCharacter)
+	{
+		return false;
+	}
+
+	ClearPauseIfActive();
+	PlayerCharacter->SetBonfireServiceProtection(true);
+	ActiveBonfireCheckpoint = Checkpoint;
+	bBonfireMenuOpen = true;
+	bCanPause = false;
+	HideInteractionPrompt();
+
+	FInputModeUIOnly InputMode;
+	InputMode.SetWidgetToFocus(BonfireMenuWidget->TakeWidget());
+	SetInputMode(InputMode);
+	bShowMouseCursor = true;
+	BonfireMenuWidget->AddToViewport(2);
+	BonfireMenuWidget->SetKeyboardFocus();
+	return true;
+}
+
+void ACharacterController::CloseBonfireMenu()
+{
+	DismissBonfireMenu(true);
+}
+
+void ACharacterController::DismissBonfireMenu(bool bRestoreInput)
+{
+	if (!bBonfireMenuOpen)
+	{
+		return;
+	}
+
+	bBonfireMenuOpen = false;
+	ActiveBonfireCheckpoint.Reset();
+
+	if (BonfireMenuWidget)
+	{
+		BonfireMenuWidget->RemoveFromParent();
+	}
+
+	AMyCharacter* PlayerCharacter = GetMyCharacter();
+	if (PlayerCharacter)
+	{
+		PlayerCharacter->SetBonfireServiceProtection(false);
+	}
+
+	if (!bRestoreInput)
+	{
+		return;
+	}
+
+	bCanPause = true;
+	RestoreGameplayInput();
+	if (PlayerCharacter)
+	{
+		PlayerCharacter->RefreshInteractionPrompt();
+	}
+}
+
+void ACharacterController::OnBonfireRestRequested()
+{
+	ACheckpointActor* Checkpoint = ActiveBonfireCheckpoint.Get();
+	AMyCharacter* PlayerCharacter = GetMyCharacter();
+	ATestGameMode* GameMode = GetWorld() ? GetWorld()->GetAuthGameMode<ATestGameMode>() : nullptr;
+	if (Checkpoint && PlayerCharacter && GameMode)
+	{
+		GameMode->RequestRestAtCheckpoint(Checkpoint, PlayerCharacter);
+	}
+}
+
+void ACharacterController::OnBonfireLeaveRequested()
+{
+	CloseBonfireMenu();
+}
+
 void ACharacterController::ShowInteractionPrompt(const FText& PromptText)
 {
 	if (!InteractionPromptWidget)
@@ -467,6 +563,8 @@ void ACharacterController::HideInteractionPrompt()
 
 void ACharacterController::ShowDeathOverlay()
 {
+	DismissBonfireMenu(false);
+	RestoreGameplayInput();
 	bCanPause = false;
 	ClearPauseIfActive();
 	HideInteractionPrompt();
@@ -486,6 +584,7 @@ void ACharacterController::ShowDeathOverlay()
 
 void ACharacterController::PrepareForMapTransition()
 {
+	DismissBonfireMenu(false);
 	ClearPauseIfActive();
 	HideInteractionPrompt();
 	RestoreGameplayInput();

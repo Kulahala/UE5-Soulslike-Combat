@@ -6,6 +6,7 @@
 #include "Character/Controller/CharacterController.h"
 #include "Character/MyCharacter.h"
 #include "Camera/PlayerCameraManager.h"
+#include "Enemy/Enemy.h"
 #include "EngineUtils.h"
 #include "Game/SoulslikeGameInstance.h"
 #include "Kismet/GameplayStatics.h"
@@ -118,9 +119,9 @@ void ATestGameMode::HandlePlayerSpawned(APlayerController* NewPlayer)
 	}
 }
 
-void ATestGameMode::RequestRestAtCheckpoint(ACheckpointActor* Checkpoint, AMyCharacter* Player)
+void ATestGameMode::RequestUseCheckpoint(ACheckpointActor* Checkpoint, AMyCharacter* Player)
 {
-	if (bTransitionInProgress || !Checkpoint || !Player || Checkpoint->GetPersistentId() == NAME_None)
+	if (!CanUseCheckpoint(Checkpoint, Player))
 	{
 		return;
 	}
@@ -128,13 +129,46 @@ void ATestGameMode::RequestRestAtCheckpoint(ACheckpointActor* Checkpoint, AMyCha
 	USoulslikeGameInstance* GameInstance = GetGameInstance<USoulslikeGameInstance>();
 	if (!GameInstance)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("Rest failed: USoulslikeGameInstance is not active."));
+		UE_LOG(LogTemp, Warning, TEXT("Checkpoint use failed: USoulslikeGameInstance is not active."));
 		return;
 	}
 
-	GameInstance->SetRespawnCheckpoint(GetCurrentGameplayMapName(), Checkpoint->GetPersistentId());
+	if (!GameInstance->HasActivatedCheckpoint(Checkpoint->GetPersistentId()))
+	{
+		RequestRestAtCheckpoint(Checkpoint, Player);
+		return;
+	}
+
+	ACharacterController* Controller = Cast<ACharacterController>(Player->GetController());
+	if (!Controller || !Controller->OpenBonfireMenu(Checkpoint))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Checkpoint '%s' could not open the bonfire menu."),
+			*Checkpoint->GetPersistentId().ToString());
+	}
+}
+
+bool ATestGameMode::RequestRestAtCheckpoint(ACheckpointActor* Checkpoint, AMyCharacter* Player)
+{
+	if (bTransitionInProgress || !Checkpoint || !Player || Checkpoint->GetPersistentId() == NAME_None)
+	{
+		return false;
+	}
+
+	USoulslikeGameInstance* GameInstance = GetGameInstance<USoulslikeGameInstance>();
+	if (!GameInstance)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Rest failed: USoulslikeGameInstance is not active."));
+		return false;
+	}
+
 	CapturePlayerGold();
+	if (!GameInstance->ActivateCheckpointAndSetRespawn(GetCurrentGameplayMapName(), Checkpoint->GetPersistentId()))
+	{
+		return false;
+	}
+
 	StartGameplayReload();
+	return true;
 }
 
 void ATestGameMode::HandlePlayerDeath(AMyCharacter* Player)
@@ -145,21 +179,23 @@ void ATestGameMode::HandlePlayerDeath(AMyCharacter* Player)
 	}
 
 	USoulslikeGameInstance* GameInstance = GetGameInstance<USoulslikeGameInstance>();
-	if (!GameInstance || !GameInstance->HasValidContinue())
+	if (!GameInstance)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("Death respawn failed: no valid checkpoint save exists."));
+		UE_LOG(LogTemp, Warning, TEXT("Death respawn failed: USoulslikeGameInstance is not active."));
 		return;
 	}
 
-	const FName SavedCheckpointId = GameInstance->GetLastCheckpointId();
-	if (SavedCheckpointId == NAME_None)
+	FName RespawnCheckpointId = NAME_None;
+	if (GameInstance->HasValidContinue())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("Death respawn failed: the current save has no checkpoint ID."));
-		return;
+		RespawnCheckpointId = GameInstance->GetLastCheckpointId();
+	}
+	else
+	{
+		UE_LOG(LogTemp, Display, TEXT("No activated checkpoint is available; death will restart from PlayerStart."));
 	}
 
-	// New Game deliberately enters through PlayerStart, but death must always use the durable respawn anchor.
-	GameInstance->PrepareGameplayTransition(GetCurrentGameplayMapName(), SavedCheckpointId);
+	GameInstance->PrepareGameplayTransition(GetCurrentGameplayMapName(), RespawnCheckpointId);
 
 	bTransitionInProgress = true;
 	CapturePlayerGold();
@@ -237,9 +273,9 @@ void ATestGameMode::RestorePlayerFromSave(AMyCharacter* Player)
 	}
 
 	const UTestSaveGame* SaveGame = GameInstance->GetCurrentSaveGame();
-	if (!SaveGame || !SaveGame->IsUsable())
+	if (!SaveGame || !SaveGame->IsPersistable())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("Player restore skipped: no valid current save."));
+		UE_LOG(LogTemp, Warning, TEXT("Player restore skipped: no persistable current save."));
 		return;
 	}
 
@@ -249,6 +285,30 @@ void ATestGameMode::RestorePlayerFromSave(AMyCharacter* Player)
 	bRestoringPlayerState = false;
 
 	Player->RestoreItemOwnershipFromSave(SaveGame);
+}
+
+bool ATestGameMode::CanUseCheckpoint(const ACheckpointActor* Checkpoint, const AMyCharacter* Player) const
+{
+	return !bTransitionInProgress && Checkpoint && Checkpoint->GetPersistentId() != NAME_None && Player
+		&& Player->CanInteractWithWorld() && !IsPlayerEngagedByEnemy(Player);
+}
+
+bool ATestGameMode::IsPlayerEngagedByEnemy(const AMyCharacter* Player) const
+{
+	if (!Player || !GetWorld())
+	{
+		return false;
+	}
+
+	for (TActorIterator<AEnemy> It(GetWorld()); It; ++It)
+	{
+		if (It->IsEngagingActor(Player))
+		{
+			return true;
+		}
+	}
+
+	return false;
 }
 
 void ATestGameMode::CapturePlayerGold()

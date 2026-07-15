@@ -12,7 +12,7 @@ class UPrimitiveComponent;
 class USphereComponent;
 class UStaticMeshComponent;
 
-/** 关卡放置的火堆。PersistentId 由关卡作者维护，不能依赖 Actor 名称。 */
+/** 关卡放置的火堆。首次激活自动休息，后续进入火堆服务菜单。 */
 UCLASS()
 class TEST_API ACheckpointActor : public AActor, public IInteractableInterface
 {

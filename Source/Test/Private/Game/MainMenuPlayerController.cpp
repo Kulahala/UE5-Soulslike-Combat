@@ -167,16 +167,38 @@ void AMainMenuPlayerController::FinishGameplayTransition()
 	USoulslikeGameInstance* GameInstance = GetGameInstance<USoulslikeGameInstance>();
 	if (!GameInstance)
 	{
+		UE_LOG(LogTemp, Warning, TEXT("Gameplay transition failed: USoulslikeGameInstance is not active."));
+		RecoverFromFailedGameplayTransition();
 		return;
 	}
 
-	if (bCreateNewGameAfterFade)
+	const bool bTransitionStarted = bCreateNewGameAfterFade
+		? GameInstance->StartNewGame(GameplayMapName)
+		: GameInstance->ContinueGame();
+	if (!bTransitionStarted)
 	{
-		GameInstance->StartNewGame(GameplayMapName);
+		UE_LOG(LogTemp, Warning, TEXT("Gameplay transition failed; restoring the main menu."));
+		RecoverFromFailedGameplayTransition();
 	}
-	else
+}
+
+void AMainMenuPlayerController::RecoverFromFailedGameplayTransition()
+{
+	if (PlayerCameraManager)
 	{
-		GameInstance->ContinueGame();
+		PlayerCameraManager->StartCameraFade(1.f, 0.f, MenuFadeDuration, FLinearColor::Black, false, false);
+	}
+
+	bShowMouseCursor = true;
+	RestoreMainMenuInput();
+
+	if (MainMenuWidget)
+	{
+		MainMenuWidget->SetVisibility(ESlateVisibility::Visible);
+		if (USoulslikeGameInstance* GameInstance = GetGameInstance<USoulslikeGameInstance>())
+		{
+			MainMenuWidget->SetContinueEnabled(GameInstance->HasValidContinue());
+		}
 	}
 }
 

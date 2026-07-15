@@ -116,6 +116,8 @@ void AMyCharacter::BeginPlay()
 
 void AMyCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	bBonfireServiceProtected = false;
+
 	if (PlayerHUDWidget)
 	{
 		PlayerHUDWidget->RemoveFromParent();
@@ -707,6 +709,11 @@ void AMyCharacter::Jump()
 void AMyCharacter::GetHit_Implementation(const FVector& ImpactPoint, AActor* HitInstigator)
 {
 	if (bDodgeInvulnerable) return;  // 翻滚无敌帧
+	if (bBonfireServiceProtected)
+	{
+		ResetPendingHitContext();
+		return;
+	}
 
 	if (ActionState == EActionState::EAS_UsingPotion)
 	{
@@ -742,6 +749,8 @@ void AMyCharacter::GetHit_Implementation(const FVector& ImpactPoint, AActor* Hit
 
 void AMyCharacter::Die()
 {
+	bBonfireServiceProtected = false;
+
 	// 先清理暂停状态（如果死亡时正在暂停）
 	if (ACharacterController* CC = Cast<ACharacterController>(GetController()))
 	{
@@ -824,7 +833,7 @@ bool AMyCharacter::IsExhaustionTimerActive() const
 float AMyCharacter::TakeDamage(float DamageAmount, const struct FDamageEvent& DamageEvent,
                                 class AController* EventInstigator, AActor* DamageCauser)
 {
-	if (bDodgeInvulnerable) return 0.f;  // 翻滚无敌帧
+	if (bDodgeInvulnerable || bBonfireServiceProtected) return 0.f;  // 翻滚与火堆服务无敌
 
 	if (PlayerHUDWidget)
 	{
@@ -1181,10 +1190,37 @@ void AMyCharacter::TryInteract()
 
 bool AMyCharacter::CanInteractWithWorld() const
 {
-	return ActionState == EActionState::EAS_UnOccupied
+	return !bBonfireServiceProtected && ActionState == EActionState::EAS_UnOccupied
 		&& Attributes
 		&& Attributes->IsAlive()
 		&& !GetCharacterMovement()->IsFalling();
+}
+
+void AMyCharacter::SetBonfireServiceProtection(bool bEnabled)
+{
+	if (bBonfireServiceProtected == bEnabled)
+	{
+		return;
+	}
+
+	bBonfireServiceProtected = bEnabled;
+	if (!bEnabled)
+	{
+		return;
+	}
+
+	ResetCombo();
+	CloseActionCancelWindow();
+	CancelChargeInputState();
+	bPendingExhaustedAfterAttack = false;
+	bIsSprinting = false;
+	bIsWalking = false;
+	InterruptBlock(true);
+	ClearParryState();
+	ClearLockOn();
+	bRecenteringCamera = false;
+	StopMovementNoiseTimer();
+	GetCharacterMovement()->StopMovementImmediately();
 }
 
 void AMyCharacter::RegisterInteractable(AActor* InteractableActor)
@@ -1345,6 +1381,12 @@ void AMyCharacter::UpdateInteractionPrompt()
 	{
 		CharacterController->HideInteractionPrompt();
 	}
+}
+
+void AMyCharacter::RefreshInteractionPrompt()
+{
+	RefreshCurrentInteractable();
+	UpdateInteractionPrompt();
 }
 
 // ==================== 药瓶 ====================

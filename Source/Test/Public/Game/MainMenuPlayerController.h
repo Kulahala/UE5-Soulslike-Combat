@@ -70,6 +70,7 @@ private:
 
 	void BeginGameplayTransition(bool bCreateNewGame);
 	void FinishGameplayTransition();
+	void RecoverFromFailedGameplayTransition();
 	void RestoreMainMenuInput();
 	void RemoveInheritedGameplayHUDs() const;
 };
