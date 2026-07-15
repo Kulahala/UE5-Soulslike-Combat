@@ -44,8 +44,7 @@ Private dependency: `Slate`.
 - `ROADMAP.md` owns future direction, ordering, deferrals, non-goals, and Recommendations with adoption conditions. It is not an implementation plan or a source of truth for current behavior.
 - `plan.md` is the short-lived active-stage plan and agent handoff. Read its header before continuing prior work, keep it current, and clear completed working detail according to its header rather than turning it into history.
 - `AGENTS.md` owns durable collaboration, safety, tool, and workflow rules. Add a rule only when the pattern repeats, a mistake would be expensive, or it will guide future agents long-term.
-- Update `ARCHITECTURE.md` when source or authored assets change stable ownership, class responsibilities, state/data flow, source-of-truth rules, or durable asset topology.
-- Treat an `ARCHITECTURE.md` update as stage-closeout work: write it after the approved implementation has passed its relevant validation and review, when the behavior is stable, and before the stage commit. Keep provisional designs, in-progress wiring, and unresolved behavior in `plan.md` until then.
+- Update `ARCHITECTURE.md` only as stage-closeout work when source or authored assets introduce stable ownership, class responsibilities, state/data flow, source-of-truth rules, or durable asset topology. Write it after the approved implementation has passed its relevant validation and review, when the behavior is stable, and before the stage commit. Keep provisional designs, in-progress wiring, and unresolved behavior in `plan.md` until then.
 
 For complex multi-file C++, Blueprint/UMG, content, architecture, source-plus-asset, or systemic gameplay work, write a concrete `plan.md` before implementation. It must state scope, affected systems and public APIs/assets, execution order, validation, document impact, and commit boundary.
 
