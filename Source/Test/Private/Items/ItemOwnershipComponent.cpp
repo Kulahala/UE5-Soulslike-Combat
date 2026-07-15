@@ -218,6 +218,36 @@ bool UItemOwnershipComponent::TryClearEquipmentSlot(EItemEquipmentSlot Equipment
 	return true;
 }
 
+void UItemOwnershipComponent::GetLoadoutOptions(EItemEquipmentSlot EquipmentSlot,
+                                                 TArray<FItemLoadoutOption>& OutOptions)
+{
+	OutOptions.Reset();
+	BuildDefinitionCatalog();
+
+	if (!IsSupportedEquipmentSlot(EquipmentSlot))
+	{
+		return;
+	}
+
+	for (const FTestItemInstanceRecord& ItemRecord : OwnedItemInstances)
+	{
+		if (ItemRecord.InstanceId == NAME_None || ItemRecord.Quantity <= 0)
+		{
+			continue;
+		}
+
+		const UItemDefinitionDataAsset* Definition = GetDefinition(ItemRecord.DefinitionId);
+		if (!Definition || Definition->GetEquipmentSlot() != EquipmentSlot)
+		{
+			continue;
+		}
+
+		FItemLoadoutOption& Option = OutOptions.AddDefaulted_GetRef();
+		Option.InstanceId = ItemRecord.InstanceId;
+		Option.DisplayName = Definition->GetDisplayName();
+	}
+}
+
 FString UItemOwnershipComponent::BuildDebugSummary() const
 {
 	FString Result = FString::Printf(TEXT("Runtime item ownership: %d instance(s), %d equipped slot(s)."),

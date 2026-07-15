@@ -20,7 +20,7 @@ https://github.com/user-attachments/assets/fdd9304c-a7ea-4185-bfa1-09df583fa784
 ### Highlights
 
 - **State-driven player combat**: light combos, sprint attack, charged attack, dodge, parry, block, potion use, stamina exhaustion, hit stun, and death all flow through explicit action-state guards.
-- **Bonfire services and checkpoint flow**: New Game creates writable progress but no respawn anchor; before the first bonfire, death returns to `PlayerStart` while Gold and claimed fixed items persist. The first bonfire use rests and activates the anchor; later uses offer Rest or Leave without pausing the world.
+- **Bonfire services, loadout, and checkpoint flow**: New Game creates writable progress but no respawn anchor; before the first bonfire, death returns to `PlayerStart` while Gold and claimed fixed items persist. The first bonfire use rests and activates the anchor; later uses offer Rest, Equipment, or Leave without pausing the world. Owned sword and shield instances can be equipped or cleared there, take effect immediately, and restore through death, rest, and Continue.
 - **Data-driven attack setup**: `UAttackConfigDataAsset` owns player light combo, special attack, and charged attack data; `UEnemyAttackConfigDataAsset` owns enemy attack entries, including optional Motion Warping for leap attacks.
 - **Precise weapon hit detection**: weapons use swept box traces between previous and current positions to reduce missed hits during fast animation frames.
 - **Shield block and parry**: block checks attack direction and stamina before damage is applied; successful parries deplete enemy poise and trigger stance break.
@@ -114,7 +114,7 @@ https://github.com/user-attachments/assets/fdd9304c-a7ea-4185-bfa1-09df583fa784
 ### 核心亮点
 
 - **状态驱动的主角战斗**：轻攻击连招、冲刺攻击、蓄力攻击、翻滚、格挡、弹反、喝药、体力耗尽、受击硬直和死亡都通过明确的动作状态守卫组织。
-- **游戏流程基础**：独立主菜单提供 New Game、Continue、Settings 和 Quit；New Game 会先建立可写进度但不创建重生锚点，首次火堆前死亡回到 `PlayerStart`，Gold 与已领取固定物品仍即时保存。首次使用火堆会休息、激活锚点并重载地图；后续使用火堆打开不暂停世界的“休息 / 离开”服务菜单。
+- **游戏流程与火堆服务**：独立主菜单提供 New Game、Continue、Settings 和 Quit；New Game 会先建立可写进度但不创建重生锚点，首次火堆前死亡回到 `PlayerStart`，Gold 与已领取固定物品仍即时保存。首次使用火堆会休息、激活锚点并重载地图；后续使用火堆打开不暂停世界的“休息 / 装备 / 离开”服务菜单。已拥有的剑盾可在这里立即装备或卸下，并会跨死亡、休息和 Continue 恢复。
 - **数据驱动攻击配置**：`UAttackConfigDataAsset` 管理主角轻攻击连招、特殊攻击和蓄力攻击；`UEnemyAttackConfigDataAsset` 管理敌人招式条目，并支持为跳劈类攻击单独开启 Motion Warping。
 - **精确武器命中检测**：武器使用前一帧到当前帧的盒体扫掠，降低高速动画中的漏判。
 - **盾牌格挡与弹反**：伤害结算前先检查防御角度和体力；弹反成功会清空敌人韧性并触发破防。
@@ -133,7 +133,7 @@ https://github.com/user-attachments/assets/fdd9304c-a7ea-4185-bfa1-09df583fa784
 | 模块 | 简述 |
 |------|------|
 | 主角 | 移动、锁定、体力、攻击、翻滚、格挡、弹反、喝药、受击、死亡 |
-| 游戏流程 | 主菜单、单槽存档、火堆交互、死亡 Overlay、地图重载、Continue |
+| 游戏流程 | 主菜单、单槽存档、火堆交互与装备、死亡 Overlay、地图重载、Continue |
 | 战斗数据 | 主角连招/特殊/蓄力攻击配置，敌人招式条目，伤害/格挡耗体/韧性倍率，可选敌人 Motion Warping |
 | 武器 | 盒体扫掠、同阵营过滤、格挡拦截、命中反馈派发 |
 | 敌人 | 巡逻、搜索、追击、战斗局部 HFSM、冷却拉扯、攻击协调、跳劈 Motion Warping |

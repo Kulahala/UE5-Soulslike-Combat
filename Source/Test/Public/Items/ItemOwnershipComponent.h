@@ -8,6 +8,13 @@
 
 class USoulslikeGameInstance;
 
+/** 供火堆装备 UI 使用的只读实例选项；持久化身份始终是 InstanceId。 */
+struct TEST_API FItemLoadoutOption
+{
+	FName InstanceId = NAME_None;
+	FText DisplayName;
+};
+
 /** 玩家 Pawn 的运行时物品数据缓存；持久化写入始终委托给 USoulslikeGameInstance。 */
 UCLASS(ClassGroup = (Gameplay))
 class TEST_API UItemOwnershipComponent : public UActorComponent
@@ -25,6 +32,7 @@ public:
 	                       FName& OutInstanceId);
 	bool TryEquipInstance(FName InstanceId, USoulslikeGameInstance* GameInstance);
 	bool TryClearEquipmentSlot(EItemEquipmentSlot EquipmentSlot, USoulslikeGameInstance* GameInstance);
+	void GetLoadoutOptions(EItemEquipmentSlot EquipmentSlot, TArray<FItemLoadoutOption>& OutOptions);
 
 	FString BuildDebugSummary() const;
 

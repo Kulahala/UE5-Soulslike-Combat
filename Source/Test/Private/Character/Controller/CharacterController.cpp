@@ -16,6 +16,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "Settings/TestGameUserSettings.h"
 #include "Enemy/Enemy.h" 
+#include "Items/ItemOwnershipComponent.h"
 #include "World/CheckpointActor.h"
 
 namespace
@@ -75,6 +76,8 @@ void ACharacterController::BeginPlay()
 		{
 			BonfireMenuWidget->OnRestRequested.AddDynamic(this, &ACharacterController::OnBonfireRestRequested);
 			BonfireMenuWidget->OnLeaveRequested.AddDynamic(this, &ACharacterController::OnBonfireLeaveRequested);
+			BonfireMenuWidget->OnEquipmentRequested.AddDynamic(this, &ACharacterController::OnBonfireEquipmentRequested);
+			BonfireMenuWidget->OnLoadoutSelectionRequested.AddDynamic(this, &ACharacterController::OnBonfireLoadoutSelectionRequested);
 		}
 	}
 
@@ -474,6 +477,7 @@ bool ACharacterController::OpenBonfireMenu(ACheckpointActor* Checkpoint)
 	bBonfireMenuOpen = true;
 	bCanPause = false;
 	HideInteractionPrompt();
+	BonfireMenuWidget->ShowServicePage();
 
 	FInputModeUIOnly InputMode;
 	InputMode.SetWidgetToFocus(BonfireMenuWidget->TakeWidget());
@@ -537,6 +541,59 @@ void ACharacterController::OnBonfireRestRequested()
 void ACharacterController::OnBonfireLeaveRequested()
 {
 	CloseBonfireMenu();
+}
+
+void ACharacterController::OnBonfireEquipmentRequested()
+{
+	if (!bBonfireMenuOpen || !BonfireMenuWidget || !GetMyCharacter())
+	{
+		return;
+	}
+
+	RefreshBonfireLoadoutOptions();
+	BonfireMenuWidget->ShowLoadoutPage();
+}
+
+void ACharacterController::OnBonfireLoadoutSelectionRequested(EItemEquipmentSlot EquipmentSlot, FName InstanceId)
+{
+	if (!bBonfireMenuOpen)
+	{
+		return;
+	}
+
+	AMyCharacter* PlayerCharacter = GetMyCharacter();
+	if (!PlayerCharacter)
+	{
+		return;
+	}
+
+	PlayerCharacter->TryApplyBonfireLoadoutSelection(EquipmentSlot, InstanceId);
+	RefreshBonfireLoadoutOptions();
+}
+
+void ACharacterController::RefreshBonfireLoadoutOptions()
+{
+	if (!BonfireMenuWidget)
+	{
+		return;
+	}
+
+	AMyCharacter* PlayerCharacter = GetMyCharacter();
+	UItemOwnershipComponent* ItemOwnership = PlayerCharacter ? PlayerCharacter->GetItemOwnershipComponent() : nullptr;
+	if (!ItemOwnership)
+	{
+		return;
+	}
+
+	TArray<FItemLoadoutOption> MainHandOptions;
+	ItemOwnership->GetLoadoutOptions(EItemEquipmentSlot::MainHand, MainHandOptions);
+	BonfireMenuWidget->SetLoadoutOptions(EItemEquipmentSlot::MainHand, MainHandOptions,
+		ItemOwnership->GetEquippedInstanceId(EItemEquipmentSlot::MainHand));
+
+	TArray<FItemLoadoutOption> OffHandOptions;
+	ItemOwnership->GetLoadoutOptions(EItemEquipmentSlot::OffHand, OffHandOptions);
+	BonfireMenuWidget->SetLoadoutOptions(EItemEquipmentSlot::OffHand, OffHandOptions,
+		ItemOwnership->GetEquippedInstanceId(EItemEquipmentSlot::OffHand));
 }
 
 void ACharacterController::ShowInteractionPrompt(const FText& PromptText)

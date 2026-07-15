@@ -95,18 +95,14 @@ Completed roadmap work is retained here as a compact, durable record. Do not ret
   Delivered persistent authored world pickup conversion for the fixed `TestMap` DarkKnight sword and shield. Successful `E` collection atomically writes one owned item instance plus its claimed-reward ID, then removes the world Actor; death reload, fire reload, `Continue`, and New Game reset were user-validated. The stage deliberately leaves equipment slots, materialized weapon/shield Actors, pickup UI, and audio unchanged.
 
 - [x] **TODO-03B-B1: Bonfire Activation And Services v1**
-  Delivered SaveGame v2's separate writable-progress and respawn-anchor contracts, first-use checkpoint rest/activation, pre-bonfire PlayerStart death recovery, and a non-pausing protected bonfire menu with Rest and Leave. Gold and fixed-item persistence remain immediate before the first fire; New Game/Continue failure now returns safely to the menu instead of retaining a replacement session or black screen. User compilation and focused PIE validation passed; strict review passed, with commit approval pending.
+  Delivered SaveGame v2's separate writable-progress and respawn-anchor contracts, first-use checkpoint rest/activation, pre-bonfire PlayerStart death recovery, and a non-pausing protected bonfire menu with Rest and Leave. Gold and fixed-item persistence remain immediate before the first fire; New Game/Continue failure now returns safely to the menu instead of retaining a replacement session or black screen. Completed in commit `b80a017`.
+
+- [x] **TODO-03B-B2: Bonfire Loadout And Materialization v1**
+  Delivered fire-only MainHand/OffHand selection, stable `InstanceId` UI mapping, transactional immediate slot writes, and transient sword/shield materialization. Active changes replace the visible equipment without resting or reloading; empty slots naturally disable the matching combat action. Death, rest, Continue, and a new PIE session restore the saved selection. User compilation and PIE validation passed; the post-fix strict review also verified the shared runtime weapon Owner-before-`BeginPlay` contract. Completed in this commit.
 
 ## TODO Queue
 
 These TODOs are accepted future work, not permission to start implementation immediately. A queued item must be small enough to produce one independently verifiable result. Queue position follows prerequisites, validation dependencies, and the player-facing loop rather than numeric ID or append order. When an item becomes the next stage, move only that item out of this queue and write its complete implementation plan in `plan.md` first. On completion, record stable facts in `ARCHITECTURE.md` and move the compact result into `Done Milestones`; do not turn this roadmap into a stage log.
-
-### Equipment Ownership And Bonfire Services
-
-- [ ] **TODO-03B-B2: Bonfire Loadout And Materialization v1**
-  Add MainHand/OffHand selection inside the completed bonfire menu, then create, attach, clear, and restore the selected weapon/shield Actor loadout without a map reload. Verify combat availability, empty slots, death, fire reload, Continue, and New Game reset.
-
-The completed `TODO-03A`, `TODO-03B-A`, and `TODO-03B-B1` layers make saved item identity stable, remove fixed map-owned sword/shield lifetime from the player loop, and establish the durable checkpoint/bonfire-service boundary. `TODO-03B-B2` connects those owned records to a checkpoint-limited visible equipment loadout before the first formal Encounter.
 
 ### Encounter Boundaries
 

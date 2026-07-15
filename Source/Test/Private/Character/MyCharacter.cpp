@@ -15,6 +15,7 @@
 #include "GameFramework/SpringArmComponent.h"
 #include "Items/Weapon/Weapon.h"
 #include "Items/Shield/Shield.h"
+#include "Items/ItemDefinitionDataAsset.h"
 #include "Items/ItemOwnershipComponent.h"
 #include "Interfaces/InteractableInterface.h"
 #include "NiagaraFunctionLibrary.h"
@@ -34,6 +35,7 @@
 namespace
 {
 	const FName PlayerAttackWarpTargetName(TEXT("AttackTarget"));
+	const FName PlayerMainHandSocketName(TEXT("RightHandSocket"));
 }
 
 // ==================== 生命周期 ====================
@@ -117,6 +119,7 @@ void AMyCharacter::BeginPlay()
 void AMyCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	bBonfireServiceProtected = false;
+	DestroyMaterializedLoadout();
 
 	if (PlayerHUDWidget)
 	{
@@ -1243,31 +1246,6 @@ void AMyCharacter::UnregisterInteractable(AActor* InteractableActor)
 	RefreshCurrentInteractable();
 }
 
-bool AMyCharacter::EquipWeaponFromPickup(AWeapon* Weapon)
-{
-	if (!Weapon || WeaponState != EWeaponState::EWS_Unequipped || Weapon->GetOwner())
-	{
-		return false;
-	}
-
-	Weapon->Equip(GetMesh(), FName(TEXT("RightHandSocket")), this, this);
-	EquippedWeapon = Weapon;
-	WeaponState = EWeaponState::EWS_OneHandEquipped;
-	return true;
-}
-
-bool AMyCharacter::EquipShieldFromPickup(AShield* Shield)
-{
-	if (!Shield || EquippedShield || Shield->GetOwner())
-	{
-		return false;
-	}
-
-	Shield->EquipToOffhand(GetMesh(), Shield->GetOffhandSocketName(), this);
-	EquippedShield = Shield;
-	return true;
-}
-
 bool AMyCharacter::RestoreItemOwnershipFromSave(const UTestSaveGame* SaveGame)
 {
 	if (!ItemOwnershipComponent)
@@ -1276,7 +1254,14 @@ bool AMyCharacter::RestoreItemOwnershipFromSave(const UTestSaveGame* SaveGame)
 		return false;
 	}
 
-	return ItemOwnershipComponent->RestoreFromSave(SaveGame);
+	if (!ItemOwnershipComponent->RestoreFromSave(SaveGame))
+	{
+		DestroyMaterializedLoadout();
+		return false;
+	}
+
+	MaterializeEquippedLoadout();
+	return true;
 }
 
 bool AMyCharacter::TryGrantOwnedItem(FName DefinitionId, FName& OutInstanceId)
@@ -1315,6 +1300,248 @@ bool AMyCharacter::TryEquipOwnedItem(FName InstanceId)
 
 	USoulslikeGameInstance* GameInstance = GetGameInstance<USoulslikeGameInstance>();
 	return ItemOwnershipComponent->TryEquipInstance(InstanceId, GameInstance);
+}
+
+bool AMyCharacter::TryApplyBonfireLoadoutSelection(EItemEquipmentSlot EquipmentSlot, FName InstanceId)
+{
+	if (!bBonfireServiceProtected)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Loadout selection rejected outside Bonfire services."));
+		return false;
+	}
+
+	if (!ItemOwnershipComponent || (EquipmentSlot != EItemEquipmentSlot::MainHand
+		&& EquipmentSlot != EItemEquipmentSlot::OffHand))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Loadout selection rejected: item ownership or equipment slot is invalid."));
+		return false;
+	}
+
+	USoulslikeGameInstance* GameInstance = GetGameInstance<USoulslikeGameInstance>();
+	if (!GameInstance)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Loadout selection rejected: GameInstance is unavailable."));
+		return false;
+	}
+
+	if (InstanceId == NAME_None)
+	{
+		if (!ItemOwnershipComponent->TryClearEquipmentSlot(EquipmentSlot, GameInstance))
+		{
+			return false;
+		}
+
+		DestroyMaterializedLoadoutSlot(EquipmentSlot);
+		return true;
+	}
+
+	Aitem* CandidateItem = nullptr;
+	if (!PrepareMaterializedLoadoutActor(EquipmentSlot, InstanceId, CandidateItem))
+	{
+		return false;
+	}
+
+	if (!ItemOwnershipComponent->TryEquipInstance(InstanceId, GameInstance))
+	{
+		CandidateItem->Destroy();
+		return false;
+	}
+
+	DestroyMaterializedLoadoutSlot(EquipmentSlot);
+	CommitMaterializedLoadoutActor(EquipmentSlot, CandidateItem, true);
+	return true;
+}
+
+void AMyCharacter::MaterializeEquippedLoadout()
+{
+	DestroyMaterializedLoadout();
+
+	if (!ItemOwnershipComponent)
+	{
+		return;
+	}
+
+	for (const EItemEquipmentSlot EquipmentSlot : { EItemEquipmentSlot::MainHand, EItemEquipmentSlot::OffHand })
+	{
+		const FName InstanceId = ItemOwnershipComponent->GetEquippedInstanceId(EquipmentSlot);
+		if (InstanceId == NAME_None)
+		{
+			continue;
+		}
+
+		Aitem* MaterializedItem = nullptr;
+		if (PrepareMaterializedLoadoutActor(EquipmentSlot, InstanceId, MaterializedItem))
+		{
+			CommitMaterializedLoadoutActor(EquipmentSlot, MaterializedItem, false);
+		}
+	}
+}
+
+void AMyCharacter::DestroyMaterializedLoadout()
+{
+	DestroyMaterializedLoadoutSlot(EItemEquipmentSlot::OffHand);
+	DestroyMaterializedLoadoutSlot(EItemEquipmentSlot::MainHand);
+}
+
+bool AMyCharacter::ResolveLoadoutDefinition(EItemEquipmentSlot EquipmentSlot, FName InstanceId,
+	const UItemDefinitionDataAsset*& OutDefinition) const
+{
+	OutDefinition = nullptr;
+	if (!ItemOwnershipComponent || InstanceId == NAME_None)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Loadout resolution failed: item ownership or InstanceId is invalid."));
+		return false;
+	}
+
+	const FTestItemInstanceRecord* ItemRecord = ItemOwnershipComponent->GetOwnedItemInstance(InstanceId);
+	if (!ItemRecord)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Loadout resolution failed: instance '%s' is not owned."), *InstanceId.ToString());
+		return false;
+	}
+
+	const UItemDefinitionDataAsset* Definition = ItemOwnershipComponent->GetDefinition(ItemRecord->DefinitionId);
+	if (!Definition || Definition->GetEquipmentSlot() != EquipmentSlot)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Loadout resolution failed: instance '%s' does not match the requested equipment slot."),
+			*InstanceId.ToString());
+		return false;
+	}
+
+	const UClass* RuntimeClass = Definition->GetRuntimeItemActorClass().Get();
+	const bool bRuntimeClassMatchesSlot = RuntimeClass &&
+		((EquipmentSlot == EItemEquipmentSlot::MainHand && RuntimeClass->IsChildOf(AWeapon::StaticClass()))
+			|| (EquipmentSlot == EItemEquipmentSlot::OffHand && RuntimeClass->IsChildOf(AShield::StaticClass())));
+	if (!bRuntimeClassMatchesSlot)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Loadout resolution failed: definition '%s' has an incompatible runtime Actor class."),
+			*ItemRecord->DefinitionId.ToString());
+		return false;
+	}
+
+	OutDefinition = Definition;
+	return true;
+}
+
+bool AMyCharacter::PrepareMaterializedLoadoutActor(EItemEquipmentSlot EquipmentSlot, FName InstanceId, Aitem*& OutItem)
+{
+	OutItem = nullptr;
+
+	const UItemDefinitionDataAsset* Definition = nullptr;
+	if (!ResolveLoadoutDefinition(EquipmentSlot, InstanceId, Definition) || !GetWorld() || !GetMesh())
+	{
+		if (Definition && (!GetWorld() || !GetMesh()))
+		{
+			UE_LOG(LogTemp, Warning, TEXT("Loadout materialization failed: world or character mesh is unavailable."));
+		}
+		return false;
+	}
+
+	FActorSpawnParameters SpawnParameters;
+	SpawnParameters.Owner = this;
+	SpawnParameters.Instigator = this;
+	SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+	Aitem* SpawnedItem = GetWorld()->SpawnActor<Aitem>(Definition->GetRuntimeItemActorClass(), GetActorTransform(), SpawnParameters);
+	if (!SpawnedItem)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Loadout materialization failed: could not spawn '%s'."),
+			*GetNameSafe(Definition->GetRuntimeItemActorClass().Get()));
+		return false;
+	}
+
+	SpawnedItem->SetActorHiddenInGame(true);
+
+	bool bAttached = false;
+	if (EquipmentSlot == EItemEquipmentSlot::MainHand)
+	{
+		if (AWeapon* Weapon = Cast<AWeapon>(SpawnedItem))
+		{
+			bAttached = Weapon->Equip(GetMesh(), PlayerMainHandSocketName, this, this, false);
+		}
+	}
+	else if (EquipmentSlot == EItemEquipmentSlot::OffHand)
+	{
+		if (AShield* Shield = Cast<AShield>(SpawnedItem))
+		{
+			bAttached = Shield->EquipToOffhand(GetMesh(), Shield->GetOffhandSocketName(), this, false);
+		}
+	}
+
+	if (!bAttached)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Loadout materialization failed: '%s' could not attach for its slot."),
+			*GetNameSafe(SpawnedItem));
+		SpawnedItem->Destroy();
+		return false;
+	}
+
+	OutItem = SpawnedItem;
+	return true;
+}
+
+void AMyCharacter::CommitMaterializedLoadoutActor(EItemEquipmentSlot EquipmentSlot, Aitem* Item, bool bPlayEquipSound)
+{
+	if (!Item)
+	{
+		return;
+	}
+
+	if (EquipmentSlot == EItemEquipmentSlot::MainHand)
+	{
+		// PrepareMaterializedLoadoutActor 已在写盘前验证实际类型并完成附着。
+		AWeapon* Weapon = static_cast<AWeapon*>(Item);
+
+		EquippedWeapon = Weapon;
+		WeaponState = EWeaponState::EWS_OneHandEquipped;
+		Item->SetActorHiddenInGame(false);
+		if (bPlayEquipSound)
+		{
+			Weapon->PlayEquipSound();
+		}
+		return;
+	}
+
+	// PrepareMaterializedLoadoutActor 已在写盘前验证实际类型并完成附着。
+	AShield* Shield = static_cast<AShield*>(Item);
+
+	EquippedShield = Shield;
+	Item->SetActorHiddenInGame(false);
+	if (bPlayEquipSound)
+	{
+		Shield->PlayEquipSound();
+	}
+}
+
+void AMyCharacter::DestroyMaterializedLoadoutSlot(EItemEquipmentSlot EquipmentSlot)
+{
+	if (EquipmentSlot == EItemEquipmentSlot::MainHand)
+	{
+		if (IsValid(EquippedWeapon))
+		{
+			EquippedWeapon->Destroy();
+		}
+
+		EquippedWeapon = nullptr;
+		WeaponState = EWeaponState::EWS_Unequipped;
+		return;
+	}
+
+	if (EquipmentSlot == EItemEquipmentSlot::OffHand)
+	{
+		if (bIsBlocking)
+		{
+			InterruptBlock(true);
+		}
+		ClearParryState();
+
+		if (IsValid(EquippedShield))
+		{
+			EquippedShield->Destroy();
+		}
+
+		EquippedShield = nullptr;
+	}
 }
 
 FString AMyCharacter::GetItemOwnershipDebugSummary() const

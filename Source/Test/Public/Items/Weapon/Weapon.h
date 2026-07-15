@@ -16,8 +16,10 @@ class TEST_API AWeapon : public Aitem
 public:
 	AWeapon();
 
-	void AttachMeshToSocket(USceneComponent* Parent, const FName& SocketName);
-	void Equip(USceneComponent* Parent, const FName& SocketName, AActor* NewOwner, APawn* NewInstigator);
+	bool AttachMeshToSocket(USceneComponent* Parent, const FName& SocketName);
+	bool Equip(USceneComponent* Parent, const FName& SocketName, AActor* NewOwner, APawn* NewInstigator,
+	           bool bPlayEquipSound = true);
+	void PlayEquipSound() const;
 
 	// IPickupInterface
 	virtual void OnPickup_Implementation(AActor* Picker) override;

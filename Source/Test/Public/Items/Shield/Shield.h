@@ -15,7 +15,9 @@ class TEST_API AShield : public Aitem
 	GENERATED_BODY()
 
 public:
-	void EquipToOffhand(USceneComponent* Parent, const FName& SocketName, AActor* NewOwner);
+	bool EquipToOffhand(USceneComponent* Parent, const FName& SocketName, AActor* NewOwner,
+	                    bool bPlayEquipSound = true);
+	void PlayEquipSound() const;
 	virtual void OnPickup_Implementation(AActor* Picker) override;
 	virtual bool RequiresPersistentWorldClaim() const override { return true; }
 

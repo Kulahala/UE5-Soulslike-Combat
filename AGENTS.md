@@ -45,6 +45,7 @@ Private dependency: `Slate`.
 - `plan.md` is the short-lived active-stage plan and agent handoff. Read its header before continuing prior work, keep it current, and clear completed working detail according to its header rather than turning it into history.
 - `AGENTS.md` owns durable collaboration, safety, tool, and workflow rules. Add a rule only when the pattern repeats, a mistake would be expensive, or it will guide future agents long-term.
 - Update `ARCHITECTURE.md` when source or authored assets change stable ownership, class responsibilities, state/data flow, source-of-truth rules, or durable asset topology.
+- Treat an `ARCHITECTURE.md` update as stage-closeout work: write it after the approved implementation has passed its relevant validation and review, when the behavior is stable, and before the stage commit. Keep provisional designs, in-progress wiring, and unresolved behavior in `plan.md` until then.
 
 For complex multi-file C++, Blueprint/UMG, content, architecture, source-plus-asset, or systemic gameplay work, write a concrete `plan.md` before implementation. It must state scope, affected systems and public APIs/assets, execution order, validation, document impact, and commit boundary.
 
@@ -82,6 +83,7 @@ For this UE 5.7 project, use the standard MCP `initialize -> tools/list -> tools
 ## Review, Validation, Memory, And Git
 
 - Formal review prioritizes bugs, behavioral regressions, risks, and missing validation. Put findings first, ordered by severity, with file and line references.
+- For every blocker or finding that requires a user decision, explain the concrete player-facing impact alongside the technical cause: what the player will see, lose, be unable to do, or risk corrupting; the normal trigger; and whether save data, level progress, or only logs are affected. A severity label, source location, or abstract term such as "lifecycle race" is not sufficient by itself.
 - Strict or stage-end review has two passes: normal review, then adversarial review that defends only technically sound design choices and records weak points as risks. It is not a defense exercise.
 - A review fix reopens the validation relevant to that changed behavior. State what was verified by tools, what the user manually verified, and what remains unverified.
 - Before asking the user to compile a non-trivial C++ change, perform a lightweight static review and a targeted server-memory MCP query using code-derived terms from the touched Unreal types, reflection surface, subsystem, or likely error family. Do not scan the full memory graph without a concrete query.

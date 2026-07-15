@@ -27,24 +27,43 @@ AWeapon::AWeapon()
 
 // ==================== 装备/拾取 ====================
 
-void AWeapon::AttachMeshToSocket(USceneComponent* Parent, const FName& SocketName)
+bool AWeapon::AttachMeshToSocket(USceneComponent* Parent, const FName& SocketName)
 {
+	if (!Parent || SocketName == NAME_None || !Parent->DoesSocketExist(SocketName))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s failed to attach weapon: parent or socket '%s' is invalid."),
+			*GetName(), *SocketName.ToString());
+		return false;
+	}
+
 	FAttachmentTransformRules AttachmentRules(EAttachmentRule::SnapToTarget, true);
-	AttachToComponent(Parent, AttachmentRules, SocketName);
+	if (!AttachToComponent(Parent, AttachmentRules, SocketName))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s failed to attach weapon to socket '%s'."),
+			*GetName(), *SocketName.ToString());
+		return false;
+	}
 
 	// 叠加装备旋转偏移，修正不同武器模型的本地朝向差异
 	if (!EquipRotationOffset.IsNearlyZero())
 	{
 		SetActorRelativeRotation(EquipRotationOffset);
 	}
+
+	return true;
 }
 
-void AWeapon::Equip(USceneComponent* Parent, const FName& SocketName, AActor* NewOwner, APawn* NewInstigator)
+bool AWeapon::Equip(USceneComponent* Parent, const FName& SocketName, AActor* NewOwner, APawn* NewInstigator,
+	bool bPlayEquipSound)
 {
 	SetOwner(NewOwner);
 	SetInstigator(NewInstigator);
 
-	AttachMeshToSocket(Parent, SocketName);
+	if (!AttachMeshToSocket(Parent, SocketName))
+	{
+		return false;
+	}
+
 	ItemState = EItemState::EIS_Equipped;
 	DisablePickupCollision();
 
@@ -59,6 +78,16 @@ void AWeapon::Equip(USceneComponent* Parent, const FName& SocketName, AActor* Ne
 		SetOwner(Parent->GetOwner());
 	}
 
+	if (bPlayEquipSound)
+	{
+		PlayEquipSound();
+	}
+
+	return true;
+}
+
+void AWeapon::PlayEquipSound() const
+{
 	if (EquipSound)
 	{
 		UGameplayStatics::PlaySoundAtLocation(this, EquipSound, GetActorLocation());

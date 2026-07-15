@@ -30,6 +30,8 @@ class UAnimMontage;
 class UMotionWarpingComponent;
 class UPawnNoiseEmitterComponent;
 class UTestSaveGame;
+class UItemDefinitionDataAsset;
+enum class EItemEquipmentSlot : uint8;
 struct FPlayerAttackMotionWarpingConfig;
 
 UCLASS()
@@ -91,14 +93,15 @@ public:
 	void SetBonfireServiceProtection(bool bEnabled);
 	void RefreshInteractionPrompt();
 	FORCEINLINE bool IsBonfireServiceProtected() const { return bBonfireServiceProtected; }
-	bool EquipWeaponFromPickup(AWeapon* Weapon);
-	bool EquipShieldFromPickup(AShield* Shield);
 
-	/* 物品所有权：本阶段只处理数据，不实体化或附着装备 Actor。 */
+	/* 物品所有权与火堆装备表现。 */
 	bool RestoreItemOwnershipFromSave(const UTestSaveGame* SaveGame);
 	bool TryGrantOwnedItem(FName DefinitionId, FName& OutInstanceId);
 	bool TryClaimWorldItemPickup(FName PersistentId, FName ItemDefinitionId, FName& OutInstanceId);
 	bool TryEquipOwnedItem(FName InstanceId);
+	bool TryApplyBonfireLoadoutSelection(EItemEquipmentSlot EquipmentSlot, FName InstanceId);
+	void MaterializeEquippedLoadout();
+	void DestroyMaterializedLoadout();
 	FString GetItemOwnershipDebugSummary() const;
 
 	/* 药瓶系统 */
@@ -327,6 +330,12 @@ private:
 
 	// 火堆服务菜单期间的短暂运行态；不属于可持久化或战斗 FSM 状态。
 	bool bBonfireServiceProtected = false;
+
+	bool ResolveLoadoutDefinition(EItemEquipmentSlot EquipmentSlot, FName InstanceId,
+	                              const UItemDefinitionDataAsset*& OutDefinition) const;
+	bool PrepareMaterializedLoadoutActor(EItemEquipmentSlot EquipmentSlot, FName InstanceId, Aitem*& OutItem);
+	void CommitMaterializedLoadoutActor(EItemEquipmentSlot EquipmentSlot, Aitem* Item, bool bPlayEquipSound);
+	void DestroyMaterializedLoadoutSlot(EItemEquipmentSlot EquipmentSlot);
 
 	/* 药瓶 */
 	bool bPotionOnCooldown = false;

@@ -13,6 +13,7 @@
 #include "components/CapsuleComponent.h"
 #include "Components/WidgetComponent.h"
 #include "Engine/TargetPoint.h"
+#include "Engine/World.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "HUD/BaseHealthBarWidget.h"
 #include "HUD/HealthBarComponent.h"
@@ -108,7 +109,13 @@ void AEnemy::WeaponInit()
 	// 武器
 	if (WeaponClass)
 	{
-		AWeapon* Weapon = GetWorld()->SpawnActor<AWeapon>(WeaponClass);
+		// 运行时敌人武器不是固定世界拾取物；必须在 BeginPlay 前建立所有权。
+		FActorSpawnParameters SpawnParameters;
+		SpawnParameters.Owner = this;
+		SpawnParameters.Instigator = this;
+		SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+		AWeapon* Weapon = GetWorld()->SpawnActor<AWeapon>(WeaponClass, GetActorTransform(), SpawnParameters);
 		if (!Weapon)
 		{
 			UE_LOG(LogTemp, Warning, TEXT("%s failed to spawn weapon from class %s"),

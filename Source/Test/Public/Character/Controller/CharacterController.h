@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/PlayerController.h"
 #include "InputActionValue.h"
+#include "Items/ItemDefinitionDataAsset.h"
 #include "CharacterController.generated.h"
 
 class UInputMappingContext;
@@ -156,6 +157,14 @@ private:
 
 	UFUNCTION()
 	void OnBonfireLeaveRequested();
+
+	UFUNCTION()
+	void OnBonfireEquipmentRequested();
+
+	UFUNCTION()
+	void OnBonfireLoadoutSelectionRequested(EItemEquipmentSlot EquipmentSlot, FName InstanceId);
+
+	void RefreshBonfireLoadoutOptions();
 
 public:
 	FString GetDebugInputText() const;
