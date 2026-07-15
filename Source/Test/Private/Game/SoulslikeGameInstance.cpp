@@ -31,6 +31,8 @@ bool USoulslikeGameInstance::StartNewGame(FName GameplayMapName)
 		return false;
 	}
 
+	ClearItemClaimSaveFailureForDebug();
+
 	UTestSaveGame* PreviousSaveGame = CurrentSaveGame;
 	const FName PreviousPendingCheckpointId = PendingCheckpointId;
 	const FName PreviousPendingGameplayMapName = PendingGameplayMapName;
@@ -175,7 +177,7 @@ bool USoulslikeGameInstance::AddOwnedItemInstanceAndClaimReward(const FTestItemI
 	CurrentSaveGame->ItemInstances.Add(ItemRecord);
 	CurrentSaveGame->ClaimedRewardIds.Add(RewardId);
 
-	if (SaveNow())
+	if (!ConsumeItemClaimSaveFailureForDebug(RewardId) && SaveNow())
 	{
 		return true;
 	}
@@ -282,6 +284,35 @@ bool USoulslikeGameInstance::GetSavedItemOwnership(TArray<FTestItemInstanceRecor
 	return true;
 }
 
+bool USoulslikeGameInstance::GetSavedClaimedRewardIds(TSet<FName>& OutClaimedRewardIds) const
+{
+	OutClaimedRewardIds.Reset();
+	if (!CurrentSaveGame || !CurrentSaveGame->IsPersistable())
+	{
+		return false;
+	}
+
+	OutClaimedRewardIds = CurrentSaveGame->ClaimedRewardIds;
+	return true;
+}
+
+bool USoulslikeGameInstance::ArmNextItemClaimSaveFailureForDebug()
+{
+#if UE_BUILD_SHIPPING
+	UE_LOG(LogTemp, Warning, TEXT("Item claim save failure injection is unavailable in Shipping builds."));
+	return false;
+#else
+	if (!EnsureCurrentSaveLoaded() || !CurrentSaveGame || !CurrentSaveGame->IsPersistable())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Item claim save failure injection failed: no usable current save."));
+		return false;
+	}
+
+	bFailNextItemClaimSaveForDebug = true;
+	return true;
+#endif
+}
+
 bool USoulslikeGameInstance::ActivateCheckpointAndSetRespawn(FName GameplayMapName, FName CheckpointId)
 {
 	if (GameplayMapName == NAME_None || CheckpointId == NAME_None)
@@ -324,6 +355,7 @@ bool USoulslikeGameInstance::HasActivatedCheckpoint(FName CheckpointId)
 
 void USoulslikeGameInstance::PrepareGameplayTransition(FName GameplayMapName, FName CheckpointId)
 {
+	ClearItemClaimSaveFailureForDebug();
 	PendingGameplayMapName = GameplayMapName;
 	PendingCheckpointId = CheckpointId;
 
@@ -349,6 +381,7 @@ void USoulslikeGameInstance::InvalidateCurrentSave(const FString& Reason)
 
 void USoulslikeGameInstance::ReturnToMainMenu()
 {
+	ClearItemClaimSaveFailureForDebug();
 	PendingGameplayMapName = NAME_None;
 	PendingCheckpointId = NAME_None;
 	UGameplayStatics::OpenLevel(this, MainMenuMapName);
@@ -460,6 +493,27 @@ bool USoulslikeGameInstance::AddPersistentId(TSet<FName>& TargetSet, FName Persi
 	TargetSet.Add(PersistentId);
 	SaveNow();
 	return true;
+}
+
+bool USoulslikeGameInstance::ConsumeItemClaimSaveFailureForDebug(FName RewardId)
+{
+#if UE_BUILD_SHIPPING
+	return false;
+#else
+	if (!bFailNextItemClaimSaveForDebug)
+	{
+		return false;
+	}
+
+	bFailNextItemClaimSaveForDebug = false;
+	UE_LOG(LogTemp, Warning, TEXT("Injected item claim save failure for reward '%s'."), *RewardId.ToString());
+	return true;
+#endif
+}
+
+void USoulslikeGameInstance::ClearItemClaimSaveFailureForDebug()
+{
+	bFailNextItemClaimSaveForDebug = false;
 }
 
 void USoulslikeGameInstance::OpenGameplayMap()

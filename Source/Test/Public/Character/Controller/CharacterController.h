@@ -180,6 +180,9 @@ public:
 	UFUNCTION(Exec)
 	void ItemDebugDump();
 
+	UFUNCTION(Exec)
+	void ItemDebugFailNextClaimSave();
+
 	bool IsPaused() const { return bIsPaused; }
 	void SetCanPause(bool bCanPauseNew) { bCanPause = bCanPauseNew; }
 	void ClearPauseIfActive();

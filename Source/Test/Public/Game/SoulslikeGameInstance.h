@@ -36,6 +36,8 @@ public:
 	bool SetEquippedItemSlot(FName SlotId, FName ItemInstanceId);
 	bool GetSavedItemOwnership(TArray<FTestItemInstanceRecord>& OutItemInstances,
 	                           TArray<FTestEquipmentSlotRecord>& OutEquippedSlots) const;
+	bool GetSavedClaimedRewardIds(TSet<FName>& OutClaimedRewardIds) const;
+	bool ArmNextItemClaimSaveFailureForDebug();
 	bool ActivateCheckpointAndSetRespawn(FName GameplayMapName, FName CheckpointId);
 	bool HasActivatedCheckpoint(FName CheckpointId);
 	void PrepareGameplayTransition(FName GameplayMapName, FName CheckpointId);
@@ -59,6 +61,8 @@ private:
 	bool LoadExistingSave();
 	bool EnsureCurrentSaveLoaded();
 	bool AddPersistentId(TSet<FName>& TargetSet, FName PersistentId, const TCHAR* Context);
+	bool ConsumeItemClaimSaveFailureForDebug(FName RewardId);
+	void ClearItemClaimSaveFailureForDebug();
 	void OpenGameplayMap();
 
 	UPROPERTY()
@@ -67,6 +71,7 @@ private:
 	FName PendingCheckpointId = NAME_None;
 	FName PendingGameplayMapName = NAME_None;
 	bool bAttemptedSaveLoad = false;
+	bool bFailNextItemClaimSaveForDebug = false;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Maps", meta = (ToolTip = "主菜单地图名。资产路径由地图名解析，不保存到 SaveGame。"))
 	FName MainMenuMapName = FName(TEXT("MainMenu"));

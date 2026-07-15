@@ -22,10 +22,11 @@
 namespace
 {
 	FString BuildSavedItemOwnershipDebugSummary(const TArray<FTestItemInstanceRecord>& ItemRecords,
-	                                           const TArray<FTestEquipmentSlotRecord>& SlotRecords)
+	                                           const TArray<FTestEquipmentSlotRecord>& SlotRecords,
+	                                           const TSet<FName>& ClaimedRewardIds)
 	{
-		FString Result = FString::Printf(TEXT("Saved item ownership: %d instance(s), %d equipped slot(s)."),
-			ItemRecords.Num(), SlotRecords.Num());
+		FString Result = FString::Printf(TEXT("Saved item ownership: %d instance(s), %d equipped slot(s), %d claimed reward(s)."),
+			ItemRecords.Num(), SlotRecords.Num(), ClaimedRewardIds.Num());
 
 		for (const FTestItemInstanceRecord& ItemRecord : ItemRecords)
 		{
@@ -38,6 +39,18 @@ namespace
 		{
 			Result += FString::Printf(TEXT("\n  Slot=%s Instance=%s"),
 				*SlotRecord.SlotId.ToString(), *SlotRecord.ItemInstanceId.ToString());
+		}
+
+		TArray<FString> SortedClaimedRewardIds;
+		SortedClaimedRewardIds.Reserve(ClaimedRewardIds.Num());
+		for (const FName ClaimedRewardId : ClaimedRewardIds)
+		{
+			SortedClaimedRewardIds.Add(ClaimedRewardId.ToString());
+		}
+		SortedClaimedRewardIds.Sort();
+		for (const FString& ClaimedRewardId : SortedClaimedRewardIds)
+		{
+			Result += FString::Printf(TEXT("\n  Claimed Reward=%s"), *ClaimedRewardId);
 		}
 
 		return Result;
@@ -714,13 +727,36 @@ void ACharacterController::ItemDebugDump()
 	USoulslikeGameInstance* GameInstance = GetGameInstance<USoulslikeGameInstance>();
 	TArray<FTestItemInstanceRecord> SavedItemRecords;
 	TArray<FTestEquipmentSlotRecord> SavedSlotRecords;
-	if (!GameInstance || !GameInstance->GetSavedItemOwnership(SavedItemRecords, SavedSlotRecords))
+	TSet<FName> SavedClaimedRewardIds;
+	if (!GameInstance || !GameInstance->GetSavedItemOwnership(SavedItemRecords, SavedSlotRecords)
+		|| !GameInstance->GetSavedClaimedRewardIds(SavedClaimedRewardIds))
 	{
 		UE_LOG(LogTemp, Warning, TEXT("ItemDebugDump: no usable saved item ownership is available."));
 		return;
 	}
 
-	UE_LOG(LogTemp, Display, TEXT("%s"), *BuildSavedItemOwnershipDebugSummary(SavedItemRecords, SavedSlotRecords));
+	UE_LOG(LogTemp, Display, TEXT("%s"),
+		*BuildSavedItemOwnershipDebugSummary(SavedItemRecords, SavedSlotRecords, SavedClaimedRewardIds));
+#endif
+}
+
+void ACharacterController::ItemDebugFailNextClaimSave()
+{
+#if UE_BUILD_SHIPPING
+	UE_LOG(LogTemp, Warning, TEXT("ItemDebugFailNextClaimSave is unavailable in Shipping builds."));
+#else
+	USoulslikeGameInstance* GameInstance = GetGameInstance<USoulslikeGameInstance>();
+	if (!GameInstance)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("ItemDebugFailNextClaimSave failed: no SoulslikeGameInstance is available."));
+		return;
+	}
+
+	if (GameInstance->ArmNextItemClaimSaveFailureForDebug())
+	{
+		UE_LOG(LogTemp, Display,
+			TEXT("ItemDebugFailNextClaimSave armed: the next valid fixed-item claim will simulate a save failure."));
+	}
 #endif
 }
 
