@@ -103,14 +103,12 @@ Completed roadmap work is retained here as a compact, durable record. Do not ret
 - [x] **TODO-03B-C1: Item Claim Transaction Failure Injection v1**
   Delivered a development-only, one-shot save-failure injection scoped to the fixed world-item claim transaction, plus claimed-reward evidence in `ItemDebugDump`. User compilation and PIE validation confirmed that an injected shield claim left the sword instance, MainHand selection, and sword reward ID unchanged across a map reload; an unarmed retry then persisted both reward IDs. Normal and adversarial review found no scope leak into Gold, checkpoints, equipment-slot writes, or runtime loadout materialization. Completed in this commit.
 
+- [x] **TODO-03B-C2: Pickup Feedback And Empty-Slot Auto-Equip v1**
+  Delivered definition-owned pickup audio and a candidate-first fixed-world claim that atomically persists the new instance, reward ID, and only an empty compatible equipment slot. Automatic first-equip is silent apart from the pickup sound, never replaces an occupied slot, and leaves the world Actor intact when candidate preparation or persistence fails. User compilation and PIE validation passed; normal and adversarial review found no transaction, sound-routing, or materialization lifecycle defect.
+
 ## TODO Queue
 
 These TODOs are accepted future work, not permission to start implementation immediately. A queued item must be small enough to produce one independently verifiable result. Queue position follows prerequisites, validation dependencies, and the player-facing loop rather than numeric ID or append order. When an item becomes the next stage, move only that item out of this queue and write its complete implementation plan in `plan.md` first. On completion, record stable facts in `ARCHITECTURE.md` and move the compact result into `Done Milestones`; do not turn this roadmap into a stage log.
-
-### Pickup Feedback And First-Equip
-
-- [ ] **TODO-03B-C2: Pickup Feedback And Empty-Slot Auto-Equip v1**
-  After C1, add a definition-owned `PickupSound` while retaining `AWeapon` / `AShield` actor-owned `EquipSound`. A successfully claimed MainHand or OffHand fixed world pickup may immediately materialize only when its compatible slot is empty; it must atomically save the new instance, claimed reward ID, and equipped slot. The automatic first-equip plays only the pickup sound, never replaces an occupied slot, and does not create field loadout selection or a backpack UI. Verify empty-slot sword/shield pickup, occupied-slot collection, rest/death/Continue restoration, and each failure downgrade.
 
 ### Encounter Boundaries
 
@@ -182,7 +180,7 @@ This is a small durable register for non-blocking review findings that can affec
 - Use a runtime item-instance data structure for ownership, quantity, rolled affixes, durability or upgrade level if those become real gameplay. Do not encode mutable item state back into a shared definition DataAsset.
 - World pickup Actors are presentation and interaction endpoints. They carry or resolve a drop result, validate collection, then transfer the item record into player-owned gameplay state. They are not the permanent inventory database.
 - Keep inventory/equipment APIs narrow. Start with actual player needs such as equip, unequip, add/remove a pickup, and query an equipped item. Add save/restore only with the checkpoint and persistence stage. Avoid a generic item service or universal interface until multiple unrelated systems truly need the same operation.
-- Manual weapon and shield loadout changes remain restricted to resting at a checkpoint. `TODO-03B-C2` is a narrow first-equip exception: a newly claimed fixed world pickup may fill only its empty compatible slot, without replacing an existing item or exposing field selection. Do not add pause-menu or encounter-time hot-swapping before a real backpack stage.
+- Manual weapon and shield loadout changes remain restricted to resting at a checkpoint. The completed C2 first-equip rule is a narrow exception: a newly claimed fixed world pickup may fill only its empty compatible slot, without replacing an existing item or exposing field selection. Do not add pause-menu or encounter-time hot-swapping before a real backpack stage.
 - Gold remains a scalar player attribute/reward value. It should not be forced into the item-instance model merely because both are rewards.
 - Every drop source should use one authored table or explicit reward definition. Do not scatter weighted random selection through enemy, chest, and level Blueprints.
 

@@ -33,6 +33,9 @@ public:
 	void UpdateGold(int32 NewGold);
 	bool AddOwnedItemInstance(const FTestItemInstanceRecord& ItemRecord);
 	bool AddOwnedItemInstanceAndClaimReward(const FTestItemInstanceRecord& ItemRecord, FName RewardId);
+	bool AddOwnedItemInstanceAndClaimRewardWithOptionalEmptySlot(const FTestItemInstanceRecord& ItemRecord,
+	                                                            FName RewardId, FName RequestedEmptySlotId,
+	                                                            bool& bOutAutoEquipped);
 	bool SetEquippedItemSlot(FName SlotId, FName ItemInstanceId);
 	bool GetSavedItemOwnership(TArray<FTestItemInstanceRecord>& OutItemInstances,
 	                           TArray<FTestEquipmentSlotRecord>& OutEquippedSlots) const;
@@ -61,6 +64,9 @@ private:
 	bool LoadExistingSave();
 	bool EnsureCurrentSaveLoaded();
 	bool AddPersistentId(TSet<FName>& TargetSet, FName PersistentId, const TCHAR* Context);
+	bool AddOwnedItemInstanceAndClaimRewardInternal(const FTestItemInstanceRecord& ItemRecord, FName RewardId,
+	                                                FName RequestedEmptySlotId, bool& bOutAutoEquipped);
+	static bool IsSupportedEquipmentSlotId(FName SlotId);
 	bool ConsumeItemClaimSaveFailureForDebug(FName RewardId);
 	void ClearItemClaimSaveFailureForDebug();
 	void OpenGameplayMap();

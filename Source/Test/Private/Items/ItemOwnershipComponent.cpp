@@ -129,9 +129,11 @@ bool UItemOwnershipComponent::TryGrantDefinition(FName DefinitionId, USoulslikeG
 }
 
 bool UItemOwnershipComponent::TryClaimWorldItem(FName PersistentId, FName DefinitionId,
-	                                                USoulslikeGameInstance* GameInstance, FName& OutInstanceId)
+	                                                USoulslikeGameInstance* GameInstance, bool bRequestAutoEquip,
+	                                                FName& OutInstanceId, bool& bOutAutoEquipped)
 {
 	OutInstanceId = NAME_None;
+	bOutAutoEquipped = false;
 	BuildDefinitionCatalog();
 
 	if (!GameInstance || PersistentId == NAME_None)
@@ -140,9 +142,20 @@ bool UItemOwnershipComponent::TryClaimWorldItem(FName PersistentId, FName Defini
 		return false;
 	}
 
-	if (!GetDefinition(DefinitionId))
+	const UItemDefinitionDataAsset* Definition = GetDefinition(DefinitionId);
+	if (!Definition)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("Claim world item failed: DefinitionId '%s' is not in this player's catalog."),
+			*DefinitionId.ToString());
+		return false;
+	}
+
+	const EItemEquipmentSlot EquipmentSlot = Definition->GetEquipmentSlot();
+	const FName RequestedSlotId = GetSlotId(EquipmentSlot);
+	if (bRequestAutoEquip && (!IsSupportedEquipmentSlot(EquipmentSlot) || RequestedSlotId == NAME_None
+		|| GetEquippedInstanceId(EquipmentSlot) != NAME_None))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Claim world item rejected automatic equip for DefinitionId '%s': the compatible slot is unavailable."),
 			*DefinitionId.ToString());
 		return false;
 	}
@@ -153,12 +166,17 @@ bool UItemOwnershipComponent::TryClaimWorldItem(FName PersistentId, FName Defini
 	NewRecord.Quantity = 1;
 	NewRecord.UpgradeLevel = 0;
 
-	if (!GameInstance->AddOwnedItemInstanceAndClaimReward(NewRecord, PersistentId))
+	if (!GameInstance->AddOwnedItemInstanceAndClaimRewardWithOptionalEmptySlot(NewRecord, PersistentId,
+		bRequestAutoEquip ? RequestedSlotId : NAME_None, bOutAutoEquipped))
 	{
 		return false;
 	}
 
 	OwnedItemInstances.Add(NewRecord);
+	if (bOutAutoEquipped)
+	{
+		UpdateLocalEquipmentSlot(RequestedSlotId, NewRecord.InstanceId);
+	}
 	OutInstanceId = NewRecord.InstanceId;
 	return true;
 }

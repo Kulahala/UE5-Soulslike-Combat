@@ -141,16 +141,45 @@ bool USoulslikeGameInstance::AddOwnedItemInstance(const FTestItemInstanceRecord&
 bool USoulslikeGameInstance::AddOwnedItemInstanceAndClaimReward(const FTestItemInstanceRecord& ItemRecord,
 	                                                                FName RewardId)
 {
+	bool bIgnoredAutoEquipped = false;
+	return AddOwnedItemInstanceAndClaimRewardInternal(ItemRecord, RewardId, NAME_None, bIgnoredAutoEquipped);
+}
+
+bool USoulslikeGameInstance::AddOwnedItemInstanceAndClaimRewardWithOptionalEmptySlot(
+	const FTestItemInstanceRecord& ItemRecord, FName RewardId, FName RequestedEmptySlotId, bool& bOutAutoEquipped)
+{
+	bOutAutoEquipped = false;
+	if (RequestedEmptySlotId != NAME_None && !IsSupportedEquipmentSlotId(RequestedEmptySlotId))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Fixed world item claim rejected unsupported equipment slot '%s'."),
+			*RequestedEmptySlotId.ToString());
+		return false;
+	}
+
+	return AddOwnedItemInstanceAndClaimRewardInternal(ItemRecord, RewardId, RequestedEmptySlotId, bOutAutoEquipped);
+}
+
+bool USoulslikeGameInstance::AddOwnedItemInstanceAndClaimRewardInternal(
+	const FTestItemInstanceRecord& ItemRecord, FName RewardId, FName RequestedEmptySlotId, bool& bOutAutoEquipped)
+{
+	bOutAutoEquipped = false;
 	if (!EnsureCurrentSaveLoaded() || !CurrentSaveGame || !CurrentSaveGame->IsPersistable())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("AddOwnedItemInstanceAndClaimReward failed: no usable current save."));
+		UE_LOG(LogTemp, Warning, TEXT("Fixed world item claim failed: no usable current save."));
+		return false;
+	}
+
+	if (RequestedEmptySlotId != NAME_None && !IsSupportedEquipmentSlotId(RequestedEmptySlotId))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Fixed world item claim rejected unsupported equipment slot '%s'."),
+			*RequestedEmptySlotId.ToString());
 		return false;
 	}
 
 	if (RewardId == NAME_None || ItemRecord.DefinitionId == NAME_None || ItemRecord.InstanceId == NAME_None
 		|| ItemRecord.Quantity <= 0 || ItemRecord.UpgradeLevel < 0)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("AddOwnedItemInstanceAndClaimReward rejected invalid reward or item record."));
+		UE_LOG(LogTemp, Warning, TEXT("Fixed world item claim rejected invalid reward or item record."));
 		return false;
 	}
 
@@ -167,23 +196,39 @@ bool USoulslikeGameInstance::AddOwnedItemInstanceAndClaimReward(const FTestItemI
 		});
 	if (bDuplicateInstanceId)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("AddOwnedItemInstanceAndClaimReward rejected duplicate InstanceId '%s'."),
+		UE_LOG(LogTemp, Warning, TEXT("Fixed world item claim rejected duplicate InstanceId '%s'."),
 			*ItemRecord.InstanceId.ToString());
 		return false;
 	}
 
 	const TArray<FTestItemInstanceRecord> PreviousItems = CurrentSaveGame->ItemInstances;
 	const TSet<FName> PreviousClaimedRewards = CurrentSaveGame->ClaimedRewardIds;
+	const TArray<FTestEquipmentSlotRecord> PreviousEquippedSlots = CurrentSaveGame->EquippedSlots;
+	const bool bRequestedSlotIsEmpty = RequestedEmptySlotId != NAME_None
+		&& !CurrentSaveGame->EquippedSlots.ContainsByPredicate([RequestedEmptySlotId](const FTestEquipmentSlotRecord& SlotRecord)
+		{
+			return SlotRecord.SlotId == RequestedEmptySlotId;
+		});
+
 	CurrentSaveGame->ItemInstances.Add(ItemRecord);
 	CurrentSaveGame->ClaimedRewardIds.Add(RewardId);
+	if (bRequestedSlotIsEmpty)
+	{
+		FTestEquipmentSlotRecord NewSlotRecord;
+		NewSlotRecord.SlotId = RequestedEmptySlotId;
+		NewSlotRecord.ItemInstanceId = ItemRecord.InstanceId;
+		CurrentSaveGame->EquippedSlots.Add(NewSlotRecord);
+	}
 
 	if (!ConsumeItemClaimSaveFailureForDebug(RewardId) && SaveNow())
 	{
+		bOutAutoEquipped = bRequestedSlotIsEmpty;
 		return true;
 	}
 
 	CurrentSaveGame->ItemInstances = PreviousItems;
 	CurrentSaveGame->ClaimedRewardIds = PreviousClaimedRewards;
+	CurrentSaveGame->EquippedSlots = PreviousEquippedSlots;
 	return false;
 }
 
@@ -493,6 +538,11 @@ bool USoulslikeGameInstance::AddPersistentId(TSet<FName>& TargetSet, FName Persi
 	TargetSet.Add(PersistentId);
 	SaveNow();
 	return true;
+}
+
+bool USoulslikeGameInstance::IsSupportedEquipmentSlotId(FName SlotId)
+{
+	return SlotId == FName(TEXT("MainHand")) || SlotId == FName(TEXT("OffHand"));
 }
 
 bool USoulslikeGameInstance::ConsumeItemClaimSaveFailureForDebug(FName RewardId)

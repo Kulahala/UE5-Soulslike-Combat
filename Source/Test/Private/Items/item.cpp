@@ -4,6 +4,7 @@
 #include "Components/SphereComponent.h"
 #include "EngineUtils.h"
 #include "Game/SoulslikeGameInstance.h"
+#include "Kismet/GameplayStatics.h"
 #include "NiagaraComponent.h"
 
 // ==================== 生命周期 ====================
@@ -165,9 +166,20 @@ bool Aitem::TryClaimPersistentWorldPickup(AMyCharacter* Picker)
 	}
 
 	FName InstanceId = NAME_None;
-	if (!Picker->TryClaimWorldItemPickup(PersistentId, ItemDefinitionId, InstanceId))
+	USoundBase* PickupSound = nullptr;
+	if (!Picker->TryClaimWorldItemPickup(PersistentId, ItemDefinitionId, InstanceId, PickupSound))
 	{
 		return false;
+	}
+
+	if (PickupSound)
+	{
+		UGameplayStatics::PlaySoundAtLocation(this, PickupSound, GetActorLocation());
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("World item pickup '%s' for DefinitionId '%s' completed without a PickupSound."),
+			*GetName(), *ItemDefinitionId.ToString());
 	}
 
 	Picker->UnregisterInteractable(this);

@@ -29,7 +29,7 @@ public:
 	bool RestoreFromSave(const UTestSaveGame* SaveGame);
 	bool TryGrantDefinition(FName DefinitionId, USoulslikeGameInstance* GameInstance, FName& OutInstanceId);
 	bool TryClaimWorldItem(FName PersistentId, FName DefinitionId, USoulslikeGameInstance* GameInstance,
-	                       FName& OutInstanceId);
+	                       bool bRequestAutoEquip, FName& OutInstanceId, bool& bOutAutoEquipped);
 	bool TryEquipInstance(FName InstanceId, USoulslikeGameInstance* GameInstance);
 	bool TryClearEquipmentSlot(EItemEquipmentSlot EquipmentSlot, USoulslikeGameInstance* GameInstance);
 	void GetLoadoutOptions(EItemEquipmentSlot EquipmentSlot, TArray<FItemLoadoutOption>& OutOptions);

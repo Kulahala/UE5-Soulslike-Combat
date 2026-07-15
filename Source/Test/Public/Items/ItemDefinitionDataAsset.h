@@ -5,6 +5,7 @@
 #include "ItemDefinitionDataAsset.generated.h"
 
 class Aitem;
+class USoundBase;
 struct FPropertyChangedEvent;
 
 /** 物品定义声明的装备槽；存档中仍保存稳定 FName 槽位 ID。 */
@@ -29,6 +30,7 @@ public:
 	FORCEINLINE const FText& GetDisplayName() const { return DisplayName; }
 	FORCEINLINE EItemEquipmentSlot GetEquipmentSlot() const { return EquipmentSlot; }
 	FORCEINLINE TSubclassOf<Aitem> GetRuntimeItemActorClass() const { return RuntimeItemActorClass; }
+	FORCEINLINE USoundBase* GetPickupSound() const { return PickupSound; }
 
 	bool IsDefinitionValid(FString& OutFailureReason) const;
 
@@ -50,6 +52,9 @@ private:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Equipment", meta = (AllowPrivateAccess = "true", ToolTip = "TODO-03B 实体化并附着装备表现时使用的物品 Actor 类。"))
 	TSubclassOf<Aitem> RuntimeItemActorClass;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Audio", meta = (AllowPrivateAccess = "true", ToolTip = "固定世界拾取成功后播放的音效；为空时静默领取。火堆主动换装仍使用运行时 Actor 自己的 EquipSound。"))
+	USoundBase* PickupSound = nullptr;
 
 	void LogConfigWarnings() const;
 };

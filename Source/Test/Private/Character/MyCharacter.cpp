@@ -1277,17 +1277,63 @@ bool AMyCharacter::TryGrantOwnedItem(FName DefinitionId, FName& OutInstanceId)
 	return ItemOwnershipComponent->TryGrantDefinition(DefinitionId, GameInstance, OutInstanceId);
 }
 
-bool AMyCharacter::TryClaimWorldItemPickup(FName PersistentId, FName ItemDefinitionId, FName& OutInstanceId)
+bool AMyCharacter::TryClaimWorldItemPickup(FName PersistentId, FName ItemDefinitionId, FName& OutInstanceId,
+	USoundBase*& OutPickupSound)
 {
 	OutInstanceId = NAME_None;
+	OutPickupSound = nullptr;
 	if (!ItemOwnershipComponent)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("Claim world item failed: ItemOwnershipComponent is not available."));
 		return false;
 	}
 
+	const UItemDefinitionDataAsset* Definition = ItemOwnershipComponent->GetDefinition(ItemDefinitionId);
+	if (!Definition)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Claim world item failed: DefinitionId '%s' is not in this player's catalog."),
+			*ItemDefinitionId.ToString());
+		return false;
+	}
+
+	const EItemEquipmentSlot EquipmentSlot = Definition->GetEquipmentSlot();
+	const bool bCanAutoEquip = (EquipmentSlot == EItemEquipmentSlot::MainHand
+		|| EquipmentSlot == EItemEquipmentSlot::OffHand)
+		&& ItemOwnershipComponent->GetEquippedInstanceId(EquipmentSlot) == NAME_None;
+
+	Aitem* CandidateItem = nullptr;
+	if (bCanAutoEquip && !PrepareMaterializedLoadoutActorFromDefinition(EquipmentSlot, Definition, CandidateItem))
+	{
+		// 候选表现未准备好时，不能让存档先于可见装备提交。
+		return false;
+	}
+
 	USoulslikeGameInstance* GameInstance = GetGameInstance<USoulslikeGameInstance>();
-	return ItemOwnershipComponent->TryClaimWorldItem(PersistentId, ItemDefinitionId, GameInstance, OutInstanceId);
+	bool bAutoEquipped = false;
+	if (!ItemOwnershipComponent->TryClaimWorldItem(PersistentId, ItemDefinitionId, GameInstance, bCanAutoEquip,
+		OutInstanceId, bAutoEquipped))
+	{
+		if (CandidateItem)
+		{
+			CandidateItem->Destroy();
+		}
+		return false;
+	}
+
+	if (bAutoEquipped)
+	{
+		check(CandidateItem);
+		DestroyMaterializedLoadoutSlot(EquipmentSlot);
+		CommitMaterializedLoadoutActor(EquipmentSlot, CandidateItem, false);
+	}
+	else if (CandidateItem)
+	{
+		// 存档中该槽位在事务开始前已占用，候选不会替换当前表现。
+		CandidateItem->Destroy();
+	}
+
+	OutPickupSound = Definition->GetPickupSound();
+	return true;
 }
 
 bool AMyCharacter::TryEquipOwnedItem(FName InstanceId)
@@ -1408,17 +1454,6 @@ bool AMyCharacter::ResolveLoadoutDefinition(EItemEquipmentSlot EquipmentSlot, FN
 		return false;
 	}
 
-	const UClass* RuntimeClass = Definition->GetRuntimeItemActorClass().Get();
-	const bool bRuntimeClassMatchesSlot = RuntimeClass &&
-		((EquipmentSlot == EItemEquipmentSlot::MainHand && RuntimeClass->IsChildOf(AWeapon::StaticClass()))
-			|| (EquipmentSlot == EItemEquipmentSlot::OffHand && RuntimeClass->IsChildOf(AShield::StaticClass())));
-	if (!bRuntimeClassMatchesSlot)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("Loadout resolution failed: definition '%s' has an incompatible runtime Actor class."),
-			*ItemRecord->DefinitionId.ToString());
-		return false;
-	}
-
 	OutDefinition = Definition;
 	return true;
 }
@@ -1426,14 +1461,43 @@ bool AMyCharacter::ResolveLoadoutDefinition(EItemEquipmentSlot EquipmentSlot, FN
 bool AMyCharacter::PrepareMaterializedLoadoutActor(EItemEquipmentSlot EquipmentSlot, FName InstanceId, Aitem*& OutItem)
 {
 	OutItem = nullptr;
-
 	const UItemDefinitionDataAsset* Definition = nullptr;
-	if (!ResolveLoadoutDefinition(EquipmentSlot, InstanceId, Definition) || !GetWorld() || !GetMesh())
+	return ResolveLoadoutDefinition(EquipmentSlot, InstanceId, Definition)
+		&& PrepareMaterializedLoadoutActorFromDefinition(EquipmentSlot, Definition, OutItem);
+}
+
+bool AMyCharacter::PrepareMaterializedLoadoutActorFromDefinition(EItemEquipmentSlot EquipmentSlot,
+	const UItemDefinitionDataAsset* Definition, Aitem*& OutItem)
+{
+	OutItem = nullptr;
+	if (!Definition || Definition->GetEquipmentSlot() != EquipmentSlot)
 	{
-		if (Definition && (!GetWorld() || !GetMesh()))
-		{
-			UE_LOG(LogTemp, Warning, TEXT("Loadout materialization failed: world or character mesh is unavailable."));
-		}
+		UE_LOG(LogTemp, Warning, TEXT("Loadout materialization failed: definition does not match the requested equipment slot."));
+		return false;
+	}
+
+	FString FailureReason;
+	if (!Definition->IsDefinitionValid(FailureReason))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Loadout materialization failed: definition '%s' is invalid: %s."),
+			*GetNameSafe(Definition), *FailureReason);
+		return false;
+	}
+
+	const UClass* RuntimeClass = Definition->GetRuntimeItemActorClass().Get();
+	const bool bRuntimeClassMatchesSlot = RuntimeClass
+		&& ((EquipmentSlot == EItemEquipmentSlot::MainHand && RuntimeClass->IsChildOf(AWeapon::StaticClass()))
+			|| (EquipmentSlot == EItemEquipmentSlot::OffHand && RuntimeClass->IsChildOf(AShield::StaticClass())));
+	if (!bRuntimeClassMatchesSlot)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Loadout materialization failed: definition '%s' has an incompatible runtime Actor class."),
+			*GetNameSafe(Definition));
+		return false;
+	}
+
+	if (!GetWorld() || !GetMesh())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Loadout materialization failed: world or character mesh is unavailable."));
 		return false;
 	}
 

@@ -97,7 +97,8 @@ public:
 	/* 物品所有权与火堆装备表现。 */
 	bool RestoreItemOwnershipFromSave(const UTestSaveGame* SaveGame);
 	bool TryGrantOwnedItem(FName DefinitionId, FName& OutInstanceId);
-	bool TryClaimWorldItemPickup(FName PersistentId, FName ItemDefinitionId, FName& OutInstanceId);
+	bool TryClaimWorldItemPickup(FName PersistentId, FName ItemDefinitionId, FName& OutInstanceId,
+	                             USoundBase*& OutPickupSound);
 	bool TryEquipOwnedItem(FName InstanceId);
 	bool TryApplyBonfireLoadoutSelection(EItemEquipmentSlot EquipmentSlot, FName InstanceId);
 	void MaterializeEquippedLoadout();
@@ -334,6 +335,8 @@ private:
 	bool ResolveLoadoutDefinition(EItemEquipmentSlot EquipmentSlot, FName InstanceId,
 	                              const UItemDefinitionDataAsset*& OutDefinition) const;
 	bool PrepareMaterializedLoadoutActor(EItemEquipmentSlot EquipmentSlot, FName InstanceId, Aitem*& OutItem);
+	bool PrepareMaterializedLoadoutActorFromDefinition(EItemEquipmentSlot EquipmentSlot,
+	                                                   const UItemDefinitionDataAsset* Definition, Aitem*& OutItem);
 	void CommitMaterializedLoadoutActor(EItemEquipmentSlot EquipmentSlot, Aitem* Item, bool bPlayEquipSound);
 	void DestroyMaterializedLoadoutSlot(EItemEquipmentSlot EquipmentSlot);
 
