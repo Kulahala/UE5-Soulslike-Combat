@@ -76,14 +76,17 @@ public:
 	static ACombatProjectile* SpawnConfiguredProjectile(UWorld* World,
 		TSubclassOf<ACombatProjectile> ProjectileClass, const FProjectileLaunchParams& LaunchParams);
 
-	/** 创建已验证的静止投射物；调用者必须在提交自己的持久化事务后显式激活。 */
+	/** 创建已验证的静止投射物；调用者必须在提交自己的持久化事务后显式 Commit。 */
 	static ACombatProjectile* SpawnPreparedProjectile(UWorld* World,
 		TSubclassOf<ACombatProjectile> ProjectileClass, const FProjectileLaunchParams& LaunchParams);
 
-	/** 启动已配置的投射物。准备阶段保持无碰撞且不消耗生命周期。 */
-	bool ActivateConfiguredProjectile();
+	/**
+	 * 提交已完整准备的投射物。调用前必须先以 IsPreparedForActivation() 完成可失败验证；
+	 * Commit 只执行原生组件状态切换，不提供失败或恢复出口。
+	 */
+	void CommitPreparedLaunch();
 
-	FORCEINLINE bool IsPreparedForActivation() const { return bLaunchConfigured && !bLaunchActivated; }
+	bool IsPreparedForActivation() const;
 
 protected:
 	virtual void BeginPlay() override;
@@ -110,6 +113,7 @@ private:
 	FVector LaunchDirection = FVector::ForwardVector;
 	FVector LaunchLocation = FVector::ZeroVector;
 	bool bLaunchConfigured = false;
+	bool bNativePreparationComplete = false;
 	bool bLaunchActivated = false;
 	bool bStartLaunchOnBeginPlay = true;
 	bool bImpactResolved = false;
@@ -117,6 +121,7 @@ private:
 	static ACombatProjectile* SpawnProjectile(UWorld* World, TSubclassOf<ACombatProjectile> ProjectileClass,
 		const FProjectileLaunchParams& LaunchParams, bool bStartImmediately);
 	bool ConfigureLaunch(const FProjectileLaunchParams& LaunchParams);
+	bool HasValidNativeLaunchState() const;
 	void DrawDebugPath(const FVector& EndPoint, const FColor& Color) const;
 
 	UFUNCTION()

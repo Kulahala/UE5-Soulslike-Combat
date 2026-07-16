@@ -18,41 +18,44 @@
 
 ## 计划 (Plan)
 
-# TODO-04B-A2: Ammo Containers And Bonfire Refill v1
+# TODO-04B-B0: Prepared Projectile Commit And Refund Atomicity v1 — ✅已执行，已通过，待提交
 
 ## 目标
 
-将箭矢拆为已装填容器与储备 ItemInstance 栈：弓只消费已装填箭，真实火堆休息以检查点激活为同一次写盘事务补充箭矢。`DA_Item_DarkKnightArrow` 的作者配置固定为装填上限 `20`、储备单栈上限 `99`；储备无总上限，满栈自动新建稳定实例。
+将弓箭发射固定为“准备即承诺”：所有可能失败的配置验证和 Prepared Projectile 创建都发生在已装填箭持久化消费之前；消费成功后只执行原生、不可失败的 Commit 启动。由此移除旧的第二次写盘退款分支。
 
 ## 已锁定边界
 
-- `SaveVersion` 保持 `2`。旧 v2 箭实例保留为储备，`LoadedAmmoContainers` 为空；下一次真实休息才装填，不加载时迁移或写盘。
-- 只有火堆“休息”补箭；死亡、Continue、离开菜单、换装、字段交互和地图重载都只恢复已保存数量。
-- 组件只构造已验证 `InstanceId` 的储备转移计划；GameInstance 是唯一写入者，并一次提交检查点、储备与装填容器。
-- 不新增背包 UI、HUD、地图拾取物、弓模型/动画或 `BP_PlayerArrow`；后者的投射物退款 P2 仍归 `TODO-04B-B`。
+- 不新增 `SaveVersion`、预留箭状态、退款事务、背包、HUD、输入映射、动画、音效、`BP_PlayerArrow`、世界拾取物或敌人射箭。
+- `SpawnPreparedProjectile()` 是唯一可失败候选入口：Deferred Spawn、配置、`FinishSpawning()`、`BeginPlay()` 后必须确认原生碰撞、移动、快照和未提交状态均可 Commit。
+- `CommitPreparedLaunch()` 不是 BlueprintCallable，也没有失败返回值；未来 `BP_PlayerArrow` 只能增加无碰撞表现，不能改变原生碰撞、移动、寿命、命中或 Commit 语义。
+- `BowDebugFailNextProjectilePrepare` 仅为当前 Pawn 的非 Shipping 一次性注入：候选已准备后、消费前销毁候选，不写入 SaveGame，不跨死亡、转场、Continue 或 PIE。
 
 ## 实施顺序
 
-1. 新增 SaveGame 装填记录、Definition Ammo 配置和缓存验证。
-2. 实现储备栈授予、已装填消费、火堆补给与检查点的原子事务及 scoped 失败注入。
-3. 将弓发射改为消费已装填箭，并把火堆休息改走角色/组件协调入口。
-4. 扩展 Dump 与无副作用的损坏记录 fixture 验证；完成 `DA_Item_DarkKnightArrow` 配置。
+1. 收束 `ACombatProjectile` 的 native prepare/readiness 状态、完成后校验和即时/Prepared 共用 Commit 路径。
+2. 将 `ReleaseBowArrow()` 改为候选准备成功后才消费 Loaded Arrow，删除激活失败退款路径。
+3. 添加 Pawn 生命周期内的准备失败注入及 Controller Exec 转发；死亡与 `EndPlay` 清理标记。
+4. 静态检查调用链、无第二写盘退款、Owner/Instigator 时序和候选销毁；再请求用户手动编译与 PIE。
 
 ## 当前进度
 
-- [x] 已完成实现前 CodeGraph/存档/火堆调用链预检，并确认工作区干净。
-- [x] 已完成 C++ 数据模型、事务和火堆接线：装填容器、已验证实例索引快照、储备分栈、弓消费、检查点补给原子回滚和开发期 fixture 已接入。
-- [x] Live Editor 预检与 Definition 接线完成：Editor、`3000`、`8088` 和可调用 MCP 已确认；`DA_Item_DarkKnightArrow` 已保存并读回 `bUsesAmmoContainer=True`、`LoadedAmmoCapacity=20`、`ReserveAmmoStackLimit=99`。
-- [x] PIE 基础箭矢循环已验证：`25` 支仅进入储备（`0/20 + 25`）；零装填拒射；真实休息后为 `20/20 + 5`；发射一箭后为 `19/20 + 5`，运行时与保存数据一致。
-- [x] PIE 完整验收已完成：再次休息补一支；补给写盘失败注入不触发重载且正常重试后恢复；损坏记录 fixture 只在内存副本中验证；储备多栈为 `99 + 21`；已装填消费失败注入不发射、不扣数。死亡、Continue 和重新 PIE 不补箭由用户人工确认；其余关键状态与注入日志已由 MCP 输出日志读回。
-- [x] 正常 review：未发现 A2 的事务回滚、写入范围、缓存恢复、火堆转场或旧 v2 默认容器阻断问题。
-- [x] 对抗性 review：坏容器/同 ID 脏记录、空储备、死亡/Continue 和失败注入均未绕过真实休息补给边界；记录一个不影响当前箭矢路径的 P2，供首个非箭矢可堆叠消耗品/背包阶段替换旧 raw-DefinitionId 数量消费 API。
-- [x] 文档同步：`ARCHITECTURE.md` 记录装填/储备、火堆事务与调试边界；`ROADMAP.md` 将 A2 移入 Done、移除已解决的箭矢 raw-order 风险，并保留通用非箭矢数量 API P2 与投射物退款 P2。
-- [x] 最终差异检查：`git diff --check` 无空白错误；工作区范围仅含 A2 C++、`DA_Item_DarkKnightArrow`、`ARCHITECTURE.md` 与 `ROADMAP.md`，未混入无关 UI 或 Encounter WIP。
-- [x] 已获用户批准并创建独立提交 `f6e15f2`：`[Feature] 新增弹药容器与火堆补给（Ammo Containers and Bonfire Refill）`。
+- [x] 已完成 A2 工作记录清理、Git 边界确认和 B0 路线图排期。
+- [x] 已完成 CodeGraph 调用链预检：当前风险位于 `ReleaseBowArrow()` 的“消费 -> `ActivateConfiguredProjectile()` -> 退款”分支；立即发射由 `BeginPlay()` 启动，Prepared 候选由弓路径独占。
+- [x] 已完成定向 server-memory 查询：`SpawnActorDeferred`、`FinishSpawning`、`BeginPlay`、`UProjectileMovementComponent` 与 Prepared Commit 生命周期没有可复用的既有错误条目。
+- [x] 已完成原生 prepare/commit 契约、弓的单次消费路径和一次性准备失败注入：`SpawnPreparedProjectile()` 在 `FinishSpawning()` 后拒绝未完成 native preparation 的候选；立即发射仍由 `BeginPlay()` 调用同一 `CommitPreparedLaunch()`；成功发射不再有退款写盘。
+- [x] 已完成轻量静态检查：旧 `ActivateConfiguredProjectile()` 无源码调用，`ReleaseBowArrow()` 无退款 `TryGrantDefinitionQuantity()`，新 Exec/Character/Projectile 声明定义齐全，死亡与 `EndPlay` 均清除 Pawn 内注入标记。
+- [x] 已修复首次编译的 `C2039`：当前 UE 版本的 `UProjectileMovementComponent` 不提供 `GetUpdatedComponent()`；改为在 `BeginPlay()` 重设原生 `CollisionSphere` 为 UpdatedComponent，并以根组件验证准备态。该 API 差异已记录到 server-memory。
+- [x] 用户已手动编译并完成 PIE 验收，MCP 日志确认：正常发射 `Loaded 18 -> 17` 且 Runtime/Saved 一致；准备失败注入只销毁候选、不扣箭；下一次未重武装正常发射；已装填消费写盘注入不发射、不扣箭；死亡重载清除未消费的准备注入，重载后首次发射正常；两次 `ProjectileDebugFire` 均走即时 Commit 并正常停止。
+- [x] 正常 review：未发现 B0 的候选销毁、Owner/Instigator 时序、单次持久化消费、失败注入范围、即时投射物回归或 Shipping 守卫阻断问题。`TryConsumeLoadedAmmo()` 的成功写盘后只会重建本地缓存，不会转场、销毁 Pawn 或触碰候选；`RestoreFromSave()` 对持久化存档只降级忽略脏记录，不会制造第二个失败出口。
+- [x] 对抗性 review：所有当前 Commit 调用者均先完成 `IsPreparedForActivation()`；`BeginPlay()` 重设原生 UpdatedComponent，准备态要求无碰撞/未激活移动/有效快照；消费失败和准备注入都在 Commit 前销毁候选；死亡与 `EndPlay` 清除 Pawn 注入。无 B0 阻断发现。
+- [x] 已补即时 Debug 投射物的命中与超时回归：日志确认命中 `BP_Pladin` 并结算 `10.00` 伤害；多次空射均在约 `3 s` 后输出 `expired without an impact`。墙体优先停止、目标命中和空射寿命都由当前 Commit 路径覆盖。
+- [x] 已完成稳定文档同步：`ARCHITECTURE.md` 记录可失败准备、不可失败原生 Commit、单次 Loaded Arrow 写盘和 Blueprint 表现边界；`ROADMAP.md` 将 B0 移入 Done，并移除已解决的两次写盘退款风险。
+- [x] 已获明确提交批准；提交范围仅限 B0 C++、`plan.md`、`ARCHITECTURE.md` 与 `ROADMAP.md`。
 
 ## 验证重点
 
-- `25` 支储备在休息前为 `0 loaded / 25 reserve`，休息后为 `20 / 5`。
-- 已装填消费、再次休息补给、死亡/Continue 恢复、`99 + 21` 多栈、旧 v2 首次休息和失败注入均符合计划。
-- 损坏储备 fixture 不能影响合法实例；剑盾、Gold、火堆保护与既有 SaveGame 行为不回归。
+1. 正常发射只消费一支 Loaded Arrow，并维持现有声音、冷却、墙体优先、命中和超时表现。
+2. `BowDebugFailNextProjectilePrepare` 在候选准备后销毁它：无投射物、无声音、无冷却、Runtime/Saved Dump 不变；下一次有效释放正常发射。
+3. `BowDebugFailNextAmmoConsumeSave` 仍只让消费写盘失败：候选销毁且 Loaded/Reserve/SaveGame 不变。
+4. 死亡、Continue、重新 PIE 和 `ProjectileDebugFire` 不保留候选、碰撞、寿命或注入状态；`ReleaseBowArrow()` 不再包含退款数量写入。

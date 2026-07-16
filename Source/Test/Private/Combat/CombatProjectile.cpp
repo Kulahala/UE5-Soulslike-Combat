@@ -100,6 +100,33 @@ ACombatProjectile* ACombatProjectile::SpawnProjectile(UWorld* World, TSubclassOf
 
 	Projectile->bStartLaunchOnBeginPlay = bStartImmediately;
 	UGameplayStatics::FinishSpawningActor(Projectile, SpawnTransform);
+	if (!IsValid(Projectile))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Combat projectile spawn failed: '%s' was invalid after FinishSpawning."),
+			*GetNameSafe(ProjectileClass.Get()));
+		return nullptr;
+	}
+
+	if (bStartImmediately)
+	{
+		if (!Projectile->bLaunchActivated || !Projectile->HasValidNativeLaunchState())
+		{
+			UE_LOG(LogTemp, Warning,
+				TEXT("Combat projectile spawn failed: immediate projectile '%s' did not complete its native launch commit."),
+				*GetNameSafe(Projectile));
+			Projectile->Destroy();
+			return nullptr;
+		}
+	}
+	else if (!Projectile->IsPreparedForActivation())
+	{
+		UE_LOG(LogTemp, Warning,
+			TEXT("Combat projectile spawn failed: prepared projectile '%s' did not complete native preparation."),
+			*GetNameSafe(Projectile));
+		Projectile->Destroy();
+		return nullptr;
+	}
+
 	return Projectile;
 }
 
@@ -107,13 +134,15 @@ void ACombatProjectile::BeginPlay()
 {
 	Super::BeginPlay();
 
-	if (!bLaunchConfigured)
+	if (!bLaunchConfigured || !CollisionSphere || !ProjectileMovement)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("Combat projectile '%s' began play without a valid launch configuration."), *GetName());
+		UE_LOG(LogTemp, Warning, TEXT("Combat projectile '%s' began play without a valid native launch configuration."), *GetName());
 		Destroy();
 		return;
 	}
 
+	// Commit 语义由原生碰撞根与移动组件独占；Blueprint 表现不能替换投递 UpdatedComponent。
+	ProjectileMovement->SetUpdatedComponent(CollisionSphere);
 	CollisionSphere->SetSphereRadius(ActiveDeliveryConfig.CollisionRadius, true);
 	CollisionSphere->IgnoreActorWhenMoving(LaunchAttacker, true);
 	if (APawn* InstigatorPawn = GetInstigator())
@@ -121,20 +150,24 @@ void ACombatProjectile::BeginPlay()
 		CollisionSphere->IgnoreActorWhenMoving(InstigatorPawn, true);
 	}
 	ProjectileMovement->OnProjectileStop.AddDynamic(this, &ACombatProjectile::OnProjectileStopped);
-	if (bStartLaunchOnBeginPlay && !ActivateConfiguredProjectile())
+	bNativePreparationComplete = true;
+
+	if (bStartLaunchOnBeginPlay)
 	{
-		Destroy();
+		if (!IsPreparedForActivation())
+		{
+			UE_LOG(LogTemp, Warning, TEXT("Combat projectile '%s' could not complete native preparation before launch."), *GetName());
+			Destroy();
+			return;
+		}
+
+		CommitPreparedLaunch();
 	}
 }
 
-bool ACombatProjectile::ActivateConfiguredProjectile()
+void ACombatProjectile::CommitPreparedLaunch()
 {
-	if (!bLaunchConfigured || bLaunchActivated || !CollisionSphere || !ProjectileMovement)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("Combat projectile '%s' cannot activate: launch configuration or components are invalid."),
-			*GetName());
-		return false;
-	}
+	checkf(IsPreparedForActivation(), TEXT("Combat projectile '%s' committed without a complete prepared launch state."), *GetName());
 
 	bLaunchActivated = true;
 	CollisionSphere->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
@@ -144,7 +177,15 @@ bool ACombatProjectile::ActivateConfiguredProjectile()
 	ProjectileMovement->Velocity = LaunchDirection * ActiveDeliveryConfig.InitialSpeed;
 	ProjectileMovement->Activate(true);
 	SetLifeSpan(ActiveDeliveryConfig.MaxLifetime);
-	return true;
+}
+
+bool ACombatProjectile::IsPreparedForActivation() const
+{
+	return HasValidNativeLaunchState()
+		&& !bLaunchActivated
+		&& !bImpactResolved
+		&& CollisionSphere->GetCollisionEnabled() == ECollisionEnabled::NoCollision
+		&& !ProjectileMovement->IsActive();
 }
 
 void ACombatProjectile::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -193,6 +234,20 @@ bool ACombatProjectile::ConfigureLaunch(const FProjectileLaunchParams& LaunchPar
 	LaunchLocation = LaunchParams.SpawnLocation;
 	bLaunchConfigured = true;
 	return true;
+}
+
+bool ACombatProjectile::HasValidNativeLaunchState() const
+{
+	return bLaunchConfigured
+		&& bNativePreparationComplete
+		&& !IsActorBeingDestroyed()
+		&& GetWorld()
+		&& IsValid(LaunchAttacker)
+		&& ActiveDeliveryConfig.IsValid()
+		&& !LaunchDirection.IsNearlyZero()
+		&& IsValid(CollisionSphere)
+		&& IsValid(ProjectileMovement)
+		&& GetRootComponent() == CollisionSphere;
 }
 
 void ACombatProjectile::DrawDebugPath(const FVector& EndPoint, const FColor& Color) const

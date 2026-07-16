@@ -898,6 +898,26 @@ void ACharacterController::BowDebugFailNextAmmoConsumeSave()
 #endif
 }
 
+void ACharacterController::BowDebugFailNextProjectilePrepare()
+{
+#if UE_BUILD_SHIPPING
+	UE_LOG(LogTemp, Warning, TEXT("BowDebugFailNextProjectilePrepare is unavailable in Shipping builds."));
+#else
+	AMyCharacter* MyCharacter = GetMyCharacter();
+	if (!MyCharacter)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("BowDebugFailNextProjectilePrepare failed: no possessed AMyCharacter is available."));
+		return;
+	}
+
+	if (MyCharacter->ArmNextProjectilePrepareFailureForDebug())
+	{
+		UE_LOG(LogTemp, Display,
+			TEXT("BowDebugFailNextProjectilePrepare armed: the next valid bow release will discard its prepared projectile before consuming ammo."));
+	}
+#endif
+}
+
 void ACharacterController::BowDebugFailNextAmmoRefillSave()
 {
 #if UE_BUILD_SHIPPING

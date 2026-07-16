@@ -111,6 +111,7 @@ public:
 	void DestroyMaterializedLoadout();
 	FString GetItemOwnershipDebugSummary() const;
 	int32 GetOwnedItemQuantity(FName DefinitionId) const;
+	bool ArmNextProjectilePrepareFailureForDebug();
 
 	/* 药瓶系统 */
 	void UsePotion();
@@ -274,6 +275,7 @@ private:
 	bool CanStartBowAim() const;
 	void CancelBowAim(bool bClearBlockHeld, bool bResetReleaseCooldown = true);
 	void ResetBowReleaseCooldown();
+	bool ConsumeProjectilePrepareFailureForDebug();
 
 	/* 相机组件 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true", ToolTip = "玩家相机。"))
@@ -317,6 +319,7 @@ private:
 	// 弓的瞄准输入仅在主手实际是 ABow 时生效；不与剑的蓄力状态复用。
 	bool bBowDrawInputHeld = false;
 	bool bBowReleaseOnCooldown = false;
+	bool bFailNextProjectilePrepareForDebug = false;
 	FTimerHandle BowReleaseCooldownTimer;
 
 	// 当前重叠的可拾取物品

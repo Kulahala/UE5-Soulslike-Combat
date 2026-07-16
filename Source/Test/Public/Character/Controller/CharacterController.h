@@ -195,6 +195,9 @@ public:
 	void BowDebugFailNextAmmoConsumeSave();
 
 	UFUNCTION(Exec)
+	void BowDebugFailNextProjectilePrepare();
+
+	UFUNCTION(Exec)
 	void BowDebugFailNextAmmoRefillSave();
 
 	UFUNCTION(Exec)

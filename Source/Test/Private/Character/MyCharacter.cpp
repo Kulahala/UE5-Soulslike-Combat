@@ -121,6 +121,7 @@ void AMyCharacter::BeginPlay()
 void AMyCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	bBonfireServiceProtected = false;
+	bFailNextProjectilePrepareForDebug = false;
 	CancelBowAim(true);
 	DestroyMaterializedLoadout();
 
@@ -809,6 +810,7 @@ void AMyCharacter::GetHit_Implementation(const FVector& ImpactPoint, AActor* Hit
 void AMyCharacter::Die()
 {
 	bBonfireServiceProtected = false;
+	bFailNextProjectilePrepareForDebug = false;
 
 	// 先清理暂停状态（如果死亡时正在暂停）
 	if (ACharacterController* CC = Cast<ACharacterController>(GetController()))
@@ -2052,6 +2054,15 @@ bool AMyCharacter::ReleaseBowArrow()
 		return false;
 	}
 
+	if (ConsumeProjectilePrepareFailureForDebug())
+	{
+		Projectile->Destroy();
+		UE_LOG(LogTemp, Warning,
+			TEXT("%s: BowDebugFailNextProjectilePrepare discarded a prepared projectile before consuming '%s'."),
+			*GetName(), *AmmoDefinitionId.ToString());
+		return false;
+	}
+
 	USoulslikeGameInstance* GameInstance = GetGameInstance<USoulslikeGameInstance>();
 	if (!ItemOwnershipComponent->TryConsumeLoadedAmmo(AmmoDefinitionId, 1, GameInstance))
 	{
@@ -2059,16 +2070,7 @@ bool AMyCharacter::ReleaseBowArrow()
 		return false;
 	}
 
-	if (!Projectile->ActivateConfiguredProjectile())
-	{
-		Projectile->Destroy();
-		FName RefundInstanceId = NAME_None;
-		if (!ItemOwnershipComponent->TryGrantDefinitionQuantity(AmmoDefinitionId, 1, GameInstance, RefundInstanceId))
-		{
-			UE_LOG(LogTemp, Error, TEXT("%s: Bow projectile activation failed and arrow refund also failed."), *GetName());
-		}
-		return false;
-	}
+	Projectile->CommitPreparedLaunch();
 
 	Bow->PlayShotSound();
 	bBowReleaseOnCooldown = true;
@@ -2084,6 +2086,16 @@ bool AMyCharacter::ReleaseBowArrow()
 
 	UE_LOG(LogTemp, Display, TEXT("%s: Bow released one '%s'."), *GetName(), *AmmoDefinitionId.ToString());
 	return true;
+}
+
+bool AMyCharacter::ArmNextProjectilePrepareFailureForDebug()
+{
+#if UE_BUILD_SHIPPING
+	return false;
+#else
+	bFailNextProjectilePrepareForDebug = true;
+	return true;
+#endif
 }
 
 bool AMyCharacter::StartParryAction()
@@ -2498,6 +2510,21 @@ void AMyCharacter::CancelBowAim(bool bClearBlockHeld, bool bResetReleaseCooldown
 void AMyCharacter::ResetBowReleaseCooldown()
 {
 	bBowReleaseOnCooldown = false;
+}
+
+bool AMyCharacter::ConsumeProjectilePrepareFailureForDebug()
+{
+#if UE_BUILD_SHIPPING
+	return false;
+#else
+	if (!bFailNextProjectilePrepareForDebug)
+	{
+		return false;
+	}
+
+	bFailNextProjectilePrepareForDebug = false;
+	return true;
+#endif
 }
 
 // ==================== 移动 ====================
