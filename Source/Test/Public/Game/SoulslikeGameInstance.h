@@ -32,6 +32,7 @@ public:
 	bool SaveNow();
 	void UpdateGold(int32 NewGold);
 	bool AddOwnedItemInstance(const FTestItemInstanceRecord& ItemRecord);
+	bool ConsumeOwnedItemQuantity(FName DefinitionId, int32 Quantity);
 	bool AddOwnedItemInstanceAndClaimReward(const FTestItemInstanceRecord& ItemRecord, FName RewardId);
 	bool AddOwnedItemInstanceAndClaimRewardWithOptionalEmptySlot(const FTestItemInstanceRecord& ItemRecord,
 	                                                            FName RewardId, FName RequestedEmptySlotId,
@@ -41,6 +42,7 @@ public:
 	                           TArray<FTestEquipmentSlotRecord>& OutEquippedSlots) const;
 	bool GetSavedClaimedRewardIds(TSet<FName>& OutClaimedRewardIds) const;
 	bool ArmNextItemClaimSaveFailureForDebug();
+	bool ArmNextItemQuantitySaveFailureForDebug();
 	bool ActivateCheckpointAndSetRespawn(FName GameplayMapName, FName CheckpointId);
 	bool HasActivatedCheckpoint(FName CheckpointId);
 	void PrepareGameplayTransition(FName GameplayMapName, FName CheckpointId);
@@ -68,7 +70,9 @@ private:
 	                                                FName RequestedEmptySlotId, bool& bOutAutoEquipped);
 	static bool IsSupportedEquipmentSlotId(FName SlotId);
 	bool ConsumeItemClaimSaveFailureForDebug(FName RewardId);
+	bool ConsumeItemQuantitySaveFailureForDebug(FName DefinitionId);
 	void ClearItemClaimSaveFailureForDebug();
+	void ClearItemQuantitySaveFailureForDebug();
 	void OpenGameplayMap();
 
 	UPROPERTY()
@@ -78,6 +82,7 @@ private:
 	FName PendingGameplayMapName = NAME_None;
 	bool bAttemptedSaveLoad = false;
 	bool bFailNextItemClaimSaveForDebug = false;
+	bool bFailNextItemQuantitySaveForDebug = false;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Maps", meta = (ToolTip = "主菜单地图名。资产路径由地图名解析，不保存到 SaveGame。"))
 	FName MainMenuMapName = FName(TEXT("MainMenu"));

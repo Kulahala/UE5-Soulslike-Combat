@@ -16,6 +16,7 @@
 #include "HUD/InteractionPromptWidget.h"
 #include "HUD/PauseMenuWidget.h"
 #include "Blueprint/UserWidget.h"
+#include "Framework/Application/SlateApplication.h"
 #include "Kismet/GameplayStatics.h"
 #include "Settings/TestGameUserSettings.h"
 #include "Enemy/Enemy.h" 
@@ -91,6 +92,11 @@ namespace
 void ACharacterController::BeginPlay()
 {
 	Super::BeginPlay();
+	if (IsLocalPlayerController() && FSlateApplication::IsInitialized())
+	{
+		ApplicationActivationChangedHandle = FSlateApplication::Get().OnApplicationActivationStateChanged()
+			.AddUObject(this, &ACharacterController::HandleApplicationActivationChanged);
+	}
 
 	if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(GetLocalPlayer()))
 	{
@@ -136,6 +142,17 @@ void ACharacterController::BeginPlay()
 	}
 }
 
+void ACharacterController::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	if (ApplicationActivationChangedHandle.IsValid() && FSlateApplication::IsInitialized())
+	{
+		FSlateApplication::Get().OnApplicationActivationStateChanged().Remove(ApplicationActivationChangedHandle);
+		ApplicationActivationChangedHandle.Reset();
+	}
+
+	Super::EndPlay(EndPlayReason);
+}
+
 void ACharacterController::SetupInputComponent()
 {
 	Super::SetupInputComponent();
@@ -153,7 +170,7 @@ void ACharacterController::SetupInputComponent()
 		EnhancedInputComponent->BindAction(InteractAction, ETriggerEvent::Started, this, &ACharacterController::Input_Interact);
 		EnhancedInputComponent->BindAction(AttackAction, ETriggerEvent::Started, this, &ACharacterController::Input_AttackPressed);
 		EnhancedInputComponent->BindAction(AttackAction, ETriggerEvent::Completed, this, &ACharacterController::Input_AttackReleased);
-		EnhancedInputComponent->BindAction(AttackAction, ETriggerEvent::Canceled, this, &ACharacterController::Input_AttackReleased);
+		EnhancedInputComponent->BindAction(AttackAction, ETriggerEvent::Canceled, this, &ACharacterController::Input_AttackCanceled);
 
 		EnhancedInputComponent->BindAction(SprintAction, ETriggerEvent::Started, this, &ACharacterController::Input_SprintStart);
 		EnhancedInputComponent->BindAction(SprintAction, ETriggerEvent::Completed, this, &ACharacterController::Input_SprintEnd);
@@ -208,7 +225,8 @@ void ACharacterController::Input_Move(const FInputActionValue& Value)
 	EActionState State = MyCharacter->GetActionState();
 	if (State != EActionState::EAS_UnOccupied
 		&& State != EActionState::EAS_Exhausted
-		&& State != EActionState::EAS_UsingPotion) return;
+		&& State != EActionState::EAS_UsingPotion
+		&& State != EActionState::EAS_Aiming) return;
 	if (MyCharacter->GetCharacterMovement()->IsFalling()) return;
 
 	const FRotator Rotation = GetControlRotation();
@@ -288,6 +306,7 @@ void ACharacterController::Input_Interact()
 
 void ACharacterController::Input_AttackPressed()
 {
+	bSuppressNextAttackReleaseAfterFocusLoss = false;
 	DebugAttackExpireTime = GetWorld()->GetTimeSeconds() + 0.15f;  // [调试]
 
 	if (AMyCharacter* MyCharacter = GetMyCharacter())
@@ -303,6 +322,12 @@ void ACharacterController::Input_AttackPressed()
 
 void ACharacterController::Input_AttackReleased()
 {
+	if (bSuppressNextAttackReleaseAfterFocusLoss)
+	{
+		bSuppressNextAttackReleaseAfterFocusLoss = false;
+		return;
+	}
+
 	if (AMyCharacter* MyCharacter = GetMyCharacter())
 	{
 		MyCharacter->OnAttackInputReleased();
@@ -478,6 +503,32 @@ void ACharacterController::OnResumeRequested()
 	{
 		TogglePause();
 	}
+}
+
+void ACharacterController::Input_AttackCanceled()
+{
+	if (AMyCharacter* MyCharacter = GetMyCharacter())
+	{
+		MyCharacter->OnAttackInputCanceled();
+	}
+}
+
+void ACharacterController::HandleApplicationActivationChanged(bool bIsActive)
+{
+	if (bIsActive || !IsLocalPlayerController())
+	{
+		return;
+	}
+
+	// Windows Alt+Tab 会清空 Slate 的按键状态，但无 Trigger 的 Digital Action 仍可能随后派发 Completed。
+	bSuppressNextAttackReleaseAfterFocusLoss = true;
+	Input_AttackCanceled();
+	Input_BlockEnd();
+	Input_SprintEnd();
+	Input_WalkEnd();
+	Input_MoveEnd();
+	Input_StopJumping();
+	UE_LOG(LogTemp, Display, TEXT("%s: cleared held gameplay input after application focus loss."), *GetName());
 }
 
 void ACharacterController::OnQuitRequested()
@@ -722,6 +773,32 @@ void ACharacterController::ItemDebugGrant(FName DefinitionId)
 #endif
 }
 
+void ACharacterController::ItemDebugGrantQuantity(FName DefinitionId, int32 Quantity)
+{
+#if UE_BUILD_SHIPPING
+	UE_LOG(LogTemp, Warning, TEXT("ItemDebugGrantQuantity is unavailable in Shipping builds."));
+#else
+	AMyCharacter* PlayerCharacter = GetMyCharacter();
+	if (!PlayerCharacter)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("ItemDebugGrantQuantity failed: no AMyCharacter is possessed."));
+		return;
+	}
+
+	FName InstanceId = NAME_None;
+	if (PlayerCharacter->TryGrantOwnedItemQuantity(DefinitionId, Quantity, InstanceId))
+	{
+		UE_LOG(LogTemp, Display, TEXT("ItemDebugGrantQuantity succeeded: DefinitionId='%s', Quantity=%d, InstanceId='%s'."),
+			*DefinitionId.ToString(), Quantity, *InstanceId.ToString());
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("ItemDebugGrantQuantity failed: DefinitionId='%s', Quantity=%d."),
+			*DefinitionId.ToString(), Quantity);
+	}
+#endif
+}
+
 void ACharacterController::ItemDebugEquip(FName InstanceId)
 {
 #if UE_BUILD_SHIPPING
@@ -787,6 +864,26 @@ void ACharacterController::ItemDebugFailNextClaimSave()
 	{
 		UE_LOG(LogTemp, Display,
 			TEXT("ItemDebugFailNextClaimSave armed: the next valid fixed-item claim will simulate a save failure."));
+	}
+#endif
+}
+
+void ACharacterController::BowDebugFailNextAmmoConsumeSave()
+{
+#if UE_BUILD_SHIPPING
+	UE_LOG(LogTemp, Warning, TEXT("BowDebugFailNextAmmoConsumeSave is unavailable in Shipping builds."));
+#else
+	USoulslikeGameInstance* GameInstance = GetGameInstance<USoulslikeGameInstance>();
+	if (!GameInstance)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("BowDebugFailNextAmmoConsumeSave failed: no SoulslikeGameInstance is available."));
+		return;
+	}
+
+	if (GameInstance->ArmNextItemQuantitySaveFailureForDebug())
+	{
+		UE_LOG(LogTemp, Display,
+			TEXT("BowDebugFailNextAmmoConsumeSave armed: the next valid arrow consumption will simulate a save failure."));
 	}
 #endif
 }

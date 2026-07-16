@@ -15,6 +15,7 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "Items/Weapon/Weapon.h"
+#include "Items/Bow/Bow.h"
 #include "Items/Shield/Shield.h"
 #include "Items/ItemDefinitionDataAsset.h"
 #include "Items/ItemOwnershipComponent.h"
@@ -120,6 +121,7 @@ void AMyCharacter::BeginPlay()
 void AMyCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	bBonfireServiceProtected = false;
+	CancelBowAim(true);
 	DestroyMaterializedLoadout();
 
 	if (PlayerHUDWidget)
@@ -202,6 +204,7 @@ bool AMyCharacter::ShouldUseSprintAttack() const
 {
 	return bIsSprinting &&
 	       !bIsBlocking &&
+	       !IsBowEquipped() &&
 	       GetLastMovementInputVector().SizeSquared2D() > KINDA_SMALL_NUMBER &&
 	       WeaponState != EWeaponState::EWS_Unequipped &&
 	       ActionState == EActionState::EAS_UnOccupied &&
@@ -289,7 +292,7 @@ void AMyCharacter::CancelChargeInputState()
 
 bool AMyCharacter::CanStartChargedAttack() const
 {
-	return !bIsBlocking &&
+	return !bIsBlocking && !IsBowEquipped() &&
 	       ActionState == EActionState::EAS_UnOccupied &&
 	       WeaponState != EWeaponState::EWS_Unequipped &&
 	       !GetCharacterMovement()->IsFalling();
@@ -297,6 +300,12 @@ bool AMyCharacter::CanStartChargedAttack() const
 
 void AMyCharacter::OnAttackInputPressed()
 {
+	if (IsBowAiming())
+	{
+		bBowDrawInputHeld = true;
+		return;
+	}
+
 	if (ShouldUseSprintAttack())
 	{
 		Attack();
@@ -315,6 +324,17 @@ void AMyCharacter::OnAttackInputPressed()
 
 void AMyCharacter::OnAttackInputReleased()
 {
+	if (IsBowAiming())
+	{
+		const bool bWasDrawingBow = bBowDrawInputHeld;
+		bBowDrawInputHeld = false;
+		if (bWasDrawingBow)
+		{
+			TryStartAction(EPlayerActionType::RangedRelease);
+		}
+		return;
+	}
+
 	bAttackInputHeld = false;
 	if (GetWorldTimerManager().IsTimerActive(ChargeDecisionTimer))
 	{
@@ -329,6 +349,34 @@ void AMyCharacter::OnAttackInputReleased()
 	{
 		PerformChargedRelease(); // 蓄力中松开，释放蓄力攻击
 	}
+}
+
+void AMyCharacter::OnAttackInputCanceled()
+{
+	if (IsBowAiming())
+	{
+		bBowDrawInputHeld = false;
+		return;
+	}
+
+	if (bIsChargingAttack)
+	{
+		bAttackInputHeld = false;
+		UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
+		UAttackConfigDataAsset* AttackConfig = GetAttackConfig();
+		if (AnimInstance && AttackConfig && AttackConfig->ChargedAttack.Montage
+			&& AnimInstance->Montage_IsPlaying(AttackConfig->ChargedAttack.Montage))
+		{
+			// 输入取消必须实际停止蓄力蒙太奇；结束回调再统一恢复攻击状态。
+			AnimInstance->Montage_Stop(0.15f, AttackConfig->ChargedAttack.Montage);
+			return;
+		}
+
+		CleanupInterruptedAttack();
+		return;
+	}
+
+	CancelChargeInputState();
 }
 
 void AMyCharacter::EnterChargeMode()
@@ -417,6 +465,11 @@ void AMyCharacter::Attack()
 
 bool AMyCharacter::StartAttackAction()
 {
+	if (IsBowEquipped())
+	{
+		return false;
+	}
+
 	if (ShouldUseSprintAttack())
 	{
 		return PerformSprintAttack();
@@ -723,6 +776,8 @@ void AMyCharacter::GetHit_Implementation(const FVector& ImpactPoint, AActor* Hit
 	{
 		InterruptPotion();
 	}
+	// 受击是强制中断：不能因为物理右键仍按住而在硬直结束后自动重新瞄准。
+	CancelBowAim(true);
 
 	Super::GetHit_Implementation(ImpactPoint, HitInstigator);
 
@@ -767,6 +822,7 @@ void AMyCharacter::Die()
 	ClearParryState();
 	InterruptPotion();  // 死亡时中断喝药
 	CancelChargeInputState();
+	CancelBowAim(true);
 	bPendingExhaustedAfterAttack = false;
 	ClearLockOn();
 	bRecenteringCamera = false; // 新增：死亡时中断归中
@@ -858,6 +914,7 @@ bool AMyCharacter::CanAttack() const
 {
 	return ActionState == EActionState::EAS_UnOccupied
 		&& WeaponState != EWeaponState::EWS_Unequipped
+		&& !IsBowEquipped()
 		&& !GetCharacterMovement()->IsFalling();
 }
 
@@ -866,6 +923,7 @@ bool AMyCharacter::CanAttack() const
 bool AMyCharacter::CanStartBlock() const
 {
 	return EquippedShield
+		&& !IsBowEquipped()
 		&& ActionState == EActionState::EAS_UnOccupied
 		&& !GetCharacterMovement()->IsFalling();
 }
@@ -874,12 +932,23 @@ void AMyCharacter::StartBlockInput()
 {
 	bBlockInputHeld = true;
 	bIsSprinting = false;
+	if (IsBowEquipped())
+	{
+		TryStartAction(EPlayerActionType::RangedAim);
+		return;
+	}
 	TryResumeBlock();
 }
 
 void AMyCharacter::ReleaseBlockInput()
 {
 	bBlockInputHeld = false;
+	if (IsBowAiming())
+	{
+		// 正常收起瞄准不会绕过已成功放箭后的射击冷却。
+		CancelBowAim(false, false);
+		return;
+	}
 	bIsBlocking = false;
 	if (Attributes)
 	{
@@ -901,6 +970,15 @@ void AMyCharacter::InterruptBlock(bool bClearHeld)
 
 void AMyCharacter::TryResumeBlock()
 {
+	if (IsBowEquipped())
+	{
+		if (bBlockInputHeld && ActionState == EActionState::EAS_UnOccupied)
+		{
+			TryStartAction(EPlayerActionType::RangedAim);
+		}
+		return;
+	}
+
 	TryStartAction(EPlayerActionType::Block);
 }
 
@@ -1213,6 +1291,7 @@ void AMyCharacter::SetBonfireServiceProtection(bool bEnabled)
 	ResetCombo();
 	CloseActionCancelWindow();
 	CancelChargeInputState();
+	CancelBowAim(true);
 	bPendingExhaustedAfterAttack = false;
 	bIsSprinting = false;
 	bIsWalking = false;
@@ -1273,6 +1352,19 @@ bool AMyCharacter::TryGrantOwnedItem(FName DefinitionId, FName& OutInstanceId)
 
 	USoulslikeGameInstance* GameInstance = GetGameInstance<USoulslikeGameInstance>();
 	return ItemOwnershipComponent->TryGrantDefinition(DefinitionId, GameInstance, OutInstanceId);
+}
+
+bool AMyCharacter::TryGrantOwnedItemQuantity(FName DefinitionId, int32 Quantity, FName& OutInstanceId)
+{
+	OutInstanceId = NAME_None;
+	if (!ItemOwnershipComponent)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Grant owned item quantity failed: ItemOwnershipComponent is not available."));
+		return false;
+	}
+
+	USoulslikeGameInstance* GameInstance = GetGameInstance<USoulslikeGameInstance>();
+	return ItemOwnershipComponent->TryGrantDefinitionQuantity(DefinitionId, Quantity, GameInstance, OutInstanceId);
 }
 
 bool AMyCharacter::TryClaimWorldItemPickup(FName PersistentId, FName ItemDefinitionId, FName& OutInstanceId,
@@ -1579,6 +1671,7 @@ void AMyCharacter::DestroyMaterializedLoadoutSlot(EItemEquipmentSlot EquipmentSl
 {
 	if (EquipmentSlot == EItemEquipmentSlot::MainHand)
 	{
+		CancelBowAim(true);
 		if (IsValid(EquippedWeapon))
 		{
 			EquippedWeapon->Destroy();
@@ -1611,6 +1704,11 @@ FString AMyCharacter::GetItemOwnershipDebugSummary() const
 	return ItemOwnershipComponent
 		? ItemOwnershipComponent->BuildDebugSummary()
 		: TEXT("Runtime item ownership: ItemOwnershipComponent is unavailable.");
+}
+
+int32 AMyCharacter::GetOwnedItemQuantity(FName DefinitionId) const
+{
+	return ItemOwnershipComponent ? ItemOwnershipComponent->GetOwnedQuantity(DefinitionId) : 0;
 }
 
 void AMyCharacter::RefreshCurrentInteractable()
@@ -1702,8 +1800,10 @@ bool AMyCharacter::TryStartAction(EPlayerActionType Action)
 	 * Block 是按住输入维持的常驻姿态：允许被更高优先级动作打断，但目标动作资源校验失败时不提前丢盾。
 	 */
 	const EPlayerActionType CurrentAction = GetCurrentPlayerActionType();
-	const bool bShouldCancel = CanCancelCurrentActionWith(Action);
-	if (CurrentAction != EPlayerActionType::None && CurrentAction != Action && !bShouldCancel)
+	const bool bIsBowReleaseFromAim = CurrentAction == EPlayerActionType::RangedAim
+		&& Action == EPlayerActionType::RangedRelease;
+	const bool bShouldCancel = !bIsBowReleaseFromAim && CanCancelCurrentActionWith(Action);
+	if (CurrentAction != EPlayerActionType::None && CurrentAction != Action && !bShouldCancel && !bIsBowReleaseFromAim)
 	{
 		return false;
 	}
@@ -1745,6 +1845,12 @@ bool AMyCharacter::TryStartAction(EPlayerActionType Action)
 		break;
 	case EPlayerActionType::Potion:
 		bStarted = CanUsePotion() && StartPotionAction();
+		break;
+	case EPlayerActionType::RangedAim:
+		bStarted = IsBowAiming() || (bBlockInputHeld && CanStartBowAim() && StartBowAimAction());
+		break;
+	case EPlayerActionType::RangedRelease:
+		bStarted = bIsBowReleaseFromAim && ReleaseBowArrow();
 		break;
 	case EPlayerActionType::HitReact:
 	case EPlayerActionType::Death:
@@ -1824,6 +1930,138 @@ bool AMyCharacter::StartBlockAction()
 	return true;
 }
 
+bool AMyCharacter::StartBowAimAction()
+{
+	ABow* Bow = GetEquippedBow();
+	if (!Bow)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s: StartBowAimAction failed: ABow is not equipped."), *GetName());
+		return false;
+	}
+
+	FString FailureReason;
+	if (!Bow->HasValidProjectileConfig(FailureReason))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s: StartBowAimAction failed: %s"), *GetName(), *FailureReason);
+		return false;
+	}
+
+	bIsSprinting = false;
+	bBowDrawInputHeld = false;
+	ActionState = EActionState::EAS_Aiming;
+	return true;
+}
+
+bool AMyCharacter::ReleaseBowArrow()
+{
+	ABow* Bow = GetEquippedBow();
+	if (!Bow || !ItemOwnershipComponent || bBowReleaseOnCooldown)
+	{
+		return false;
+	}
+
+	FString FailureReason;
+	if (!Bow->HasValidProjectileConfig(FailureReason))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s: Bow release failed: %s"), *GetName(), *FailureReason);
+		return false;
+	}
+
+	const FName AmmoDefinitionId = Bow->GetAmmoDefinitionId();
+	if (ItemOwnershipComponent->GetOwnedQuantity(AmmoDefinitionId) <= 0)
+	{
+		Bow->PlayEmptyAmmoSound();
+		UE_LOG(LogTemp, Display, TEXT("%s: Bow release blocked: no '%s' remaining."), *GetName(), *AmmoDefinitionId.ToString());
+		return false;
+	}
+
+	UWorld* World = GetWorld();
+	if (!World || !Camera)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s: Bow release failed: World or Camera is unavailable."), *GetName());
+		return false;
+	}
+
+	const FProjectileDeliveryConfig& DeliveryConfig = Bow->GetProjectileDeliveryConfig();
+	const FVector CameraLocation = Camera->GetComponentLocation();
+	const FVector CameraDirection = Camera->GetForwardVector().GetSafeNormal();
+	if (CameraDirection.IsNearlyZero())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s: Bow release failed: camera forward direction is zero."), *GetName());
+		return false;
+	}
+
+	const float AimDistance = DeliveryConfig.InitialSpeed * DeliveryConfig.MaxLifetime;
+	FVector AimPoint = CameraLocation + CameraDirection * AimDistance;
+	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(BowAim), false, this);
+	QueryParams.AddIgnoredActor(Bow);
+	FHitResult AimHit;
+	if (World->LineTraceSingleByChannel(AimHit, CameraLocation, AimPoint, ECC_Visibility, QueryParams))
+	{
+		AimPoint = AimHit.ImpactPoint;
+	}
+
+	const FVector SpawnLocation = Bow->GetProjectileSpawnLocation();
+	const FVector LaunchDirection = (AimPoint - SpawnLocation).GetSafeNormal();
+	if (LaunchDirection.IsNearlyZero())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s: Bow release failed: launch direction is zero."), *GetName());
+		return false;
+	}
+
+	FProjectileLaunchParams LaunchParams;
+	LaunchParams.Attacker = this;
+	LaunchParams.EventInstigator = GetController();
+	LaunchParams.SpawnLocation = SpawnLocation;
+	LaunchParams.LaunchDirection = LaunchDirection;
+	LaunchParams.bOverrideDeliveryConfig = true;
+	LaunchParams.DeliveryConfigOverride = DeliveryConfig;
+
+	ACombatProjectile* Projectile = ACombatProjectile::SpawnPreparedProjectile(World, Bow->GetProjectileClass(), LaunchParams);
+	if (!Projectile || !Projectile->IsPreparedForActivation())
+	{
+		if (Projectile)
+		{
+			Projectile->Destroy();
+		}
+		UE_LOG(LogTemp, Warning, TEXT("%s: Bow release failed: prepared projectile is unavailable."), *GetName());
+		return false;
+	}
+
+	USoulslikeGameInstance* GameInstance = GetGameInstance<USoulslikeGameInstance>();
+	if (!ItemOwnershipComponent->TryConsumeDefinitionQuantity(AmmoDefinitionId, 1, GameInstance))
+	{
+		Projectile->Destroy();
+		return false;
+	}
+
+	if (!Projectile->ActivateConfiguredProjectile())
+	{
+		Projectile->Destroy();
+		FName RefundInstanceId = NAME_None;
+		if (!ItemOwnershipComponent->TryGrantDefinitionQuantity(AmmoDefinitionId, 1, GameInstance, RefundInstanceId))
+		{
+			UE_LOG(LogTemp, Error, TEXT("%s: Bow projectile activation failed and arrow refund also failed."), *GetName());
+		}
+		return false;
+	}
+
+	Bow->PlayShotSound();
+	bBowReleaseOnCooldown = true;
+	const float Cooldown = Bow->GetShotCooldown();
+	if (Cooldown > 0.f)
+	{
+		GetWorldTimerManager().SetTimer(BowReleaseCooldownTimer, this, &AMyCharacter::ResetBowReleaseCooldown, Cooldown, false);
+	}
+	else
+	{
+		ResetBowReleaseCooldown();
+	}
+
+	UE_LOG(LogTemp, Display, TEXT("%s: Bow released one '%s'."), *GetName(), *AmmoDefinitionId.ToString());
+	return true;
+}
+
 bool AMyCharacter::StartParryAction()
 {
 	// 先确认蒙太奇可播放，再扣体力和进入状态（防止卡在 EAS_Parrying）
@@ -1864,6 +2102,8 @@ EPlayerActionType AMyCharacter::GetCurrentPlayerActionType() const
 		return EPlayerActionType::Dodge;
 	case EActionState::EAS_UsingPotion:
 		return EPlayerActionType::Potion;
+	case EActionState::EAS_Aiming:
+		return EPlayerActionType::RangedAim;
 	case EActionState::EAS_Stunning:
 		return EPlayerActionType::HitReact;
 	case EActionState::EAS_Dead:
@@ -1976,8 +2216,11 @@ bool AMyCharacter::CanCancelCurrentActionWith(EPlayerActionType NewAction) const
 	case EPlayerActionType::Parry:
 	case EPlayerActionType::Potion:
 		break;
+	case EPlayerActionType::RangedRelease:
+		return GetCurrentPlayerActionType() == EPlayerActionType::RangedAim;
 	case EPlayerActionType::HitReact:
 	case EPlayerActionType::Death:
+	case EPlayerActionType::RangedAim:
 	case EPlayerActionType::None:
 	default:
 		return false;
@@ -1995,7 +2238,8 @@ bool AMyCharacter::CanCancelCurrentActionWith(EPlayerActionType NewAction) const
 	}
 
 	// 举盾是按住输入维持的姿态，不依赖蒙太奇 CancelWindow；其他动作由 NotifyState 开窗。
-	if (CurrentAction != EPlayerActionType::Block && !bActionCancelWindowOpen)
+	if (CurrentAction != EPlayerActionType::Block && CurrentAction != EPlayerActionType::RangedAim
+		&& !bActionCancelWindowOpen)
 	{
 		return false;
 	}
@@ -2042,8 +2286,13 @@ void AMyCharacter::CleanupInterruptedAction(EPlayerActionType InterruptedAction)
 	case EPlayerActionType::Potion:
 		InterruptPotion();
 		break;
+	case EPlayerActionType::RangedAim:
+		// 翻滚、弹反等更高优先级动作打断瞄准后，要求玩家重新按住右键才可再次瞄准。
+		CancelBowAim(true);
+		break;
 	case EPlayerActionType::HitReact:
 	case EPlayerActionType::Death:
+	case EPlayerActionType::RangedRelease:
 	case EPlayerActionType::None:
 	default:
 		break;
@@ -2177,6 +2426,56 @@ void AMyCharacter::ResetPotionCooldown()
 	UpdatePotionCooldownHUD();
 }
 
+ABow* AMyCharacter::GetEquippedBow() const
+{
+	return Cast<ABow>(EquippedWeapon);
+}
+
+bool AMyCharacter::IsBowEquipped() const
+{
+	return IsValid(GetEquippedBow());
+}
+
+bool AMyCharacter::IsBowAiming() const
+{
+	return ActionState == EActionState::EAS_Aiming && IsBowEquipped();
+}
+
+bool AMyCharacter::CanStartBowAim() const
+{
+	return IsBowEquipped()
+		&& !bIsBlocking
+		&& ActionState == EActionState::EAS_UnOccupied
+		&& Attributes
+		&& Attributes->IsAlive()
+		&& !bBonfireServiceProtected
+		&& !GetCharacterMovement()->IsFalling();
+}
+
+void AMyCharacter::CancelBowAim(bool bClearBlockHeld, bool bResetReleaseCooldown)
+{
+	bBowDrawInputHeld = false;
+	if (bResetReleaseCooldown)
+	{
+		bBowReleaseOnCooldown = false;
+		GetWorldTimerManager().ClearTimer(BowReleaseCooldownTimer);
+	}
+	if (bClearBlockHeld)
+	{
+		bBlockInputHeld = false;
+	}
+
+	if (ActionState == EActionState::EAS_Aiming)
+	{
+		ActionState = EActionState::EAS_UnOccupied;
+	}
+}
+
+void AMyCharacter::ResetBowReleaseCooldown()
+{
+	bBowReleaseOnCooldown = false;
+}
+
 // ==================== 移动 ====================
 
 void AMyCharacter::Sprint()
@@ -2220,6 +2519,10 @@ void AMyCharacter::UpdateMovementSpeed()
 	Velocity.Z = 0.f;
 
 	float SpeedMultiplier = (bIsBlocking && EquippedShield) ? EquippedShield->GetBlockMoveSpeedMultiplier() : 1.0f;
+	if (const ABow* Bow = GetEquippedBow(); Bow && IsBowAiming())
+	{
+		SpeedMultiplier *= Bow->GetAimMoveSpeedMultiplier();
+	}
 
 	if (!Velocity.IsNearlyZero())
 	{
@@ -2766,9 +3069,13 @@ void AMyCharacter::DrawDebugInfo() const
 	FDebugDrawHelper::Add(PotionInfo, FColor::Cyan);
 
 	static const TCHAR* ActionStateNames[] = {
-		TEXT("UnOccupied"), TEXT("Attacking"), TEXT("Stunning"), TEXT("Exhausted"), TEXT("Parrying"), TEXT("Dodging"), TEXT("UsingPotion"), TEXT("Dead")
+		TEXT("UnOccupied"), TEXT("Attacking"), TEXT("Stunning"), TEXT("Exhausted"), TEXT("Parrying"), TEXT("Dodging"), TEXT("UsingPotion"), TEXT("Dead"), TEXT("Aiming")
 	};
-	FDebugDrawHelper::Add(FString::Printf(TEXT("State: %s"), ActionStateNames[static_cast<uint8>(ActionState)]), FColor::Yellow);
+	const uint8 ActionStateIndex = static_cast<uint8>(ActionState);
+	const TCHAR* ActionStateName = ActionStateIndex < UE_ARRAY_COUNT(ActionStateNames)
+		? ActionStateNames[ActionStateIndex]
+		: TEXT("Invalid");
+	FDebugDrawHelper::Add(FString::Printf(TEXT("State: %s"), ActionStateName), FColor::Yellow);
 
 	UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
 	UAnimMontage* ActiveMontage = AnimInstance ? AnimInstance->GetCurrentActiveMontage() : nullptr;

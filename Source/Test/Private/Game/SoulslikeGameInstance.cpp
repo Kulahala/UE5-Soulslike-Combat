@@ -32,6 +32,7 @@ bool USoulslikeGameInstance::StartNewGame(FName GameplayMapName)
 	}
 
 	ClearItemClaimSaveFailureForDebug();
+	ClearItemQuantitySaveFailureForDebug();
 
 	UTestSaveGame* PreviousSaveGame = CurrentSaveGame;
 	const FName PreviousPendingCheckpointId = PendingCheckpointId;
@@ -135,6 +136,61 @@ bool USoulslikeGameInstance::AddOwnedItemInstance(const FTestItemInstanceRecord&
 	}
 
 	CurrentSaveGame->ItemInstances.Pop();
+	return false;
+}
+
+bool USoulslikeGameInstance::ConsumeOwnedItemQuantity(FName DefinitionId, int32 Quantity)
+{
+	if (!EnsureCurrentSaveLoaded() || !CurrentSaveGame || !CurrentSaveGame->IsPersistable())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Consume owned item quantity failed: no usable current save."));
+		return false;
+	}
+
+	if (DefinitionId == NAME_None || Quantity <= 0)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Consume owned item quantity rejected an empty DefinitionId or invalid quantity."));
+		return false;
+	}
+
+	const TArray<FTestItemInstanceRecord> PreviousItems = CurrentSaveGame->ItemInstances;
+	int32 RemainingQuantity = Quantity;
+	for (int32 Index = 0; Index < CurrentSaveGame->ItemInstances.Num() && RemainingQuantity > 0;)
+	{
+		FTestItemInstanceRecord& ItemRecord = CurrentSaveGame->ItemInstances[Index];
+		if (ItemRecord.DefinitionId != DefinitionId)
+		{
+			++Index;
+			continue;
+		}
+
+		const int32 ConsumedQuantity = FMath::Min(ItemRecord.Quantity, RemainingQuantity);
+		ItemRecord.Quantity -= ConsumedQuantity;
+		RemainingQuantity -= ConsumedQuantity;
+		if (ItemRecord.Quantity <= 0)
+		{
+			CurrentSaveGame->ItemInstances.RemoveAt(Index);
+		}
+		else
+		{
+			++Index;
+		}
+	}
+
+	if (RemainingQuantity > 0)
+	{
+		CurrentSaveGame->ItemInstances = PreviousItems;
+		UE_LOG(LogTemp, Warning, TEXT("Consume owned item quantity rejected: DefinitionId '%s' does not have enough quantity."),
+			*DefinitionId.ToString());
+		return false;
+	}
+
+	if (!ConsumeItemQuantitySaveFailureForDebug(DefinitionId) && SaveNow())
+	{
+		return true;
+	}
+
+	CurrentSaveGame->ItemInstances = PreviousItems;
 	return false;
 }
 
@@ -358,6 +414,23 @@ bool USoulslikeGameInstance::ArmNextItemClaimSaveFailureForDebug()
 #endif
 }
 
+bool USoulslikeGameInstance::ArmNextItemQuantitySaveFailureForDebug()
+{
+#if UE_BUILD_SHIPPING
+	UE_LOG(LogTemp, Warning, TEXT("Item quantity save failure injection is unavailable in Shipping builds."));
+	return false;
+#else
+	if (!EnsureCurrentSaveLoaded() || !CurrentSaveGame || !CurrentSaveGame->IsPersistable())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Item quantity save failure injection failed: no usable current save."));
+		return false;
+	}
+
+	bFailNextItemQuantitySaveForDebug = true;
+	return true;
+#endif
+}
+
 bool USoulslikeGameInstance::ActivateCheckpointAndSetRespawn(FName GameplayMapName, FName CheckpointId)
 {
 	if (GameplayMapName == NAME_None || CheckpointId == NAME_None)
@@ -401,6 +474,7 @@ bool USoulslikeGameInstance::HasActivatedCheckpoint(FName CheckpointId)
 void USoulslikeGameInstance::PrepareGameplayTransition(FName GameplayMapName, FName CheckpointId)
 {
 	ClearItemClaimSaveFailureForDebug();
+	ClearItemQuantitySaveFailureForDebug();
 	PendingGameplayMapName = GameplayMapName;
 	PendingCheckpointId = CheckpointId;
 
@@ -427,6 +501,7 @@ void USoulslikeGameInstance::InvalidateCurrentSave(const FString& Reason)
 void USoulslikeGameInstance::ReturnToMainMenu()
 {
 	ClearItemClaimSaveFailureForDebug();
+	ClearItemQuantitySaveFailureForDebug();
 	PendingGameplayMapName = NAME_None;
 	PendingCheckpointId = NAME_None;
 	UGameplayStatics::OpenLevel(this, MainMenuMapName);
@@ -561,9 +636,30 @@ bool USoulslikeGameInstance::ConsumeItemClaimSaveFailureForDebug(FName RewardId)
 #endif
 }
 
+bool USoulslikeGameInstance::ConsumeItemQuantitySaveFailureForDebug(FName DefinitionId)
+{
+#if UE_BUILD_SHIPPING
+	return false;
+#else
+	if (!bFailNextItemQuantitySaveForDebug)
+	{
+		return false;
+	}
+
+	bFailNextItemQuantitySaveForDebug = false;
+	UE_LOG(LogTemp, Warning, TEXT("Injected item quantity save failure for DefinitionId '%s'."), *DefinitionId.ToString());
+	return true;
+#endif
+}
+
 void USoulslikeGameInstance::ClearItemClaimSaveFailureForDebug()
 {
 	bFailNextItemClaimSaveForDebug = false;
+}
+
+void USoulslikeGameInstance::ClearItemQuantitySaveFailureForDebug()
+{
+	bFailNextItemQuantitySaveForDebug = false;
 }
 
 void USoulslikeGameInstance::OpenGameplayMap()

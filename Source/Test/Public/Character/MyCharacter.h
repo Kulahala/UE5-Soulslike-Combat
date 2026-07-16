@@ -15,6 +15,7 @@ class AController;
 class AEnemy;
 class AShield;
 class AWeapon;
+class ABow;
 class USpringArmComponent;
 class UCameraComponent;
 class UPlayerHUDWidget;
@@ -54,6 +55,7 @@ public:
 	bool PerformSprintAttack();
 	void OnAttackInputPressed();
 	void OnAttackInputReleased();
+	void OnAttackInputCanceled();
 	void EnterChargeMode();
 	void PerformChargedRelease();
 	void CancelChargeInputState();
@@ -98,6 +100,7 @@ public:
 	/* 物品所有权与火堆装备表现。 */
 	bool RestoreItemOwnershipFromSave(const UTestSaveGame* SaveGame);
 	bool TryGrantOwnedItem(FName DefinitionId, FName& OutInstanceId);
+	bool TryGrantOwnedItemQuantity(FName DefinitionId, int32 Quantity, FName& OutInstanceId);
 	bool TryClaimWorldItemPickup(FName PersistentId, FName ItemDefinitionId, FName& OutInstanceId,
 	                             USoundBase*& OutPickupSound);
 	bool TryEquipOwnedItem(FName InstanceId);
@@ -105,6 +108,7 @@ public:
 	void MaterializeEquippedLoadout();
 	void DestroyMaterializedLoadout();
 	FString GetItemOwnershipDebugSummary() const;
+	int32 GetOwnedItemQuantity(FName DefinitionId) const;
 
 	/* 药瓶系统 */
 	void UsePotion();
@@ -215,6 +219,8 @@ private:
 	bool StartBlockAction();
 	bool StartParryAction();
 	bool StartPotionAction();
+	bool StartBowAimAction();
+	bool ReleaseBowArrow();
 	EPlayerActionType GetCurrentPlayerActionType() const;
 	bool CanCancelCurrentActionWith(EPlayerActionType NewAction) const;
 	void CleanupInterruptedAction(EPlayerActionType InterruptedAction);
@@ -260,6 +266,12 @@ private:
 	void RefreshCurrentInteractable();
 	void UpdateInteractionPrompt();
 	void BeginDeathRespawnFlow();
+	ABow* GetEquippedBow() const;
+	bool IsBowEquipped() const;
+	bool IsBowAiming() const;
+	bool CanStartBowAim() const;
+	void CancelBowAim(bool bClearBlockHeld, bool bResetReleaseCooldown = true);
+	void ResetBowReleaseCooldown();
 
 	/* 相机组件 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true", ToolTip = "玩家相机。"))
@@ -299,6 +311,11 @@ private:
 	float ChargeInputThreshold = 0.2f;
 
 	bool bPendingExhaustedAfterAttack = false;
+
+	// 弓的瞄准输入仅在主手实际是 ABow 时生效；不与剑的蓄力状态复用。
+	bool bBowDrawInputHeld = false;
+	bool bBowReleaseOnCooldown = false;
+	FTimerHandle BowReleaseCooldownTimer;
 
 	// 当前重叠的可拾取物品
 	UPROPERTY(VisibleInstanceOnly, Category = "State", meta = (AllowPrivateAccess = "true", ToolTip = "当前重叠的可拾取物品。"))

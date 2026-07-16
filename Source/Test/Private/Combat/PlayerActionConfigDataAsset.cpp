@@ -18,6 +18,10 @@ int32 UPlayerActionConfigDataAsset::GetActionPriority(EPlayerActionType Action) 
 		return Parry.Priority;
 	case EPlayerActionType::Potion:
 		return Potion.Priority;
+	case EPlayerActionType::RangedAim:
+		return Block.Priority;
+	case EPlayerActionType::RangedRelease:
+		return SharedPriority.Attack;
 	case EPlayerActionType::HitReact:
 		return SharedPriority.HitReact;
 	case EPlayerActionType::Death:
@@ -80,8 +84,8 @@ void UPlayerActionConfigDataAsset::LogConfigWarnings() const
 	}
 
 	// Potion.Montage 故意不检查：为空时走即时治疗 + 冷却 fallback。
-	if (SharedPriority.Attack < 0 || Dodge.Priority < 0 || Block.Priority < 0 ||
-		Parry.Priority < 0 || Potion.Priority < 0 || SharedPriority.HitReact < 0 ||
+	if (SharedPriority.Attack < 0 || Dodge.Priority < 0 || Block.Priority < 0 || Parry.Priority < 0
+		|| Potion.Priority < 0 || SharedPriority.HitReact < 0 ||
 		SharedPriority.Death < 0)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("%s: Action priority contains a negative value. Action priority expects non-negative values, larger numbers are higher priority."), *GetName());

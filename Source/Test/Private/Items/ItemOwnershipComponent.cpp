@@ -96,12 +96,19 @@ bool UItemOwnershipComponent::RestoreFromSave(const UTestSaveGame* SaveGame)
 bool UItemOwnershipComponent::TryGrantDefinition(FName DefinitionId, USoulslikeGameInstance* GameInstance,
                                                   FName& OutInstanceId)
 {
+	return TryGrantDefinitionQuantity(DefinitionId, 1, GameInstance, OutInstanceId);
+}
+
+bool UItemOwnershipComponent::TryGrantDefinitionQuantity(FName DefinitionId, int32 Quantity,
+	USoulslikeGameInstance* GameInstance, FName& OutInstanceId)
+{
 	OutInstanceId = NAME_None;
 	BuildDefinitionCatalog();
 
-	if (!GameInstance)
+	if (!GameInstance || Quantity <= 0)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("Grant item '%s' failed: no SoulslikeGameInstance."), *DefinitionId.ToString());
+		UE_LOG(LogTemp, Warning, TEXT("Grant item '%s' failed: GameInstance is unavailable or quantity is invalid."),
+			*DefinitionId.ToString());
 		return false;
 	}
 
@@ -115,7 +122,7 @@ bool UItemOwnershipComponent::TryGrantDefinition(FName DefinitionId, USoulslikeG
 	FTestItemInstanceRecord NewRecord;
 	NewRecord.DefinitionId = DefinitionId;
 	NewRecord.InstanceId = GenerateUniqueInstanceId();
-	NewRecord.Quantity = 1;
+	NewRecord.Quantity = Quantity;
 	NewRecord.UpgradeLevel = 0;
 
 	if (!GameInstance->AddOwnedItemInstance(NewRecord))
@@ -125,6 +132,65 @@ bool UItemOwnershipComponent::TryGrantDefinition(FName DefinitionId, USoulslikeG
 
 	OwnedItemInstances.Add(NewRecord);
 	OutInstanceId = NewRecord.InstanceId;
+	BroadcastOwnedQuantity(DefinitionId);
+	return true;
+}
+
+bool UItemOwnershipComponent::TryConsumeDefinitionQuantity(FName DefinitionId, int32 Quantity,
+	USoulslikeGameInstance* GameInstance)
+{
+	BuildDefinitionCatalog();
+	const UItemDefinitionDataAsset* Definition = GetDefinition(DefinitionId);
+	if (!GameInstance || !Definition || Quantity <= 0)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Consume item '%s' failed: GameInstance, definition, or quantity is invalid."),
+			*DefinitionId.ToString());
+		return false;
+	}
+
+	if (Definition->GetEquipmentSlot() != EItemEquipmentSlot::None)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Consume item '%s' rejected: equipped definitions cannot be consumed by quantity."),
+			*DefinitionId.ToString());
+		return false;
+	}
+
+	if (GetOwnedQuantity(DefinitionId) < Quantity)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Consume item '%s' rejected: not enough owned quantity."), *DefinitionId.ToString());
+		return false;
+	}
+
+	if (!GameInstance->ConsumeOwnedItemQuantity(DefinitionId, Quantity))
+	{
+		return false;
+	}
+
+	int32 RemainingQuantity = Quantity;
+	for (int32 Index = 0; Index < OwnedItemInstances.Num() && RemainingQuantity > 0;)
+	{
+		FTestItemInstanceRecord& ItemRecord = OwnedItemInstances[Index];
+		if (ItemRecord.DefinitionId != DefinitionId)
+		{
+			++Index;
+			continue;
+		}
+
+		const int32 ConsumedQuantity = FMath::Min(ItemRecord.Quantity, RemainingQuantity);
+		ItemRecord.Quantity -= ConsumedQuantity;
+		RemainingQuantity -= ConsumedQuantity;
+		if (ItemRecord.Quantity <= 0)
+		{
+			OwnedItemInstances.RemoveAt(Index);
+		}
+		else
+		{
+			++Index;
+		}
+	}
+
+	check(RemainingQuantity == 0);
+	BroadcastOwnedQuantity(DefinitionId);
 	return true;
 }
 
@@ -406,6 +472,20 @@ FName UItemOwnershipComponent::GetEquippedInstanceId(EItemEquipmentSlot Equipmen
 	return NAME_None;
 }
 
+int32 UItemOwnershipComponent::GetOwnedQuantity(FName DefinitionId) const
+{
+	int64 TotalQuantity = 0;
+	for (const FTestItemInstanceRecord& ItemRecord : OwnedItemInstances)
+	{
+		if (ItemRecord.DefinitionId == DefinitionId)
+		{
+			TotalQuantity += ItemRecord.Quantity;
+		}
+	}
+
+	return static_cast<int32>(FMath::Clamp<int64>(TotalQuantity, 0, MAX_int32));
+}
+
 bool UItemOwnershipComponent::IsSupportedEquipmentSlot(EItemEquipmentSlot EquipmentSlot)
 {
 	return EquipmentSlot == EItemEquipmentSlot::MainHand || EquipmentSlot == EItemEquipmentSlot::OffHand;
@@ -450,6 +530,11 @@ void UItemOwnershipComponent::UpdateLocalEquipmentSlot(FName SlotId, FName ItemI
 	NewSlotRecord.SlotId = SlotId;
 	NewSlotRecord.ItemInstanceId = ItemInstanceId;
 	EquippedSlots.Add(NewSlotRecord);
+}
+
+void UItemOwnershipComponent::BroadcastOwnedQuantity(FName DefinitionId)
+{
+	OnOwnedItemQuantityChanged.Broadcast(DefinitionId, GetOwnedQuantity(DefinitionId));
 }
 
 FName UItemOwnershipComponent::GenerateUniqueInstanceId() const

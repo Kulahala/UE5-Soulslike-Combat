@@ -11,6 +11,12 @@
 #include "Kismet/GameplayStatics.h"
 #include "Utils/DebugDrawHelper.h"
 
+namespace
+{
+	// Config/DefaultEngine.ini 的 Projectile Object Channel；投射物必须忽略同类以支持连续发射。
+	constexpr ECollisionChannel ProjectileCollisionChannel = ECC_GameTraceChannel1;
+}
+
 ACombatProjectile::ACombatProjectile()
 {
 	PrimaryActorTick.bCanEverTick = false;
@@ -19,8 +25,9 @@ ACombatProjectile::ACombatProjectile()
 	SetRootComponent(CollisionSphere);
 	CollisionSphere->InitSphereRadius(10.f);
 	CollisionSphere->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	CollisionSphere->SetCollisionObjectType(ECC_WorldDynamic);
+	CollisionSphere->SetCollisionObjectType(ProjectileCollisionChannel);
 	CollisionSphere->SetCollisionResponseToAllChannels(ECR_Ignore);
+	CollisionSphere->SetCollisionResponseToChannel(ProjectileCollisionChannel, ECR_Ignore);
 	CollisionSphere->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Block);
 	CollisionSphere->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Block);
 	CollisionSphere->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
@@ -41,6 +48,18 @@ ACombatProjectile::ACombatProjectile()
 
 ACombatProjectile* ACombatProjectile::SpawnConfiguredProjectile(UWorld* World,
 	TSubclassOf<ACombatProjectile> ProjectileClass, const FProjectileLaunchParams& LaunchParams)
+{
+	return SpawnProjectile(World, ProjectileClass, LaunchParams, true);
+}
+
+ACombatProjectile* ACombatProjectile::SpawnPreparedProjectile(UWorld* World,
+	TSubclassOf<ACombatProjectile> ProjectileClass, const FProjectileLaunchParams& LaunchParams)
+{
+	return SpawnProjectile(World, ProjectileClass, LaunchParams, false);
+}
+
+ACombatProjectile* ACombatProjectile::SpawnProjectile(UWorld* World, TSubclassOf<ACombatProjectile> ProjectileClass,
+	const FProjectileLaunchParams& LaunchParams, bool bStartImmediately)
 {
 	if (!World || !ProjectileClass)
 	{
@@ -79,6 +98,7 @@ ACombatProjectile* ACombatProjectile::SpawnConfiguredProjectile(UWorld* World,
 		return nullptr;
 	}
 
+	Projectile->bStartLaunchOnBeginPlay = bStartImmediately;
 	UGameplayStatics::FinishSpawningActor(Projectile, SpawnTransform);
 	return Projectile;
 }
@@ -100,16 +120,31 @@ void ACombatProjectile::BeginPlay()
 	{
 		CollisionSphere->IgnoreActorWhenMoving(InstigatorPawn, true);
 	}
-	CollisionSphere->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-
 	ProjectileMovement->OnProjectileStop.AddDynamic(this, &ACombatProjectile::OnProjectileStopped);
+	if (bStartLaunchOnBeginPlay && !ActivateConfiguredProjectile())
+	{
+		Destroy();
+	}
+}
+
+bool ACombatProjectile::ActivateConfiguredProjectile()
+{
+	if (!bLaunchConfigured || bLaunchActivated || !CollisionSphere || !ProjectileMovement)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Combat projectile '%s' cannot activate: launch configuration or components are invalid."),
+			*GetName());
+		return false;
+	}
+
+	bLaunchActivated = true;
+	CollisionSphere->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 	ProjectileMovement->InitialSpeed = ActiveDeliveryConfig.InitialSpeed;
 	ProjectileMovement->MaxSpeed = ActiveDeliveryConfig.MaxSpeed;
 	ProjectileMovement->ProjectileGravityScale = 0.f;
 	ProjectileMovement->Velocity = LaunchDirection * ActiveDeliveryConfig.InitialSpeed;
 	ProjectileMovement->Activate(true);
-
 	SetLifeSpan(ActiveDeliveryConfig.MaxLifetime);
+	return true;
 }
 
 void ACombatProjectile::EndPlay(const EEndPlayReason::Type EndPlayReason)

@@ -29,6 +29,7 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void SetupInputComponent() override;
 
 	/* ================= 输入回调函数 ================= */
@@ -40,6 +41,7 @@ protected:
 	void Input_Interact();
 	void Input_AttackPressed();
 	void Input_AttackReleased();
+	void Input_AttackCanceled();
 	void Input_SprintStart();
 	void Input_SprintEnd();
 	void Input_WalkStart();
@@ -51,6 +53,7 @@ protected:
 	void Input_Dodge();
 	void Input_Pause();
 	void Input_UsePotion();
+	void HandleApplicationActivationChanged(bool bIsActive);
 
 	/* ================= 增强输入资产声明 ================= */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input", meta = (ToolTip = "默认输入映射上下文。"))
@@ -103,6 +106,8 @@ private:
 	bool bDebugSprintHeld = false;
 	bool bDebugWalkHeld = false;
 	bool bDebugBlockHeld = false;
+	bool bSuppressNextAttackReleaseAfterFocusLoss = false;
+	FDelegateHandle ApplicationActivationChangedHandle;
 	float DebugAttackExpireTime = 0.f;
 	float DebugJumpExpireTime = 0.f;
 	float DebugInteractExpireTime = 0.f;
@@ -175,6 +180,9 @@ public:
 	void ItemDebugGrant(FName DefinitionId);
 
 	UFUNCTION(Exec)
+	void ItemDebugGrantQuantity(FName DefinitionId, int32 Quantity);
+
+	UFUNCTION(Exec)
 	void ItemDebugEquip(FName InstanceId);
 
 	UFUNCTION(Exec)
@@ -182,6 +190,9 @@ public:
 
 	UFUNCTION(Exec)
 	void ItemDebugFailNextClaimSave();
+
+	UFUNCTION(Exec)
+	void BowDebugFailNextAmmoConsumeSave();
 
 	// 非 Shipping 的投射物验收入口；不创建正式输入映射或地图内容。
 	UFUNCTION(Exec)

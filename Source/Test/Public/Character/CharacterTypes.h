@@ -17,7 +17,8 @@ enum class EActionState : uint8
 	EAS_Parrying UMETA(DisplayName = "Parrying"),
 	EAS_Dodging UMETA(DisplayName = "Dodging"),
 	EAS_UsingPotion UMETA(DisplayName = "UsingPotion"),
-	EAS_Dead UMETA(DisplayName = "Dead")
+	EAS_Dead UMETA(DisplayName = "Dead"),
+	EAS_Aiming UMETA(DisplayName = "Aiming")
 };
 
 UENUM()
@@ -37,7 +38,9 @@ enum class EPlayerActionType : uint8
 	Parry UMETA(DisplayName = "Parry"),
 	Potion UMETA(DisplayName = "Potion"),
 	HitReact UMETA(DisplayName = "HitReact"),
-	Death UMETA(DisplayName = "Death")
+	Death UMETA(DisplayName = "Death"),
+	RangedAim UMETA(DisplayName = "RangedAim"),
+	RangedRelease UMETA(DisplayName = "RangedRelease")
 };
 
 UENUM()
