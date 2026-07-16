@@ -126,14 +126,17 @@ These TODOs are accepted future work, not permission to start implementation imm
 
 ### Ranged Combat
 
-- [ ] **TODO-04B-B: Bow Presentation And World Pickup v1**
-  Prerequisite: `TODO-04B-B0` is validated, and a legal DarkKnight-compatible bow mesh plus aim/release animations and needed audio assets are selected. Author the visible bow, visible arrow, persistent `TestMap` bow and 20-arrow bundle pickups, permanent loaded-arrow HUD, and aim-only dot reticle. Do not substitute sword animations as a final bow presentation.
+- [ ] **TODO-04D-A: Enemy Ranged Delivery And Local HFSM v1**
+  Prerequisite: `TODO-04A` and `TODO-04B-B0` are validated. Extend the existing `AEnemy` local HFSM with one readable ranged attack delivery path: authored attack range, line-of-sight gate, spacing/retreat behavior, a state-guarded release point, and `ACombatProjectile` delivery. Reuse `UEnemyAttackConfigDataAsset`; do not introduce an archer base class, Behavior Tree, StateTree, caster system, inventory, map fixture, or player-facing bow assets.
+
+- [ ] **TODO-04D-B: Erika Archer Authoring And TestMap v1**
+  Prerequisite: `TODO-04D-A` is validated. Author the Erika Archer presentation on her own `SK_ErikaArcher`: AnimBP/locomotion, a `Draw -> AimLoop -> Release` attack Montage, state-guarded release Notify, hit/death presentation, Enemy Blueprint, sockets, and one deliberate TestMap placement. Confirm a visible bow source before this stage; do not fake final presentation with an invisible or unrelated weapon asset.
 
 - [ ] **TODO-04C: Lock Target Switching v1**
-  While locked on, use horizontal mouse movement on the existing `LookAction` to select the nearest valid target on the requested screen side. Include a configurable swipe threshold, re-arm threshold, and cooldown; preserve the current target when no eligible target exists. This stage changes targeting only, not projectile behavior.
+  Prerequisite: the first authored archer has passed `TODO-04D-B`, so the new target-selection behavior is validated against actual mixed melee/ranged pressure. While locked on, use horizontal mouse movement on the existing `LookAction` to select the nearest valid target on the requested screen side. Include a configurable swipe threshold, re-arm threshold, and cooldown; preserve the current target when no eligible target exists. This stage changes targeting only, not projectile behavior.
 
-- [ ] **TODO-04D: Archer Enemy v1**
-  Configure an archer `AEnemy` variant using the projectile core, readable line-of-sight behavior, and the existing local HFSM. Verify mixed melee/archer pressure without a Behavior Tree, StateTree, or caster system.
+- [ ] **TODO-04B-B: Bow Presentation And World Pickup v1**
+  Prerequisite: `TODO-04B-B0` is validated, and a legal DarkKnight-compatible bow mesh plus aim/release animations and needed audio assets are selected. Author the visible bow, visible arrow, persistent `TestMap` bow and 20-arrow bundle pickups, permanent loaded-arrow HUD, and aim-only dot reticle. Do not substitute sword animations as a final bow presentation. This remains blocked on final player assets and follows the enemy archer/target-switching validation path.
 
 ### Combat Punish And Criticals
 
@@ -223,6 +226,12 @@ Adoption conditions: 在加入第二张 gameplay map 前，或在同一存档可
 Recommendation: keep the existing `AEnemy` local HFSM for melee, archer, and first caster behavior. Use attack/profile data to vary range, line-of-sight, retreat distance, attack delivery, cooldown, and presentation before splitting C++ classes.
 
 Adoption conditions: introduce enemy profile DataAssets when three or more enemy variants repeat the same AI, stat, reward, sensing, and attack setup with only configuration differences. Consider StateTree or Behavior Tree only when the local HFSM becomes unreadable across multiple enemy families, repeated tactical branches dominate `AEnemy`, or future enemies need multi-step plans that cannot remain clear in the existing flow. Introduce a Boss-specific class or component only when a Boss needs persistent phase state, encounter-owned UI/objectives, arena rules, or lifecycle logic outside normal enemies.
+
+### Combo Montage Granularity
+
+Recommendation: retain one shared light-combo Montage while its attacks have homogeneous timing and only need Section-based input continuation. DataAssets own combo order, entry identity, damage, stamina, poise, and Motion Warping; the Montage timeline owns phase boundaries, local playback rate, collision, sound, cancel, and input-window timing. Do not duplicate one source animation into wind-up/strike/recovery segments merely because a future adjustment is imaginable.
+
+Adoption conditions: migrate to one Montage per combo attack when two or more existing attacks each require independently tuned wind-up, strike, and recovery timing, or when their cancel/transition rules cease to be legible in one shared Montage. That focused combat-authoring stage must replace the current single `ComboMontage + SectionName` contract with per-entry Montage and entry-Section references, preserve C++ ownership of buffered-input consumption, and start the next Montage through `Montage_Play`/its entry Section. `Montage_JumpToSection` must remain intra-Montage only. Revalidate every attack's collision, ComboBranchPoint, cancel window, sound, root-motion/Motion-Warping behavior, and recovery path before adopting it.
 
 ### PCG
 
