@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Character/BaseCharacter.h"
 #include "Character/CharacterTypes.h"
+#include "Combat/CombatProjectile.h"
 #include "Enemy.generated.h"
 
 struct FAIStimulus;
@@ -19,6 +20,7 @@ namespace EPathFollowingResult
 
 class AEnemy;
 class AEncounterController;
+class AController;
 class UAIPerceptionComponent;
 class AAIController;
 class UHealthBarComponent;
@@ -39,6 +41,8 @@ public:
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaTime) override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+	virtual void PossessedBy(AController* NewController) override;
+	virtual void UnPossessed() override;
 
 #if WITH_EDITOR
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
@@ -70,6 +74,7 @@ public:
 	void OnHitReactEnd();
 	UFUNCTION(BlueprintCallable, meta = (ToolTip = "动画攻击结束时调用，恢复敌人 AI 状态并启动攻击冷却。"))
 	void OnAttackEnd();
+	void TryReleaseConfiguredProjectileAttack();
 	virtual void OnAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted) override;
 	virtual void OnHitReactMontageEnded(UAnimMontage* Montage, bool bInterrupted) override;
 
@@ -92,6 +97,14 @@ public:
 	/* Getters */
 	FORCEINLINE EEnemyState GetEnemyState() const { return EnemyState; }
 	bool IsEngagingActor(const AActor* Actor) const;
+
+#if !UE_BUILD_SHIPPING
+	/** 在 deferred spawn 的 FinishSpawning 前调用，避免临时 Probe 创建巡逻 TargetPoint。 */
+	void PrepareRangedDebugProbeSpawn();
+
+	/** 仅 D-A PIE 验收使用的无资产射手探针入口。 */
+	bool StartRangedDebugProbe(AActor* Target, float ReleaseDelay, AAIController* ProbeController);
+#endif
 
 	/* 受击/死亡配置 */
 	virtual UHitReactionConfigDataAsset* GetReactionConfig() const override;
@@ -324,7 +337,10 @@ private:
 
 	void UpdateCombatMovement(float DeltaTime, float DistanceToTarget, const FVector& ToTarget);
 	FEnemyCombatMovePlan BuildCombatMovePlan(float DistanceToTarget, const FVector& ToTarget) const;
+	FEnemyCombatMovePlan BuildCombatMovePlanForRange(float DistanceToTarget, const FVector& ToTarget,
+		float TooCloseRadius, float PreferredMinRadius, float PreferredMaxRadius, bool bForceStrafe) const;
 	static const TCHAR* GetCombatMoveDebugName(EEnemyCombatMoveType MoveType);
+	bool ExecuteCombatMovePlan(const FEnemyCombatMovePlan& MovePlan, float CurrentTime);
 	bool MoveToCombatLocation(const FVector& Location);
 	bool MoveToCombatTarget(float AcceptanceRadiusOverride = -1.f); // 攻击 ready 时动态追踪目标 Actor
 	void ResetCombatReposition();
@@ -362,6 +378,48 @@ private:
 	void StartAttackCooldown(float MinCooldown, float MaxCooldown);
 	bool PlayEnemyAttackMontage(const FEnemyAttackEntry& Entry);
 	void ClearCurrentAttackConfig(bool bStartCooldown = false);
+
+	struct FActiveProjectileAttack
+	{
+		TSubclassOf<ACombatProjectile> ProjectileClass;
+		FProjectileDeliveryConfig DeliveryConfig;
+		FName SpawnSocketName = NAME_None;
+		float MinDistance = 0.f;
+		float MaxDistance = 0.f;
+		float MinCooldown = 0.f;
+		float MaxCooldown = 0.f;
+		bool bIsActive = false;
+		bool bReleaseAttempted = false;
+		bool bReleaseSucceeded = false;
+		bool bDebugProbe = false;
+
+		bool IsValid() const
+		{
+			return bIsActive && ProjectileClass && DeliveryConfig.IsValid()
+				&& MaxDistance >= MinDistance && MaxDistance > 0.f;
+		}
+	};
+
+	bool BuildProjectileAttackSnapshot(const FEnemyAttackEntry& Entry, FActiveProjectileAttack& OutSnapshot) const;
+
+#if !UE_BUILD_SHIPPING
+	bool BuildDebugProbeProjectileSnapshot(FActiveProjectileAttack& OutSnapshot) const;
+#endif
+	bool ResolveProjectileSpawnLocation(const FActiveProjectileAttack& Snapshot, FVector& OutSpawnLocation) const;
+	bool HasClearProjectileLineOfSight(const FActiveProjectileAttack& Snapshot, FVector& OutSpawnLocation,
+		FVector& OutTargetLocation) const;
+	bool IsProjectileAttackWithinReleaseRange(const FActiveProjectileAttack& Snapshot, float DistanceToTarget) const;
+	void HandlePendingProjectilePositioning(const FActiveProjectileAttack& Snapshot, float DistanceToTarget,
+		const FVector& ToTarget, bool bForceStrafeForLineOfSight, float PreferredMinRadius = -1.f,
+		float PreferredMaxRadius = -1.f);
+	void ClearActiveProjectileAttack();
+
+#if !UE_BUILD_SHIPPING
+	void OnDebugProjectileReleaseTimerElapsed();
+	void OnDebugProjectileAttackEndTimerElapsed();
+	void StartDebugProjectileAttack(FActiveProjectileAttack&& Snapshot);
+	bool TryExecuteRangedDebugProbePendingAttack(float DistanceToTarget, float ForwardDot, const FVector& ToTarget);
+#endif
 	/**
 	 * 为当前敌人招式写入/清理 Motion Warping 目标。
 	 * Entry 提供 WarpTargetName、StopDistance 和 MaxWarpDistance；目标点只在出手瞬间计算一次。
@@ -388,6 +446,7 @@ private:
 	float GetAttackCooldownRemaining() const;
 	void DrawDebugInfo() const;
 	int32 CurrentAttackIndex = INDEX_NONE;
+	FActiveProjectileAttack ActiveProjectileAttack;
 	float LastAttackConfigWarningTime = -1000.f;
 	int32 PendingAttackIndex = INDEX_NONE;
 	float PendingAttackStartTime = 0.f;
@@ -399,6 +458,16 @@ private:
 	UPROPERTY(EditAnywhere, Category = "Combat|Attack", meta = (ClampMin = "0.0", ToolTip = "Pending 攻击失败后，同一招式被重新抽中的短暂屏蔽时间，防止每帧反复抽中追不上的招式。"))
 	float PendingAttackRetryBlockDuration = 0.8f;
 	bool bCurrentAttackCooldownStarted = false;
+
+#if !UE_BUILD_SHIPPING
+	bool bIsRangedDebugProbeInstance = false;
+	bool bRangedDebugProbeActive = false;
+	bool bRangedDebugProbeCompleted = false;
+	bool bDebugProbeRetryAfterAttackEnd = false;
+	float DebugProbeReleaseDelay = 0.35f;
+	float DebugProbePendingStartTime = 0.f;
+	TWeakObjectPtr<AAIController> DebugProbeController;
+#endif
 
 	void SetCombatSubState(EEnemyCombatSubState NewSubState, float AllySuggestedWaitTime = 0.f);
 	EEnemyCombatSubState EvaluateCombatSubState(float DistanceToTarget, float ForwardDot, float& OutAllySuggestedWaitTime) const;
@@ -415,6 +484,8 @@ private:
 	FTimerHandle HealthBarHideTimer; // 血条延迟隐藏定时器
 	FTimerHandle PoiseResetTimer; // 韧性重置定时器
 	FTimerHandle StanceBreakRecoveryTimer; // 破防硬直恢复定时器
+	FTimerHandle ProjectileReleaseTimer;
+	FTimerHandle ProjectileAttackEndTimer;
 	bool bAttackOnCooldown = false; // 攻击冷却中
 	bool bIsTargetedByPlayer = false; // 被玩家锁定中
 	bool bPendingStanceBreak = false; // 韧性归零flag，等待GetHit后触发
@@ -449,4 +520,6 @@ private:
 	void RecoverFromStanceBreak(); // 破防硬直恢复回调
 	void ClearPatrolTimers(); // 清理巡逻相关定时器
 	void ClearAllTimers(); // 清理所有定时器（巡逻 + 冷却 + 血条 + 弹反）
+	void RefreshEnemyControllerBinding();
+	void SetEnemyControllerBinding(AAIController* NewEnemyController);
 };

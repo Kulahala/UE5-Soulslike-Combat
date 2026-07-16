@@ -39,6 +39,19 @@ void UAnimNotify_EnemyAttackEnd::Notify(USkeletalMeshComponent* MeshComp, UAnimS
 	}
 }
 
+void UAnimNotify_EnemyProjectileRelease::Notify(USkeletalMeshComponent* MeshComp, UAnimSequenceBase* Animation,
+	const FAnimNotifyEventReference& EventReference)
+{
+	Super::Notify(MeshComp, Animation, EventReference);
+	if (MeshComp && MeshComp->GetOwner())
+	{
+		if (AEnemy* Enemy = Cast<AEnemy>(MeshComp->GetOwner()))
+		{
+			Enemy->TryReleaseConfiguredProjectileAttack();
+		}
+	}
+}
+
 void UAnimNotify_CharacterHitReactEnd::Notify(USkeletalMeshComponent* MeshComp, UAnimSequenceBase* Animation, const FAnimNotifyEventReference& EventReference)
 {
 	Super::Notify(MeshComp, Animation, EventReference);

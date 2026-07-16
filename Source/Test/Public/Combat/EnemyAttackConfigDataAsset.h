@@ -4,10 +4,18 @@
 
 #include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
+#include "Combat/CombatProjectile.h"
 #include "EnemyAttackConfigDataAsset.generated.h"
 
 class UAnimMontage;
 struct FPropertyChangedEvent;
+
+UENUM(BlueprintType)
+enum class EEnemyAttackDeliveryType : uint8
+{
+	Melee UMETA(DisplayName = "Melee"),
+	Projectile UMETA(DisplayName = "Projectile")
+};
 
 USTRUCT(BlueprintType)
 struct FEnemyAttackEntry
@@ -22,6 +30,9 @@ struct FEnemyAttackEntry
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Attack", meta = (ToolTip = "播放起始 Section。为空时从蒙太奇默认入口播放。"))
 	FName StartSection = NAME_None;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Attack", meta = (ToolTip = "攻击命中投递方式。Projectile 仍需要 Montage，并在 Release Notify 时发射原生投射物。"))
+	EEnemyAttackDeliveryType DeliveryType = EEnemyAttackDeliveryType::Melee;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Damage", meta = (ClampMin = "0.0", ToolTip = "伤害倍率（相对武器基础伤害）。"))
 	float DamageMultiplier = 1.f;
@@ -47,6 +58,15 @@ struct FEnemyAttackEntry
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Selection", meta = (ClampMin = "0.0", ToolTip = "满足距离条件时的加权随机权重。0 表示不参与选择。"))
 	float Weight = 1.f;
 
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Projectile", meta = (EditCondition = "DeliveryType == EEnemyAttackDeliveryType::Projectile", ToolTip = "Projectile 攻击实际生成的原生 ACombatProjectile 类。缺失时该条目不会进入候选池。"))
+	TSubclassOf<ACombatProjectile> ProjectileClass;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Projectile", meta = (EditCondition = "DeliveryType == EEnemyAttackDeliveryType::Projectile", ToolTip = "Projectile 命中和飞行配置。攻击开始时会与本条目倍率合成为不可变快照。"))
+	FProjectileDeliveryConfig ProjectileDeliveryConfig;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Projectile", meta = (EditCondition = "DeliveryType == EEnemyAttackDeliveryType::Projectile", ToolTip = "发射 Socket。None 时使用敌人 GetActorEyesViewPoint()；正式射手应在 D-B 配置真实 Socket。"))
+	FName ProjectileSpawnSocketName = NAME_None;
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Motion Warping", meta = (ToolTip = "是否为该招式启用 Motion Warping。v1 只建议用于跳劈/跃进类 root motion 攻击。"))
 	bool bUseMotionWarping = false;
 
@@ -71,6 +91,7 @@ public:
 
 	int32 ChooseAttackIndex(float DistanceToTarget) const;
 	int32 ChooseAttackIntentIndex(int32 ExcludedAttackIndex = INDEX_NONE) const;
+	bool IsEntrySelectable(const FEnemyAttackEntry& Entry) const;
 
 	virtual void PostLoad() override;
 

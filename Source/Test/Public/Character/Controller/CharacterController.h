@@ -210,6 +210,10 @@ public:
 	UFUNCTION(Exec)
 	void ProjectileDebugFireSelf(FName SourceTeam);
 
+	// 非 Shipping 的无资产射手验收入口；正式 Erika 资产和 Montage 由 TODO-04D-B 接线。
+	UFUNCTION(Exec)
+	void EnemyRangedDebugProbe(float ReleaseDelay = 0.35f);
+
 	bool IsPaused() const { return bIsPaused; }
 	void SetCanPause(bool bCanPauseNew) { bCanPause = bCanPauseNew; }
 	void ClearPauseIfActive();

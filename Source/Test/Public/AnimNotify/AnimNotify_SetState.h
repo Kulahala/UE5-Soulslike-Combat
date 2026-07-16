@@ -39,6 +39,16 @@ public:
 	virtual void Notify(USkeletalMeshComponent* MeshComp, UAnimSequenceBase* Animation, const FAnimNotifyEventReference& EventReference) override;
 };
 
+// 敌人远程攻击的真实 Release 时机。Notify 只请求 Enemy 验证并发射，不直接 SpawnActor。
+UCLASS()
+class TEST_API UAnimNotify_EnemyProjectileRelease : public UAnimNotify
+{
+	GENERATED_BODY()
+
+public:
+	virtual void Notify(USkeletalMeshComponent* MeshComp, UAnimSequenceBase* Animation, const FAnimNotifyEventReference& EventReference) override;
+};
+
 // 专门用于结束 主角受击硬直 的通知
 UCLASS()
 class TEST_API UAnimNotify_CharacterHitReactEnd : public UAnimNotify

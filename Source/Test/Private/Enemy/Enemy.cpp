@@ -9,9 +9,12 @@
 #include "Animation/AnimInstance.h"
 #include "AttributeComponent/AttributeComponent.h"
 #include "Combat/CombatTeamHelper.h"
+#include "Combat/CombatProjectile.h"
 #include "Combat/EnemyAttackConfigDataAsset.h"
 #include "components/CapsuleComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Components/WidgetComponent.h"
+#include "DrawDebugHelpers.h"
 #include "Engine/TargetPoint.h"
 #include "Engine/World.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -159,13 +162,14 @@ void AEnemy::BeginPlay()
 		AIPerceptionComp->OnTargetPerceptionUpdated.AddDynamic(this, &AEnemy::TargetPerceptionUpdated);
 	}
 
-	SpawnPointInit();
-
-	EnemyController = Cast<AAIController>(GetController());
-	if (EnemyController)
+#if !UE_BUILD_SHIPPING
+	if (!bIsRangedDebugProbeInstance)
+#endif
 	{
-		EnemyController->ReceiveMoveCompleted.AddDynamic(this, &AEnemy::OnRepositionMoveCompleted);
+		SpawnPointInit();
 	}
+
+	RefreshEnemyControllerBinding();
 
 	WeaponInit();
 	ValidateEnemyAttackConfig();
@@ -189,11 +193,34 @@ void AEnemy::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	// 兜底：定时器全量清理，覆盖 Die() 未执行的路径（关卡切换、编辑器 Stop 等）
 	ClearAllTimers();
-	if (EnemyController)
+	ClearActiveProjectileAttack();
+#if !UE_BUILD_SHIPPING
+	bRangedDebugProbeActive = false;
+	bRangedDebugProbeCompleted = true;
+	DebugProbeController.Reset();
+#endif
+	SetEnemyControllerBinding(nullptr);
+	Super::EndPlay(EndPlayReason);
+}
+
+void AEnemy::RefreshEnemyControllerBinding()
+{
+	SetEnemyControllerBinding(Cast<AAIController>(GetController()));
+}
+
+void AEnemy::SetEnemyControllerBinding(AAIController* NewEnemyController)
+{
+	if (IsValid(EnemyController))
 	{
 		EnemyController->ReceiveMoveCompleted.RemoveDynamic(this, &AEnemy::OnRepositionMoveCompleted);
 	}
-	Super::EndPlay(EndPlayReason);
+
+	EnemyController = NewEnemyController;
+	if (IsValid(EnemyController))
+	{
+		EnemyController->ReceiveMoveCompleted.RemoveDynamic(this, &AEnemy::OnRepositionMoveCompleted);
+		EnemyController->ReceiveMoveCompleted.AddDynamic(this, &AEnemy::OnRepositionMoveCompleted);
+	}
 }
 
 // ==================== 受击/死亡 ====================
@@ -248,6 +275,11 @@ float AEnemy::TakeDamage(float DamageAmount, const struct FDamageEvent& DamageEv
 void AEnemy::Die()
 {
 	ClearAllTimers();
+#if !UE_BUILD_SHIPPING
+	bRangedDebugProbeActive = false;
+	bRangedDebugProbeCompleted = true;
+	DebugProbeController.Reset();
+#endif
 	bPendingStanceBreak = false;
 	LastPoiseDamageInstigator = nullptr;
 
@@ -275,6 +307,18 @@ void AEnemy::Die()
 		bDeathNotificationBroadcast = true;
 		EnemyDiedDelegate.Broadcast(this);
 	}
+}
+
+void AEnemy::PossessedBy(AController* NewController)
+{
+	Super::PossessedBy(NewController);
+	RefreshEnemyControllerBinding();
+}
+
+void AEnemy::UnPossessed()
+{
+	SetEnemyControllerBinding(nullptr);
+	Super::UnPossessed();
 }
 
 bool AEnemy::ClaimEncounterOwner(AEncounterController* NewOwner)
@@ -317,6 +361,11 @@ void AEnemy::SetEncounterDormant(AEncounterController* CurrentOwner)
 	// 先建立状态屏障，再停止 Montage，避免其结束回调重新驱动 AI。
 	bEncounterDormant = true;
 	ClearAllTimers();
+#if !UE_BUILD_SHIPPING
+	bRangedDebugProbeActive = false;
+	bRangedDebugProbeCompleted = true;
+	DebugProbeController.Reset();
+#endif
 	bAttackOnCooldown = false;
 	ClearCurrentAttackConfig(false);
 	ClearPendingAttack();
@@ -520,13 +569,50 @@ bool AEnemy::PerformConfiguredAttackByIndex(int32 AttackIndex)
 	}
 
 	const FEnemyAttackEntry& Entry = EnemyAttackConfig->Attacks[AttackIndex];
+	if (!EnemyAttackConfig->IsEntrySelectable(Entry))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s rejected invalid enemy attack entry '%s'."),
+			*GetName(), *Entry.AttackName.ToString());
+		return false;
+	}
+
+	FActiveProjectileAttack ProjectileSnapshot;
+	if (Entry.DeliveryType == EEnemyAttackDeliveryType::Projectile
+		&& !BuildProjectileAttackSnapshot(Entry, ProjectileSnapshot))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s rejected projectile attack entry '%s' because its launch snapshot is invalid."),
+			*GetName(), *Entry.AttackName.ToString());
+		return false;
+	}
+
+	if (Entry.DeliveryType == EEnemyAttackDeliveryType::Projectile)
+	{
+		const float DistanceToTarget = FVector::Dist2D(GetActorLocation(), ChasingTarget->GetActorLocation());
+		FVector SpawnLocation;
+		FVector TargetLocation;
+		if (!IsProjectileAttackWithinReleaseRange(ProjectileSnapshot, DistanceToTarget)
+			|| !HasClearProjectileLineOfSight(ProjectileSnapshot, SpawnLocation, TargetLocation))
+		{
+			UE_LOG(LogTemp, Warning, TEXT("%s rejected projectile attack entry '%s' because range or LOS is no longer valid."),
+				*GetName(), *Entry.AttackName.ToString());
+			return false;
+		}
+	}
+
 	CurrentAttackIndex = AttackIndex;
 	bCurrentAttackCooldownStarted = false;
 	SetAttackDamageMultiplier(Entry.DamageMultiplier);
 	SetBlockStaminaDamageMultiplier(Entry.BlockStaminaDamageMultiplier);
 	SetCurrentAttackCannotBeParried(Entry.bCannotBeParried);
+	if (Entry.DeliveryType == EEnemyAttackDeliveryType::Projectile)
+	{
+		ActiveProjectileAttack = MoveTemp(ProjectileSnapshot);
+	}
 	SetEnemyState(EEnemyState::EES_Attacking);
-	UpdateAttackMotionWarpTarget(Entry);
+	if (Entry.DeliveryType == EEnemyAttackDeliveryType::Melee)
+	{
+		UpdateAttackMotionWarpTarget(Entry);
+	}
 
 	if (!PlayEnemyAttackMontage(Entry))
 	{
@@ -595,10 +681,143 @@ void AEnemy::ClearCurrentAttackConfig(bool bStartCooldown)
 	}
 
 	CurrentAttackIndex = INDEX_NONE;
+	ClearActiveProjectileAttack();
 	bCurrentAttackCooldownStarted = false;
 	SetAttackDamageMultiplier(1.f);
 	SetBlockStaminaDamageMultiplier(1.f);
 	SetCurrentAttackCannotBeParried(false);
+}
+
+bool AEnemy::BuildProjectileAttackSnapshot(const FEnemyAttackEntry& Entry,
+	FActiveProjectileAttack& OutSnapshot) const
+{
+	OutSnapshot = FActiveProjectileAttack{};
+	if (Entry.DeliveryType != EEnemyAttackDeliveryType::Projectile || !Entry.ProjectileClass
+		|| !Entry.ProjectileDeliveryConfig.IsValid())
+	{
+		return false;
+	}
+
+	const float EffectiveMaxDistance = FMath::Min(Entry.MaxDistance, CombatAttackMaxRadius);
+	if (EffectiveMaxDistance <= 0.f || Entry.MinDistance > EffectiveMaxDistance)
+	{
+		UE_LOG(LogTemp, Warning,
+			TEXT("%s rejected projectile attack entry '%s': range %.1f-%.1f conflicts with CombatAttackMaxRadius %.1f."),
+			*GetName(), *Entry.AttackName.ToString(), Entry.MinDistance, Entry.MaxDistance, CombatAttackMaxRadius);
+		return false;
+	}
+
+	OutSnapshot.ProjectileClass = Entry.ProjectileClass;
+	OutSnapshot.DeliveryConfig = Entry.ProjectileDeliveryConfig;
+	OutSnapshot.DeliveryConfig.Damage *= Entry.DamageMultiplier;
+	OutSnapshot.DeliveryConfig.BlockStaminaDamageMultiplier *= Entry.BlockStaminaDamageMultiplier;
+	OutSnapshot.DeliveryConfig.bCanBeParried = Entry.ProjectileDeliveryConfig.bCanBeParried
+		&& !Entry.bCannotBeParried;
+	OutSnapshot.SpawnSocketName = Entry.ProjectileSpawnSocketName;
+	OutSnapshot.MinDistance = Entry.MinDistance;
+	OutSnapshot.MaxDistance = EffectiveMaxDistance;
+	OutSnapshot.MinCooldown = Entry.MinCooldown;
+	OutSnapshot.MaxCooldown = Entry.MaxCooldown;
+	OutSnapshot.bIsActive = OutSnapshot.DeliveryConfig.IsValid();
+	return OutSnapshot.IsValid();
+}
+
+#if !UE_BUILD_SHIPPING
+bool AEnemy::BuildDebugProbeProjectileSnapshot(FActiveProjectileAttack& OutSnapshot) const
+{
+	OutSnapshot = FActiveProjectileAttack{};
+	OutSnapshot.ProjectileClass = ACombatProjectile::StaticClass();
+	OutSnapshot.DeliveryConfig.Damage = 10.f;
+	OutSnapshot.DeliveryConfig.PoiseDamage = 1.f;
+	OutSnapshot.DeliveryConfig.BlockStaminaDamageMultiplier = 1.f;
+	OutSnapshot.DeliveryConfig.bCanBeParried = false;
+	OutSnapshot.DeliveryConfig.InitialSpeed = 3000.f;
+	OutSnapshot.DeliveryConfig.MaxSpeed = 3000.f;
+	OutSnapshot.DeliveryConfig.CollisionRadius = 10.f;
+	OutSnapshot.DeliveryConfig.MaxLifetime = 3.f;
+	OutSnapshot.MinDistance = 500.f;
+	OutSnapshot.MaxDistance = 1100.f;
+	OutSnapshot.MinCooldown = 0.f;
+	OutSnapshot.MaxCooldown = 0.f;
+	OutSnapshot.bIsActive = true;
+	OutSnapshot.bDebugProbe = true;
+	return OutSnapshot.IsValid();
+}
+#endif
+
+bool AEnemy::ResolveProjectileSpawnLocation(const FActiveProjectileAttack& Snapshot, FVector& OutSpawnLocation) const
+{
+	if (Snapshot.SpawnSocketName == NAME_None)
+	{
+		FRotator EyeRotation;
+		GetActorEyesViewPoint(OutSpawnLocation, EyeRotation);
+		return true;
+	}
+
+	const USkeletalMeshComponent* MeshComponent = GetMesh();
+	if (!MeshComponent || !MeshComponent->DoesSocketExist(Snapshot.SpawnSocketName))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s rejected projectile release: socket '%s' does not exist."),
+			*GetName(), *Snapshot.SpawnSocketName.ToString());
+		return false;
+	}
+
+	OutSpawnLocation = MeshComponent->GetSocketLocation(Snapshot.SpawnSocketName);
+	return true;
+}
+
+bool AEnemy::HasClearProjectileLineOfSight(const FActiveProjectileAttack& Snapshot, FVector& OutSpawnLocation,
+	FVector& OutTargetLocation) const
+{
+	if (!GetWorld() || !IsValidCombatTarget(ChasingTarget) || !ResolveProjectileSpawnLocation(Snapshot, OutSpawnLocation))
+	{
+		return false;
+	}
+
+	FRotator TargetEyeRotation;
+	ChasingTarget->GetActorEyesViewPoint(OutTargetLocation, TargetEyeRotation);
+
+	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(EnemyProjectileLineOfSight), false, this);
+	QueryParams.AddIgnoredActor(this);
+	if (IsValid(EquippedWeapon))
+	{
+		QueryParams.AddIgnoredActor(EquippedWeapon);
+	}
+
+	FHitResult HitResult;
+	const bool bHit = GetWorld()->LineTraceSingleByChannel(HitResult, OutSpawnLocation, OutTargetLocation,
+		ECC_Visibility, QueryParams);
+	const bool bHasLineOfSight = !bHit || HitResult.GetActor() == ChasingTarget;
+	if (FDebugDrawHelper::IsRangesEnabled())
+	{
+		DrawDebugLine(GetWorld(), OutSpawnLocation, OutTargetLocation,
+			bHasLineOfSight ? FColor::Green : FColor::Red, false, 0.1f, 0, 1.5f);
+	}
+
+	return bHasLineOfSight;
+}
+
+bool AEnemy::IsProjectileAttackWithinReleaseRange(const FActiveProjectileAttack& Snapshot,
+	float DistanceToTarget) const
+{
+	return Snapshot.IsValid() && DistanceToTarget >= Snapshot.MinDistance
+		&& DistanceToTarget <= Snapshot.MaxDistance;
+}
+
+void AEnemy::ClearActiveProjectileAttack()
+{
+	GetWorldTimerManager().ClearTimer(ProjectileReleaseTimer);
+	GetWorldTimerManager().ClearTimer(ProjectileAttackEndTimer);
+#if !UE_BUILD_SHIPPING
+	if (ActiveProjectileAttack.bDebugProbe && !bDebugProbeRetryAfterAttackEnd)
+	{
+		bRangedDebugProbeActive = false;
+		bRangedDebugProbeCompleted = true;
+		DebugProbeController.Reset();
+	}
+	bDebugProbeRetryAfterAttackEnd = false;
+#endif
+	ActiveProjectileAttack = FActiveProjectileAttack{};
 }
 
 void AEnemy::UpdateAttackMotionWarpTarget(const FEnemyAttackEntry& Entry)
@@ -717,6 +936,16 @@ void AEnemy::ClearPendingAttack()
 
 void AEnemy::RollPendingAttackIntent()
 {
+#if !UE_BUILD_SHIPPING
+	if (bRangedDebugProbeActive)
+	{
+		PendingAttackIndex = 0;
+		PendingAttackStartTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
+		bPendingAttackMoveIssued = false;
+		return;
+	}
+#endif
+
 	if (!EnemyAttackConfig)
 	{
 		WarnNoEnemyAttackCandidate(0.f);
@@ -754,6 +983,12 @@ bool AEnemy::TryExecutePendingAttack(float DistanceToTarget, float ForwardDot, c
 
 	if (!EnemyAttackConfig || !EnemyAttackConfig->Attacks.IsValidIndex(PendingAttackIndex))
 	{
+#if !UE_BUILD_SHIPPING
+		if (bRangedDebugProbeActive && PendingAttackIndex == 0)
+		{
+			return TryExecuteRangedDebugProbePendingAttack(DistanceToTarget, ForwardDot, ToTarget);
+		}
+#endif
 		ClearPendingAttack();
 		return false;
 	}
@@ -775,6 +1010,16 @@ bool AEnemy::TryExecutePendingAttack(float DistanceToTarget, float ForwardDot, c
 
 	if (DistanceToTarget < Entry.MinDistance)
 	{
+		if (Entry.DeliveryType == EEnemyAttackDeliveryType::Projectile)
+		{
+			FActiveProjectileAttack PendingSnapshot;
+			if (BuildProjectileAttackSnapshot(Entry, PendingSnapshot))
+			{
+				HandlePendingProjectilePositioning(PendingSnapshot, DistanceToTarget, ToTarget, false);
+				return true;
+			}
+		}
+
 		BlockPendingAttackRetry(PendingAttackIndex);
 		ClearPendingAttack();
 		return true;
@@ -785,6 +1030,27 @@ bool AEnemy::TryExecutePendingAttack(float DistanceToTarget, float ForwardDot, c
 		StopEnemyMovementIfPossible();
 		CombatMoveDetailDebug = TEXT("PendingOrient");
 		return true;
+	}
+
+	if (Entry.DeliveryType == EEnemyAttackDeliveryType::Projectile)
+	{
+		FActiveProjectileAttack PendingSnapshot;
+		FVector SpawnLocation;
+		FVector TargetLocation;
+		if (!BuildProjectileAttackSnapshot(Entry, PendingSnapshot)
+			|| !HasClearProjectileLineOfSight(PendingSnapshot, SpawnLocation, TargetLocation))
+		{
+			if (PendingSnapshot.IsValid())
+			{
+				HandlePendingProjectilePositioning(PendingSnapshot, DistanceToTarget, ToTarget, true);
+			}
+			else
+			{
+				BlockPendingAttackRetry(PendingAttackIndex);
+				ClearPendingAttack();
+			}
+			return true;
+		}
 	}
 
 	const int32 AttackIndex = PendingAttackIndex;
@@ -858,7 +1124,24 @@ int32 AEnemy::GetBlockedPendingAttackIndex() const
 
 void AEnemy::StartCurrentAttackCooldownIfNeeded()
 {
-	if (bCurrentAttackCooldownStarted || !EnemyAttackConfig || !EnemyAttackConfig->Attacks.IsValidIndex(CurrentAttackIndex))
+	if (bCurrentAttackCooldownStarted)
+	{
+		return;
+	}
+
+	if (ActiveProjectileAttack.IsValid())
+	{
+		if (ActiveProjectileAttack.bDebugProbe)
+		{
+			return;
+		}
+
+		bCurrentAttackCooldownStarted = true;
+		StartAttackCooldown(ActiveProjectileAttack.MinCooldown, ActiveProjectileAttack.MaxCooldown);
+		return;
+	}
+
+	if (!EnemyAttackConfig || !EnemyAttackConfig->Attacks.IsValidIndex(CurrentAttackIndex))
 	{
 		return;
 	}
@@ -931,6 +1214,78 @@ void AEnemy::OnAttackEnd()
 	{
 		CheckCombatTarget();
 	}
+}
+
+void AEnemy::TryReleaseConfiguredProjectileAttack()
+{
+	const bool bCurrentAttackIsProjectile = ActiveProjectileAttack.bDebugProbe || (EnemyAttackConfig
+		&& EnemyAttackConfig->Attacks.IsValidIndex(CurrentAttackIndex)
+		&& EnemyAttackConfig->Attacks[CurrentAttackIndex].DeliveryType == EEnemyAttackDeliveryType::Projectile);
+	if (IsActorBeingDestroyed() || bEncounterDormant || EnemyState != EEnemyState::EES_Attacking || !bCurrentAttackIsProjectile
+		|| !ActiveProjectileAttack.IsValid()
+		|| ActiveProjectileAttack.bReleaseAttempted || !IsValidCombatTarget(ChasingTarget))
+	{
+		return;
+	}
+
+#if !UE_BUILD_SHIPPING
+	if (ActiveProjectileAttack.bDebugProbe && !DebugProbeController.IsValid())
+	{
+		UE_LOG(LogTemp, Display, TEXT("%s rejected debug projectile release because its temporary controller is no longer valid."),
+			*GetName());
+		return;
+	}
+	if (ActiveProjectileAttack.bDebugProbe && GetController() != DebugProbeController.Get())
+	{
+		UE_LOG(LogTemp, Display, TEXT("%s rejected debug projectile release because its temporary controller no longer possesses it."),
+			*GetName());
+		return;
+	}
+#endif
+
+	// 一个攻击只有一次 Release 尝试；重复或迟到 Notify 不能在位置重新有效后补射。
+	ActiveProjectileAttack.bReleaseAttempted = true;
+
+	const float DistanceToTarget = FVector::Dist2D(GetActorLocation(), ChasingTarget->GetActorLocation());
+	if (!IsProjectileAttackWithinReleaseRange(ActiveProjectileAttack, DistanceToTarget))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s rejected projectile release outside its range at %.1f cm."),
+			*GetName(), DistanceToTarget);
+		return;
+	}
+
+	FVector SpawnLocation;
+	FVector TargetLocation;
+	if (!HasClearProjectileLineOfSight(ActiveProjectileAttack, SpawnLocation, TargetLocation))
+	{
+		UE_LOG(LogTemp, Display, TEXT("%s rejected projectile release because LOS is blocked."), *GetName());
+		return;
+	}
+
+	const FVector LaunchDirection = (TargetLocation - SpawnLocation).GetSafeNormal();
+	if (LaunchDirection.IsNearlyZero())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s rejected projectile release because launch direction is zero."), *GetName());
+		return;
+	}
+
+	FProjectileLaunchParams LaunchParams;
+	LaunchParams.Attacker = this;
+	LaunchParams.EventInstigator = GetController();
+	LaunchParams.SpawnLocation = SpawnLocation;
+	LaunchParams.LaunchDirection = LaunchDirection;
+	LaunchParams.bOverrideDeliveryConfig = true;
+	LaunchParams.DeliveryConfigOverride = ActiveProjectileAttack.DeliveryConfig;
+
+	if (ACombatProjectile* Projectile = ACombatProjectile::SpawnConfiguredProjectile(
+		GetWorld(), ActiveProjectileAttack.ProjectileClass, LaunchParams))
+	{
+		ActiveProjectileAttack.bReleaseSucceeded = true;
+		UE_LOG(LogTemp, Display, TEXT("%s released projectile '%s'."), *GetName(), *Projectile->GetName());
+		return;
+	}
+
+	UE_LOG(LogTemp, Warning, TEXT("%s failed to spawn its configured projectile."), *GetName());
 }
 
 void AEnemy::OnAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted)
@@ -1563,6 +1918,13 @@ const TCHAR* AEnemy::GetCombatMoveDebugName(EEnemyCombatMoveType MoveType)
 
 AEnemy::FEnemyCombatMovePlan AEnemy::BuildCombatMovePlan(float DistanceToTarget, const FVector& ToTarget) const
 {
+	return BuildCombatMovePlanForRange(DistanceToTarget, ToTarget, CombatTooCloseRadius,
+		CombatPreferredMinRadius, CombatPreferredMaxRadius, false);
+}
+
+AEnemy::FEnemyCombatMovePlan AEnemy::BuildCombatMovePlanForRange(float DistanceToTarget, const FVector& ToTarget,
+	float TooCloseRadius, float PreferredMinRadius, float PreferredMaxRadius, bool bForceStrafe) const
+{
 	FEnemyCombatMovePlan Plan;
 	if (!ChasingTarget)
 	{
@@ -1574,25 +1936,25 @@ AEnemy::FEnemyCombatMovePlan AEnemy::BuildCombatMovePlan(float DistanceToTarget,
 	const FVector Right = FVector::CrossProduct(FVector::UpVector, ToTarget).GetSafeNormal2D();
 	const float SideDir = FMath::RandBool() ? 1.f : -1.f;
 
-	if (DistanceToTarget < CombatTooCloseRadius)
+	if (DistanceToTarget < TooCloseRadius)
 	{
 		// 后撤
-		const float TargetDist = FMath::FRandRange(CombatPreferredMinRadius, CombatPreferredMaxRadius);
+		const float TargetDist = FMath::FRandRange(PreferredMinRadius, PreferredMaxRadius);
 		Plan.MoveType = EEnemyCombatMoveType::Retreat;
 		Plan.GoalLocation = ChasingTarget->GetActorLocation() - ToTarget * TargetDist;
 		Plan.bUseRetreatSpeedEase = true;
 	}
-	else if (DistanceToTarget < CombatPreferredMinRadius)
+	else if (DistanceToTarget < PreferredMinRadius)
 	{
 		// 斜后撤
-		const float TargetDist = FMath::FRandRange(CombatPreferredMinRadius, CombatPreferredMaxRadius);
+		const float TargetDist = FMath::FRandRange(PreferredMinRadius, PreferredMaxRadius);
 		const FVector BackOffset = -ToTarget * TargetDist;
 		const FVector SideOffset = Right * SideDir * TargetDist * 0.3f;
 		Plan.MoveType = EEnemyCombatMoveType::BackDiag;
 		Plan.GoalLocation = ChasingTarget->GetActorLocation() + BackOffset + SideOffset;
 		Plan.bUseRetreatSpeedEase = true;
 	}
-	else if (DistanceToTarget <= CombatPreferredMaxRadius)
+	else if (bForceStrafe || DistanceToTarget <= PreferredMaxRadius)
 	{
 		// 侧移：围绕目标旋转固定角度，保持当前半径
 		const FVector OffsetFromTarget = -ToTarget * DistanceToTarget;
@@ -1604,7 +1966,7 @@ AEnemy::FEnemyCombatMovePlan AEnemy::BuildCombatMovePlan(float DistanceToTarget,
 	else
 	{
 		// 冷却期目标太远时只压回到距离环外侧，不直接压进攻击距离
-		const float TargetDist = CombatPreferredMaxRadius - CombatPressMargin;
+		const float TargetDist = PreferredMaxRadius - CombatPressMargin;
 		Plan.MoveType = EEnemyCombatMoveType::Press;
 		Plan.GoalLocation = ChasingTarget->GetActorLocation() - ToTarget * TargetDist;
 		Plan.MoveSpeed = ChaseSpeed;
@@ -1622,6 +1984,15 @@ void AEnemy::UpdateCombatMovement(float DeltaTime, float DistanceToTarget, const
 
 	const FEnemyCombatMovePlan MovePlan = BuildCombatMovePlan(DistanceToTarget, ToTarget);
 	if (!MovePlan.IsValid()) return;
+	ExecuteCombatMovePlan(MovePlan, Now);
+}
+
+bool AEnemy::ExecuteCombatMovePlan(const FEnemyCombatMovePlan& MovePlan, float CurrentTime)
+{
+	if (!MovePlan.IsValid())
+	{
+		return false;
+	}
 
 	ClearCombatRetreatSpeedEase();
 	GetCharacterMovement()->MaxWalkSpeed = MovePlan.MoveSpeed;
@@ -1635,14 +2006,172 @@ void AEnemy::UpdateCombatMovement(float DeltaTime, float DistanceToTarget, const
 		}
 		// 成功：正常节奏间隔
 		const float Interval = FMath::FRandRange(CombatRepositionIntervalMin, CombatRepositionIntervalMax);
-		NextCombatRepositionTime = Now + Interval;
+		NextCombatRepositionTime = CurrentTime + Interval;
+		return true;
 	}
-	else
+
+	// 失败：短间隔重试
+	NextCombatRepositionTime = CurrentTime + MovePlan.RetryDelay;
+	return false;
+}
+
+void AEnemy::HandlePendingProjectilePositioning(const FActiveProjectileAttack& Snapshot, float DistanceToTarget,
+	const FVector& ToTarget, bool bForceStrafeForLineOfSight, float PreferredMinRadius, float PreferredMaxRadius)
+{
+	if (!Snapshot.IsValid() || bRepositionInProgress)
 	{
-		// 失败：短间隔重试
-		NextCombatRepositionTime = Now + MovePlan.RetryDelay;
+		return;
+	}
+
+	const UWorld* World = GetWorld();
+	const float Now = World ? World->GetTimeSeconds() : 0.f;
+	if (Now < NextCombatRepositionTime)
+	{
+		return;
+	}
+
+	const float EffectivePreferredMinRadius = PreferredMinRadius >= Snapshot.MinDistance
+		? PreferredMinRadius
+		: FMath::Max(Snapshot.MinDistance, CombatPreferredMinRadius);
+	const float EffectivePreferredMaxRadius = PreferredMaxRadius >= EffectivePreferredMinRadius
+		? PreferredMaxRadius
+		: FMath::Max(EffectivePreferredMinRadius, CombatPreferredMaxRadius);
+	const FEnemyCombatMovePlan MovePlan = BuildCombatMovePlanForRange(DistanceToTarget, ToTarget,
+		Snapshot.MinDistance, EffectivePreferredMinRadius, EffectivePreferredMaxRadius, bForceStrafeForLineOfSight);
+	if (ExecuteCombatMovePlan(MovePlan, Now))
+	{
+		CombatMoveDetailDebug = bForceStrafeForLineOfSight ? TEXT("ProjectileLOSReposition")
+			: FString::Printf(TEXT("Projectile%s"), GetCombatMoveDebugName(MovePlan.MoveType));
 	}
 }
+
+#if !UE_BUILD_SHIPPING
+void AEnemy::OnDebugProjectileReleaseTimerElapsed()
+{
+	TryReleaseConfiguredProjectileAttack();
+}
+
+void AEnemy::OnDebugProjectileAttackEndTimerElapsed()
+{
+	const bool bReleaseSucceeded = ActiveProjectileAttack.bReleaseSucceeded;
+	bDebugProbeRetryAfterAttackEnd = !bReleaseSucceeded;
+	OnAttackEnd();
+	if (bReleaseSucceeded)
+	{
+		SetLifeSpan(0.1f);
+	}
+}
+
+void AEnemy::StartDebugProjectileAttack(FActiveProjectileAttack&& Snapshot)
+{
+	if (!Snapshot.IsValid() || bEncounterDormant || EnemyState != EEnemyState::EES_Combating)
+	{
+		return;
+	}
+
+	ActiveProjectileAttack = MoveTemp(Snapshot);
+	SetEnemyState(EEnemyState::EES_Attacking);
+	GetWorldTimerManager().SetTimer(ProjectileReleaseTimer, this,
+		&AEnemy::OnDebugProjectileReleaseTimerElapsed, DebugProbeReleaseDelay, false);
+	GetWorldTimerManager().SetTimer(ProjectileAttackEndTimer, this,
+		&AEnemy::OnDebugProjectileAttackEndTimerElapsed, DebugProbeReleaseDelay + 0.15f, false);
+}
+
+void AEnemy::PrepareRangedDebugProbeSpawn()
+{
+	bIsRangedDebugProbeInstance = true;
+	AutoPossessAI = EAutoPossessAI::Disabled;
+}
+
+bool AEnemy::StartRangedDebugProbe(AActor* Target, float ReleaseDelay, AAIController* ProbeController)
+{
+	if (!bIsRangedDebugProbeInstance || !IsValidCombatTarget(Target) || !IsValid(ProbeController) || ReleaseDelay < 0.f)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s could not initialize EnemyRangedDebugProbe."), *GetName());
+		return false;
+	}
+
+	bRangedDebugProbeActive = true;
+	bRangedDebugProbeCompleted = false;
+	DebugProbeReleaseDelay = ReleaseDelay;
+	DebugProbePendingStartTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
+	DebugProbeController = ProbeController;
+	ChasingTarget = Target;
+	Tags.AddUnique(FName(TEXT("Enemy")));
+	CombatAttackMaxRadius = 1100.f;
+	CombatPreferredMinRadius = 700.f;
+	CombatPreferredMaxRadius = 900.f;
+	CombatingRadius = 1200.f;
+	ChasingRadius = 1600.f;
+	SetEnemyState(EEnemyState::EES_Combating);
+	UE_LOG(LogTemp, Display, TEXT("EnemyRangedDebugProbe '%s' initialized with ReleaseDelay %.2f."),
+		*GetName(), ReleaseDelay);
+	return true;
+}
+
+bool AEnemy::TryExecuteRangedDebugProbePendingAttack(float DistanceToTarget, float ForwardDot, const FVector& ToTarget)
+{
+	if (!bRangedDebugProbeActive || bRangedDebugProbeCompleted || EnemyState != EEnemyState::EES_Combating
+		|| !DebugProbeController.IsValid() || GetController() != DebugProbeController.Get())
+	{
+		if (bRangedDebugProbeActive && (!DebugProbeController.IsValid()
+			|| GetController() != DebugProbeController.Get()))
+		{
+			bRangedDebugProbeActive = false;
+			bRangedDebugProbeCompleted = true;
+		}
+		ClearPendingAttack();
+		return true;
+	}
+
+	FActiveProjectileAttack Snapshot;
+	if (!BuildDebugProbeProjectileSnapshot(Snapshot))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s EnemyRangedDebugProbe could not build a projectile snapshot."), *GetName());
+		bRangedDebugProbeCompleted = true;
+		SetLifeSpan(0.1f);
+		ClearPendingAttack();
+		return true;
+	}
+
+	const UWorld* World = GetWorld();
+	const float Now = World ? World->GetTimeSeconds() : 0.f;
+	if (Now - DebugProbePendingStartTime >= PendingAttackTimeout)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s EnemyRangedDebugProbe timed out before a valid release."), *GetName());
+		BlockPendingAttackRetry(PendingAttackIndex);
+		ClearPendingAttack();
+		bRangedDebugProbeCompleted = true;
+		SetLifeSpan(0.1f);
+		return true;
+	}
+
+	if (DistanceToTarget > Snapshot.MaxDistance || DistanceToTarget < Snapshot.MinDistance)
+	{
+		HandlePendingProjectilePositioning(Snapshot, DistanceToTarget, ToTarget, false, 700.f, 900.f);
+		return true;
+	}
+
+	if (ForwardDot <= AttackAngleThreshold)
+	{
+		StopEnemyMovementIfPossible();
+		CombatMoveDetailDebug = TEXT("ProbeOrient");
+		return true;
+	}
+
+	FVector SpawnLocation;
+	FVector TargetLocation;
+	if (!HasClearProjectileLineOfSight(Snapshot, SpawnLocation, TargetLocation))
+	{
+		HandlePendingProjectilePositioning(Snapshot, DistanceToTarget, ToTarget, true, 700.f, 900.f);
+		return true;
+	}
+
+	StartDebugProjectileAttack(MoveTemp(Snapshot));
+	ClearPendingAttack();
+	return true;
+}
+#endif
 
 bool AEnemy::MoveToCombatLocation(const FVector& Location)
 {
@@ -1768,11 +2297,17 @@ void AEnemy::MoveToTarget(const AActor* Target)
 	FAIMoveRequest MoveRequest;
 	MoveRequest.SetGoalActor(Target);
 
-	// 追击：中心距到达 CombatAttackMaxRadius - CombatPressMargin 时停下，与前压目标距离对齐
-	// 巡逻：保持原逻辑
-	float StopRadius = (Target == ChasingTarget)
-		                   ? FMath::Max(15.f, CombatAttackMaxRadius - CombatPressMargin)
-		                   : FMath::Max(15.f, PatrolRadius - 50.f);
+	// 追击：中心距到达 CombatAttackMaxRadius - CombatPressMargin 时停下，与前压目标距离对齐。
+	// 射手探针的最小射程大于常规近战半径，保持在其有效距离窗口外侧，避免刚生成就贴脸。
+	const bool bUseRangedProbeAcceptance =
+#if !UE_BUILD_SHIPPING
+		bRangedDebugProbeActive && Target == ChasingTarget;
+#else
+		false;
+#endif
+	const float StopRadius = Target == ChasingTarget
+		? (bUseRangedProbeAcceptance ? 900.f : FMath::Max(15.f, CombatAttackMaxRadius - CombatPressMargin))
+		: FMath::Max(15.f, PatrolRadius - 50.f);
 
 	MoveRequest.SetAcceptanceRadius(StopRadius);
 	if (Target == ChasingTarget)
@@ -1993,6 +2528,8 @@ void AEnemy::ClearAllTimers()
 	GetWorldTimerManager().ClearTimer(AttackCooldownTimer);
 	GetWorldTimerManager().ClearTimer(PoiseResetTimer);
 	GetWorldTimerManager().ClearTimer(StanceBreakRecoveryTimer);
+	GetWorldTimerManager().ClearTimer(ProjectileReleaseTimer);
+	GetWorldTimerManager().ClearTimer(ProjectileAttackEndTimer);
 }
 
 bool AEnemy::IsAllyAttackingNearby(float& OutSuggestedWaitTime) const

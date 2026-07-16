@@ -10,7 +10,7 @@ public class Test : ModuleRules
 	
 		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "EnhancedInput", "AnimGraphRuntime", "Niagara" , "GeometryCollectionEngine" , "PCG" ,"UMG" , "AIModule", "SlateCore", "MotionWarping"});
 
-		PrivateDependencyModuleNames.AddRange(new string[] { "Slate" });
+		PrivateDependencyModuleNames.AddRange(new string[] { "Slate", "NavigationSystem" });
 		
 		// Uncomment if you are using online features
 		// PrivateDependencyModuleNames.Add("OnlineSubsystem");

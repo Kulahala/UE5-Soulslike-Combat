@@ -1,12 +1,14 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
 #include "Character/Controller/CharacterController.h"
+#include "AIController.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "Character/MyCharacter.h"
 #include "Combat/CombatProjectile.h"
 #include "Components/CapsuleComponent.h"
 #include "Engine/TargetPoint.h"
+#include "NavigationSystem.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Game/SoulslikeGameInstance.h"
 #include "Game/TestGameMode.h"
@@ -28,6 +30,9 @@ namespace
 	constexpr float ProjectileDebugSpawnClearance = 30.f;
 	constexpr float ProjectileDebugSelfSourceDistance = 600.f;
 	constexpr float ProjectileDebugSelfSpeed = 600.f;
+	constexpr float EnemyRangedProbeSpawnDistance = 850.f;
+	constexpr float EnemyRangedProbeSpawnSearchExtent = 300.f;
+	constexpr float EnemyRangedProbeLifetimeBuffer = 5.f;
 
 	ATargetPoint* SpawnProjectileDebugSource(UWorld* World, const FVector& Location, const FRotator& Rotation,
 		const FName TeamTag)
@@ -1062,6 +1067,94 @@ void ACharacterController::ProjectileDebugFireSelf(FName SourceTeam)
 		UE_LOG(LogTemp, Display, TEXT("ProjectileDebugFireSelf launched '%s' with source team '%s'."),
 			*Projectile->GetName(), *TeamTag.ToString());
 	}
+#endif
+}
+
+void ACharacterController::EnemyRangedDebugProbe(float ReleaseDelay)
+{
+#if UE_BUILD_SHIPPING
+	UE_LOG(LogTemp, Warning, TEXT("EnemyRangedDebugProbe is unavailable in Shipping builds."));
+#else
+	AMyCharacter* PlayerCharacter = GetMyCharacter();
+	UWorld* World = GetWorld();
+	if (!PlayerCharacter || !World)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("EnemyRangedDebugProbe failed: no possessed AMyCharacter or World is available."));
+		return;
+	}
+
+	if (ReleaseDelay < 0.f)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("EnemyRangedDebugProbe failed: ReleaseDelay must be >= 0."));
+		return;
+	}
+
+	FVector PlayerForward = PlayerCharacter->GetActorForwardVector().GetSafeNormal2D();
+	if (PlayerForward.IsNearlyZero())
+	{
+		PlayerForward = GetControlRotation().Vector().GetSafeNormal2D();
+	}
+	if (PlayerForward.IsNearlyZero())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("EnemyRangedDebugProbe failed: player forward direction is zero."));
+		return;
+	}
+
+	const FVector DesiredSpawnLocation = PlayerCharacter->GetActorLocation()
+		+ PlayerForward * EnemyRangedProbeSpawnDistance;
+	UNavigationSystemV1* NavigationSystem = FNavigationSystem::GetCurrent<UNavigationSystemV1>(World);
+	FNavLocation NavLocation;
+	if (!NavigationSystem || !NavigationSystem->ProjectPointToNavigation(DesiredSpawnLocation, NavLocation,
+		FVector(EnemyRangedProbeSpawnSearchExtent)))
+	{
+		UE_LOG(LogTemp, Warning,
+			TEXT("EnemyRangedDebugProbe failed: no NavMesh projection near %s. Run it in a navigable PIE area."),
+			*DesiredSpawnLocation.ToString());
+		return;
+	}
+
+	const FRotator SpawnRotation = (PlayerCharacter->GetActorLocation() - NavLocation.Location).Rotation();
+	const FTransform ProbeTransform(SpawnRotation, NavLocation.Location);
+	AEnemy* ProbeEnemy = World->SpawnActorDeferred<AEnemy>(AEnemy::StaticClass(), ProbeTransform, nullptr, nullptr,
+		ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn);
+	if (!ProbeEnemy)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("EnemyRangedDebugProbe failed: could not spawn temporary AEnemy."));
+		return;
+	}
+	ProbeEnemy->PrepareRangedDebugProbeSpawn();
+	UGameplayStatics::FinishSpawningActor(ProbeEnemy, ProbeTransform);
+	if (!IsValid(ProbeEnemy))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("EnemyRangedDebugProbe failed: temporary AEnemy was invalid after FinishSpawning."));
+		return;
+	}
+
+	FActorSpawnParameters ControllerSpawnParameters;
+	ControllerSpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	AAIController* ProbeController = World->SpawnActor<AAIController>(AAIController::StaticClass(),
+		NavLocation.Location, SpawnRotation, ControllerSpawnParameters);
+	if (!ProbeController)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("EnemyRangedDebugProbe failed: could not spawn temporary AAIController."));
+		ProbeEnemy->Destroy();
+		return;
+	}
+
+	ProbeController->Possess(ProbeEnemy);
+	if (ProbeEnemy->GetController() != ProbeController
+		|| !ProbeEnemy->StartRangedDebugProbe(PlayerCharacter, ReleaseDelay, ProbeController))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("EnemyRangedDebugProbe failed: temporary enemy could not be possessed or initialized."));
+		ProbeController->Destroy();
+		ProbeEnemy->Destroy();
+		return;
+	}
+
+	ProbeEnemy->SetLifeSpan(ReleaseDelay + EnemyRangedProbeLifetimeBuffer);
+	ProbeController->SetLifeSpan(ReleaseDelay + EnemyRangedProbeLifetimeBuffer);
+	UE_LOG(LogTemp, Display, TEXT("EnemyRangedDebugProbe spawned '%s' at %s with ReleaseDelay %.2f."),
+		*ProbeEnemy->GetName(), *NavLocation.Location.ToString(), ReleaseDelay);
 #endif
 }
 

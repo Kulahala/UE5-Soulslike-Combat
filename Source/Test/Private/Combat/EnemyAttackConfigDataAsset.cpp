@@ -13,7 +13,7 @@ int32 UEnemyAttackConfigDataAsset::ChooseAttackIndex(float DistanceToTarget) con
 	for (int32 Index = 0; Index < Attacks.Num(); ++Index)
 	{
 		const FEnemyAttackEntry& Entry = Attacks[Index];
-		if (!Entry.Montage || Entry.Weight <= 0.f)
+		if (!IsEntrySelectable(Entry))
 		{
 			continue;
 		}
@@ -60,7 +60,7 @@ int32 UEnemyAttackConfigDataAsset::ChooseAttackIntentIndex(int32 ExcludedAttackI
 		}
 
 		const FEnemyAttackEntry& Entry = Attacks[Index];
-		if (!Entry.Montage || Entry.Weight <= 0.f)
+		if (!IsEntrySelectable(Entry))
 		{
 			continue;
 		}
@@ -85,6 +85,29 @@ int32 UEnemyAttackConfigDataAsset::ChooseAttackIntentIndex(int32 ExcludedAttackI
 	}
 
 	return CandidateIndices.Last();
+}
+
+bool UEnemyAttackConfigDataAsset::IsEntrySelectable(const FEnemyAttackEntry& Entry) const
+{
+	if (!Entry.Montage || Entry.Weight <= 0.f)
+	{
+		return false;
+	}
+
+	if (Entry.DeliveryType == EEnemyAttackDeliveryType::Melee)
+	{
+		return true;
+	}
+
+	if (Entry.DeliveryType != EEnemyAttackDeliveryType::Projectile)
+	{
+		return false;
+	}
+
+	return Entry.MaxDistance > 0.f
+		&& Entry.MaxDistance >= Entry.MinDistance
+		&& Entry.ProjectileClass
+		&& Entry.ProjectileDeliveryConfig.IsValid();
 }
 
 void UEnemyAttackConfigDataAsset::PostLoad()
@@ -146,10 +169,41 @@ void UEnemyAttackConfigDataAsset::LogConfigWarnings() const
 		if (Entry.Weight <= 0.f)
 		{
 			UE_LOG(LogTemp, Warning, TEXT("%s: Attacks[%d] '%s' has zero weight and will not be selected."),
-			       *GetName(), Index, *Entry.AttackName.ToString());
+				       *GetName(), Index, *Entry.AttackName.ToString());
 		}
 
-		if (Entry.bUseMotionWarping)
+		if (Entry.DeliveryType == EEnemyAttackDeliveryType::Projectile)
+		{
+			if (!Entry.ProjectileClass)
+			{
+				UE_LOG(LogTemp, Warning,
+					TEXT("%s: Projectile Attacks[%d] '%s' has no ProjectileClass and will not be selected."),
+					*GetName(), Index, *Entry.AttackName.ToString());
+			}
+
+			if (!Entry.ProjectileDeliveryConfig.IsValid())
+			{
+				UE_LOG(LogTemp, Warning,
+					TEXT("%s: Projectile Attacks[%d] '%s' has an invalid ProjectileDeliveryConfig and will not be selected."),
+					*GetName(), Index, *Entry.AttackName.ToString());
+			}
+
+			if (Entry.MaxDistance <= 0.f || Entry.MaxDistance < Entry.MinDistance)
+			{
+				UE_LOG(LogTemp, Warning,
+					TEXT("%s: Projectile Attacks[%d] '%s' has an invalid range %.1f-%.1f and will not be selected."),
+					*GetName(), Index, *Entry.AttackName.ToString(), Entry.MinDistance, Entry.MaxDistance);
+			}
+
+			if (Entry.bUseMotionWarping)
+			{
+				UE_LOG(LogTemp, Warning,
+					TEXT("%s: Projectile Attacks[%d] '%s' enables Motion Warping; Projectile delivery ignores Motion Warping."),
+					*GetName(), Index, *Entry.AttackName.ToString());
+			}
+		}
+
+		if (Entry.bUseMotionWarping && Entry.DeliveryType == EEnemyAttackDeliveryType::Melee)
 		{
 			if (Entry.WarpTargetName == NAME_None)
 			{
