@@ -1367,6 +1367,30 @@ bool AMyCharacter::TryGrantOwnedItemQuantity(FName DefinitionId, int32 Quantity,
 	return ItemOwnershipComponent->TryGrantDefinitionQuantity(DefinitionId, Quantity, GameInstance, OutInstanceId);
 }
 
+bool AMyCharacter::TryRestockAmmoAtCheckpoint(FName GameplayMapName, FName CheckpointId)
+{
+	if (!ItemOwnershipComponent)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Restock ammo failed: ItemOwnershipComponent is not available."));
+		return false;
+	}
+
+	USoulslikeGameInstance* GameInstance = GetGameInstance<USoulslikeGameInstance>();
+	return ItemOwnershipComponent->TryRestockAmmoAtCheckpoint(GameplayMapName, CheckpointId, GameInstance);
+}
+
+bool AMyCharacter::VerifyAmmoRefillFixture(FName DefinitionId)
+{
+	if (!ItemOwnershipComponent)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Verify ammo refill fixture failed: ItemOwnershipComponent is not available."));
+		return false;
+	}
+
+	USoulslikeGameInstance* GameInstance = GetGameInstance<USoulslikeGameInstance>();
+	return ItemOwnershipComponent->VerifyAmmoRefillFixture(DefinitionId, GameInstance);
+}
+
 bool AMyCharacter::TryClaimWorldItemPickup(FName PersistentId, FName ItemDefinitionId, FName& OutInstanceId,
 	USoundBase*& OutPickupSound)
 {
@@ -1968,10 +1992,10 @@ bool AMyCharacter::ReleaseBowArrow()
 	}
 
 	const FName AmmoDefinitionId = Bow->GetAmmoDefinitionId();
-	if (ItemOwnershipComponent->GetOwnedQuantity(AmmoDefinitionId) <= 0)
+	if (ItemOwnershipComponent->GetLoadedAmmoQuantity(AmmoDefinitionId) <= 0)
 	{
 		Bow->PlayEmptyAmmoSound();
-		UE_LOG(LogTemp, Display, TEXT("%s: Bow release blocked: no '%s' remaining."), *GetName(), *AmmoDefinitionId.ToString());
+		UE_LOG(LogTemp, Display, TEXT("%s: Bow release blocked: no loaded '%s' remaining."), *GetName(), *AmmoDefinitionId.ToString());
 		return false;
 	}
 
@@ -2029,7 +2053,7 @@ bool AMyCharacter::ReleaseBowArrow()
 	}
 
 	USoulslikeGameInstance* GameInstance = GetGameInstance<USoulslikeGameInstance>();
-	if (!ItemOwnershipComponent->TryConsumeDefinitionQuantity(AmmoDefinitionId, 1, GameInstance))
+	if (!ItemOwnershipComponent->TryConsumeLoadedAmmo(AmmoDefinitionId, 1, GameInstance))
 	{
 		Projectile->Destroy();
 		return false;

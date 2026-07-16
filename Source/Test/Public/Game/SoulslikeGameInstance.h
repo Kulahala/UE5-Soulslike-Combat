@@ -33,6 +33,10 @@ public:
 	void UpdateGold(int32 NewGold);
 	bool AddOwnedItemInstance(const FTestItemInstanceRecord& ItemRecord);
 	bool ConsumeOwnedItemQuantity(FName DefinitionId, int32 Quantity);
+	bool GrantAmmoReserve(FName DefinitionId, int32 Quantity, int32 ReserveStackLimit,
+	                      const TArray<FTestItemInstanceSelection>& ValidReserveInstances,
+	                      FName& OutAffectedInstanceId);
+	bool ConsumeLoadedAmmo(const FTestAmmoContainerSelection& Selection, int32 Quantity);
 	bool AddOwnedItemInstanceAndClaimReward(const FTestItemInstanceRecord& ItemRecord, FName RewardId);
 	bool AddOwnedItemInstanceAndClaimRewardWithOptionalEmptySlot(const FTestItemInstanceRecord& ItemRecord,
 	                                                            FName RewardId, FName RequestedEmptySlotId,
@@ -40,10 +44,15 @@ public:
 	bool SetEquippedItemSlot(FName SlotId, FName ItemInstanceId);
 	bool GetSavedItemOwnership(TArray<FTestItemInstanceRecord>& OutItemInstances,
 	                           TArray<FTestEquipmentSlotRecord>& OutEquippedSlots) const;
+	bool GetSavedLoadedAmmoContainers(TArray<FTestAmmoContainerRecord>& OutLoadedAmmoContainers) const;
 	bool GetSavedClaimedRewardIds(TSet<FName>& OutClaimedRewardIds) const;
 	bool ArmNextItemClaimSaveFailureForDebug();
-	bool ArmNextItemQuantitySaveFailureForDebug();
+	bool ArmNextLoadedAmmoConsumeSaveFailureForDebug();
+	bool ArmNextAmmoRefillSaveFailureForDebug();
 	bool ActivateCheckpointAndSetRespawn(FName GameplayMapName, FName CheckpointId);
+	bool ActivateCheckpointAndRefillAmmo(FName GameplayMapName, FName CheckpointId,
+	                                    const TArray<FTestAmmoRefillRequest>& RefillRequests);
+	bool VerifyAmmoRefillFixture(const FTestAmmoRefillRequest& RefillRequest);
 	bool HasActivatedCheckpoint(FName CheckpointId);
 	void PrepareGameplayTransition(FName GameplayMapName, FName CheckpointId);
 	void InvalidateCurrentSave(const FString& Reason);
@@ -68,11 +77,19 @@ private:
 	bool AddPersistentId(TSet<FName>& TargetSet, FName PersistentId, const TCHAR* Context);
 	bool AddOwnedItemInstanceAndClaimRewardInternal(const FTestItemInstanceRecord& ItemRecord, FName RewardId,
 	                                                FName RequestedEmptySlotId, bool& bOutAutoEquipped);
+	bool ApplyAmmoRefillRequests(TArray<FTestItemInstanceRecord>& ItemInstances,
+	                             TArray<FTestAmmoContainerRecord>& LoadedAmmoContainers,
+	                             const TArray<FTestAmmoRefillRequest>& RefillRequests,
+	                             int32& OutTransferredQuantity, FString& OutFailureReason) const;
+	static int32 FindItemInstanceIndex(const TArray<FTestItemInstanceRecord>& ItemInstances, FName InstanceId);
+	static FName GenerateUniqueItemInstanceId(const TArray<FTestItemInstanceRecord>& ItemInstances);
 	static bool IsSupportedEquipmentSlotId(FName SlotId);
 	bool ConsumeItemClaimSaveFailureForDebug(FName RewardId);
-	bool ConsumeItemQuantitySaveFailureForDebug(FName DefinitionId);
+	bool ConsumeLoadedAmmoSaveFailureForDebug(FName DefinitionId);
+	bool ConsumeAmmoRefillSaveFailureForDebug();
 	void ClearItemClaimSaveFailureForDebug();
-	void ClearItemQuantitySaveFailureForDebug();
+	void ClearLoadedAmmoConsumeSaveFailureForDebug();
+	void ClearAmmoRefillSaveFailureForDebug();
 	void OpenGameplayMap();
 
 	UPROPERTY()
@@ -82,7 +99,8 @@ private:
 	FName PendingGameplayMapName = NAME_None;
 	bool bAttemptedSaveLoad = false;
 	bool bFailNextItemClaimSaveForDebug = false;
-	bool bFailNextItemQuantitySaveForDebug = false;
+	bool bFailNextLoadedAmmoConsumeSaveForDebug = false;
+	bool bFailNextAmmoRefillSaveForDebug = false;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Maps", meta = (ToolTip = "主菜单地图名。资产路径由地图名解析，不保存到 SaveGame。"))
 	FName MainMenuMapName = FName(TEXT("MainMenu"));

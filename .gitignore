@@ -26,7 +26,6 @@ plugins/
 compile_commands.json
 .playwright-mcp/
 .learnings/
-plan.md
 todo.md
 .geminiignore
 .claude/

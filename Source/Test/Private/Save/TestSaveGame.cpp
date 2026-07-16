@@ -11,6 +11,7 @@ void UTestSaveGame::InitializeNewSave(FName InitialMapName, FName InitialCheckpo
 	ActivatedCheckpointIds.Reset();
 	Gold = 0;
 	ItemInstances.Reset();
+	LoadedAmmoContainers.Reset();
 	EquippedSlots.Reset();
 	OpenedShortcutIds.Reset();
 	ClaimedRewardIds.Reset();

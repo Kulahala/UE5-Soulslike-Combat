@@ -55,10 +55,11 @@ namespace
 
 	FString BuildSavedItemOwnershipDebugSummary(const TArray<FTestItemInstanceRecord>& ItemRecords,
 	                                           const TArray<FTestEquipmentSlotRecord>& SlotRecords,
+	                                           const TArray<FTestAmmoContainerRecord>& LoadedAmmoContainers,
 	                                           const TSet<FName>& ClaimedRewardIds)
 	{
-		FString Result = FString::Printf(TEXT("Saved item ownership: %d instance(s), %d equipped slot(s), %d claimed reward(s)."),
-			ItemRecords.Num(), SlotRecords.Num(), ClaimedRewardIds.Num());
+		FString Result = FString::Printf(TEXT("Saved item ownership: %d instance(s), %d equipped slot(s), %d loaded ammo container(s), %d claimed reward(s)."),
+			ItemRecords.Num(), SlotRecords.Num(), LoadedAmmoContainers.Num(), ClaimedRewardIds.Num());
 
 		for (const FTestItemInstanceRecord& ItemRecord : ItemRecords)
 		{
@@ -70,7 +71,13 @@ namespace
 		for (const FTestEquipmentSlotRecord& SlotRecord : SlotRecords)
 		{
 			Result += FString::Printf(TEXT("\n  Slot=%s Instance=%s"),
-				*SlotRecord.SlotId.ToString(), *SlotRecord.ItemInstanceId.ToString());
+			*SlotRecord.SlotId.ToString(), *SlotRecord.ItemInstanceId.ToString());
+		}
+
+		for (const FTestAmmoContainerRecord& ContainerRecord : LoadedAmmoContainers)
+		{
+			Result += FString::Printf(TEXT("\n  Loaded Ammo Definition=%s Quantity=%d"),
+				*ContainerRecord.DefinitionId.ToString(), ContainerRecord.LoadedQuantity);
 		}
 
 		TArray<FString> SortedClaimedRewardIds;
@@ -835,8 +842,10 @@ void ACharacterController::ItemDebugDump()
 	USoulslikeGameInstance* GameInstance = GetGameInstance<USoulslikeGameInstance>();
 	TArray<FTestItemInstanceRecord> SavedItemRecords;
 	TArray<FTestEquipmentSlotRecord> SavedSlotRecords;
+	TArray<FTestAmmoContainerRecord> SavedLoadedAmmoContainers;
 	TSet<FName> SavedClaimedRewardIds;
 	if (!GameInstance || !GameInstance->GetSavedItemOwnership(SavedItemRecords, SavedSlotRecords)
+		|| !GameInstance->GetSavedLoadedAmmoContainers(SavedLoadedAmmoContainers)
 		|| !GameInstance->GetSavedClaimedRewardIds(SavedClaimedRewardIds))
 	{
 		UE_LOG(LogTemp, Warning, TEXT("ItemDebugDump: no usable saved item ownership is available."));
@@ -844,7 +853,8 @@ void ACharacterController::ItemDebugDump()
 	}
 
 	UE_LOG(LogTemp, Display, TEXT("%s"),
-		*BuildSavedItemOwnershipDebugSummary(SavedItemRecords, SavedSlotRecords, SavedClaimedRewardIds));
+		*BuildSavedItemOwnershipDebugSummary(SavedItemRecords, SavedSlotRecords, SavedLoadedAmmoContainers,
+			SavedClaimedRewardIds));
 #endif
 }
 
@@ -880,10 +890,50 @@ void ACharacterController::BowDebugFailNextAmmoConsumeSave()
 		return;
 	}
 
-	if (GameInstance->ArmNextItemQuantitySaveFailureForDebug())
+	if (GameInstance->ArmNextLoadedAmmoConsumeSaveFailureForDebug())
 	{
 		UE_LOG(LogTemp, Display,
-			TEXT("BowDebugFailNextAmmoConsumeSave armed: the next valid arrow consumption will simulate a save failure."));
+			TEXT("BowDebugFailNextAmmoConsumeSave armed: the next valid loaded-arrow consumption will simulate a save failure."));
+	}
+#endif
+}
+
+void ACharacterController::BowDebugFailNextAmmoRefillSave()
+{
+#if UE_BUILD_SHIPPING
+	UE_LOG(LogTemp, Warning, TEXT("BowDebugFailNextAmmoRefillSave is unavailable in Shipping builds."));
+#else
+	USoulslikeGameInstance* GameInstance = GetGameInstance<USoulslikeGameInstance>();
+	if (!GameInstance)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("BowDebugFailNextAmmoRefillSave failed: no SoulslikeGameInstance is available."));
+		return;
+	}
+
+	if (GameInstance->ArmNextAmmoRefillSaveFailureForDebug())
+	{
+		UE_LOG(LogTemp, Display,
+			TEXT("BowDebugFailNextAmmoRefillSave armed: the next rest that transfers ammo will simulate a save failure."));
+	}
+#endif
+}
+
+void ACharacterController::ItemDebugVerifyAmmoRefillFixture(FName DefinitionId)
+{
+#if UE_BUILD_SHIPPING
+	UE_LOG(LogTemp, Warning, TEXT("ItemDebugVerifyAmmoRefillFixture is unavailable in Shipping builds."));
+#else
+	AMyCharacter* PlayerCharacter = GetMyCharacter();
+	if (!PlayerCharacter)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("ItemDebugVerifyAmmoRefillFixture failed: no AMyCharacter is possessed."));
+		return;
+	}
+
+	if (!PlayerCharacter->VerifyAmmoRefillFixture(DefinitionId))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("ItemDebugVerifyAmmoRefillFixture failed for DefinitionId='%s'."),
+			*DefinitionId.ToString());
 	}
 #endif
 }

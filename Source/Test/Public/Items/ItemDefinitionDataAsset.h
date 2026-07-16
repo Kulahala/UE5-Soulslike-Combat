@@ -31,6 +31,9 @@ public:
 	FORCEINLINE EItemEquipmentSlot GetEquipmentSlot() const { return EquipmentSlot; }
 	FORCEINLINE TSubclassOf<Aitem> GetRuntimeItemActorClass() const { return RuntimeItemActorClass; }
 	FORCEINLINE USoundBase* GetPickupSound() const { return PickupSound; }
+	FORCEINLINE bool UsesAmmoContainer() const { return bUsesAmmoContainer; }
+	FORCEINLINE int32 GetLoadedAmmoCapacity() const { return LoadedAmmoCapacity; }
+	FORCEINLINE int32 GetReserveAmmoStackLimit() const { return ReserveAmmoStackLimit; }
 
 	bool IsDefinitionValid(FString& OutFailureReason) const;
 
@@ -52,6 +55,15 @@ private:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Equipment", meta = (AllowPrivateAccess = "true", ToolTip = "TODO-03B 实体化并附着装备表现时使用的物品 Actor 类。"))
 	TSubclassOf<Aitem> RuntimeItemActorClass;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ammo", meta = (AllowPrivateAccess = "true", ToolTip = "启用后，此 None 槽位 Definition 使用已装填箭与储备栈模型。"))
+	bool bUsesAmmoContainer = false;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ammo", meta = (AllowPrivateAccess = "true", EditCondition = "bUsesAmmoContainer", EditConditionHides, ClampMin = "1", UIMin = "1", ToolTip = "该弹药可被武器直接消费的已装填数量上限。"))
+	int32 LoadedAmmoCapacity = 20;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ammo", meta = (AllowPrivateAccess = "true", EditCondition = "bUsesAmmoContainer", EditConditionHides, ClampMin = "1", UIMin = "1", ToolTip = "储备背包中单个 ItemInstance 栈的数量上限；满栈后自动创建新的稳定实例。"))
+	int32 ReserveAmmoStackLimit = 99;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Audio", meta = (AllowPrivateAccess = "true", ToolTip = "固定世界拾取成功后播放的音效；为空时静默领取。火堆主动换装仍使用运行时 Actor 自己的 EquipSound。"))
 	USoundBase* PickupSound = nullptr;

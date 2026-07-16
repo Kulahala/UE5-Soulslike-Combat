@@ -101,6 +101,8 @@ public:
 	bool RestoreItemOwnershipFromSave(const UTestSaveGame* SaveGame);
 	bool TryGrantOwnedItem(FName DefinitionId, FName& OutInstanceId);
 	bool TryGrantOwnedItemQuantity(FName DefinitionId, int32 Quantity, FName& OutInstanceId);
+	bool TryRestockAmmoAtCheckpoint(FName GameplayMapName, FName CheckpointId);
+	bool VerifyAmmoRefillFixture(FName DefinitionId);
 	bool TryClaimWorldItemPickup(FName PersistentId, FName ItemDefinitionId, FName& OutInstanceId,
 	                             USoundBase*& OutPickupSound);
 	bool TryEquipOwnedItem(FName InstanceId);

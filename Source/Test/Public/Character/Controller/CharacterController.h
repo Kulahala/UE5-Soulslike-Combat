@@ -194,6 +194,12 @@ public:
 	UFUNCTION(Exec)
 	void BowDebugFailNextAmmoConsumeSave();
 
+	UFUNCTION(Exec)
+	void BowDebugFailNextAmmoRefillSave();
+
+	UFUNCTION(Exec)
+	void ItemDebugVerifyAmmoRefillFixture(FName DefinitionId);
+
 	// 非 Shipping 的投射物验收入口；不创建正式输入映射或地图内容。
 	UFUNCTION(Exec)
 	void ProjectileDebugFire();

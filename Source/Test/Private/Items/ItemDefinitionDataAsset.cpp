@@ -12,6 +12,21 @@ bool UItemDefinitionDataAsset::IsDefinitionValid(FString& OutFailureReason) cons
 		return false;
 	}
 
+	if (bUsesAmmoContainer)
+	{
+		if (EquipmentSlot != EItemEquipmentSlot::None)
+		{
+			OutFailureReason = TEXT("Ammo-container definitions must use EquipmentSlot None.");
+			return false;
+		}
+
+		if (LoadedAmmoCapacity <= 0 || ReserveAmmoStackLimit <= 0)
+		{
+			OutFailureReason = TEXT("Ammo-container capacities must both be positive.");
+			return false;
+		}
+	}
+
 	if (EquipmentSlot == EItemEquipmentSlot::None)
 	{
 		return true;

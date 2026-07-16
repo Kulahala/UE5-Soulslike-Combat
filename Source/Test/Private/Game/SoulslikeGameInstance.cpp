@@ -3,6 +3,7 @@
 #include "Game/SoulslikeGameInstance.h"
 
 #include "Kismet/GameplayStatics.h"
+#include "Misc/Guid.h"
 #include "Save/TestSaveGame.h"
 
 const FString USoulslikeGameInstance::SaveSlotName(TEXT("TestSaveSlot"));
@@ -32,7 +33,8 @@ bool USoulslikeGameInstance::StartNewGame(FName GameplayMapName)
 	}
 
 	ClearItemClaimSaveFailureForDebug();
-	ClearItemQuantitySaveFailureForDebug();
+	ClearLoadedAmmoConsumeSaveFailureForDebug();
+	ClearAmmoRefillSaveFailureForDebug();
 
 	UTestSaveGame* PreviousSaveGame = CurrentSaveGame;
 	const FName PreviousPendingCheckpointId = PendingCheckpointId;
@@ -185,12 +187,155 @@ bool USoulslikeGameInstance::ConsumeOwnedItemQuantity(FName DefinitionId, int32 
 		return false;
 	}
 
-	if (!ConsumeItemQuantitySaveFailureForDebug(DefinitionId) && SaveNow())
+	if (SaveNow())
 	{
 		return true;
 	}
 
 	CurrentSaveGame->ItemInstances = PreviousItems;
+	return false;
+}
+
+bool USoulslikeGameInstance::GrantAmmoReserve(FName DefinitionId, int32 Quantity, int32 ReserveStackLimit,
+	const TArray<FTestItemInstanceSelection>& ValidReserveInstances, FName& OutAffectedInstanceId)
+{
+	OutAffectedInstanceId = NAME_None;
+	if (!EnsureCurrentSaveLoaded() || !CurrentSaveGame || !CurrentSaveGame->IsPersistable())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Grant ammo reserve failed: no usable current save."));
+		return false;
+	}
+
+	if (DefinitionId == NAME_None || Quantity <= 0 || ReserveStackLimit <= 0)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Grant ammo reserve rejected an empty definition, invalid quantity, or invalid stack limit."));
+		return false;
+	}
+
+	TSet<FName> SeenInstanceIds;
+	TSet<int32> SeenSourceIndices;
+	for (const FTestItemInstanceSelection& Selection : ValidReserveInstances)
+	{
+		if (Selection.InstanceId == NAME_None || Selection.SourceItemIndex == INDEX_NONE || Selection.ExpectedQuantity <= 0
+			|| SeenInstanceIds.Contains(Selection.InstanceId) || SeenSourceIndices.Contains(Selection.SourceItemIndex))
+		{
+			UE_LOG(LogTemp, Warning, TEXT("Grant ammo reserve rejected an invalid or duplicate validated reserve selection."));
+			return false;
+		}
+
+		if (!CurrentSaveGame->ItemInstances.IsValidIndex(Selection.SourceItemIndex))
+		{
+			UE_LOG(LogTemp, Warning, TEXT("Grant ammo reserve rejected unavailable source index for InstanceId '%s'."),
+				*Selection.InstanceId.ToString());
+			return false;
+		}
+
+		const FTestItemInstanceRecord& ItemRecord = CurrentSaveGame->ItemInstances[Selection.SourceItemIndex];
+		if (ItemRecord.InstanceId != Selection.InstanceId || ItemRecord.DefinitionId != DefinitionId
+			|| ItemRecord.Quantity != Selection.ExpectedQuantity)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("Grant ammo reserve rejected stale validated InstanceId '%s'."),
+				*Selection.InstanceId.ToString());
+			return false;
+		}
+
+		SeenInstanceIds.Add(Selection.InstanceId);
+		SeenSourceIndices.Add(Selection.SourceItemIndex);
+	}
+
+	const TArray<FTestItemInstanceRecord> PreviousItems = CurrentSaveGame->ItemInstances;
+	int32 RemainingQuantity = Quantity;
+	for (const FTestItemInstanceSelection& Selection : ValidReserveInstances)
+	{
+		FTestItemInstanceRecord& ItemRecord = CurrentSaveGame->ItemInstances[Selection.SourceItemIndex];
+		if (ItemRecord.Quantity >= ReserveStackLimit)
+		{
+			continue;
+		}
+
+		const int32 AddedQuantity = FMath::Min(ReserveStackLimit - ItemRecord.Quantity, RemainingQuantity);
+		ItemRecord.Quantity += AddedQuantity;
+		RemainingQuantity -= AddedQuantity;
+		if (OutAffectedInstanceId == NAME_None)
+		{
+			OutAffectedInstanceId = ItemRecord.InstanceId;
+		}
+		if (RemainingQuantity <= 0)
+		{
+			break;
+		}
+	}
+
+	while (RemainingQuantity > 0)
+	{
+		FTestItemInstanceRecord NewRecord;
+		NewRecord.DefinitionId = DefinitionId;
+		NewRecord.InstanceId = GenerateUniqueItemInstanceId(CurrentSaveGame->ItemInstances);
+		NewRecord.Quantity = FMath::Min(ReserveStackLimit, RemainingQuantity);
+		NewRecord.UpgradeLevel = 0;
+		CurrentSaveGame->ItemInstances.Add(NewRecord);
+		RemainingQuantity -= NewRecord.Quantity;
+		if (OutAffectedInstanceId == NAME_None)
+		{
+			OutAffectedInstanceId = NewRecord.InstanceId;
+		}
+	}
+
+	if (SaveNow())
+	{
+		return true;
+	}
+
+	CurrentSaveGame->ItemInstances = PreviousItems;
+	OutAffectedInstanceId = NAME_None;
+	return false;
+}
+
+bool USoulslikeGameInstance::ConsumeLoadedAmmo(const FTestAmmoContainerSelection& Selection, int32 Quantity)
+{
+	if (!EnsureCurrentSaveLoaded() || !CurrentSaveGame || !CurrentSaveGame->IsPersistable())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Consume loaded ammo failed: no usable current save."));
+		return false;
+	}
+
+	if (Selection.DefinitionId == NAME_None || Selection.SourceContainerIndex == INDEX_NONE
+		|| Selection.ExpectedLoadedQuantity <= 0 || Quantity <= 0)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Consume loaded ammo rejected an invalid container selection or quantity."));
+		return false;
+	}
+
+	if (!CurrentSaveGame->LoadedAmmoContainers.IsValidIndex(Selection.SourceContainerIndex))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Consume loaded ammo rejected an unavailable container index."));
+		return false;
+	}
+
+	const FTestAmmoContainerRecord& ExistingContainer = CurrentSaveGame->LoadedAmmoContainers[Selection.SourceContainerIndex];
+	if (ExistingContainer.DefinitionId != Selection.DefinitionId
+		|| ExistingContainer.LoadedQuantity != Selection.ExpectedLoadedQuantity
+		|| ExistingContainer.LoadedQuantity < Quantity)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Consume loaded ammo rejected a stale container selection for '%s'."),
+			*Selection.DefinitionId.ToString());
+		return false;
+	}
+
+	const TArray<FTestAmmoContainerRecord> PreviousContainers = CurrentSaveGame->LoadedAmmoContainers;
+	FTestAmmoContainerRecord& MutableContainer = CurrentSaveGame->LoadedAmmoContainers[Selection.SourceContainerIndex];
+	MutableContainer.LoadedQuantity -= Quantity;
+	if (MutableContainer.LoadedQuantity <= 0)
+	{
+		CurrentSaveGame->LoadedAmmoContainers.RemoveAt(Selection.SourceContainerIndex);
+	}
+
+	if (!ConsumeLoadedAmmoSaveFailureForDebug(Selection.DefinitionId) && SaveNow())
+	{
+		return true;
+	}
+
+	CurrentSaveGame->LoadedAmmoContainers = PreviousContainers;
 	return false;
 }
 
@@ -385,6 +530,19 @@ bool USoulslikeGameInstance::GetSavedItemOwnership(TArray<FTestItemInstanceRecor
 	return true;
 }
 
+bool USoulslikeGameInstance::GetSavedLoadedAmmoContainers(
+	TArray<FTestAmmoContainerRecord>& OutLoadedAmmoContainers) const
+{
+	OutLoadedAmmoContainers.Reset();
+	if (!CurrentSaveGame || !CurrentSaveGame->IsPersistable())
+	{
+		return false;
+	}
+
+	OutLoadedAmmoContainers = CurrentSaveGame->LoadedAmmoContainers;
+	return true;
+}
+
 bool USoulslikeGameInstance::GetSavedClaimedRewardIds(TSet<FName>& OutClaimedRewardIds) const
 {
 	OutClaimedRewardIds.Reset();
@@ -414,55 +572,168 @@ bool USoulslikeGameInstance::ArmNextItemClaimSaveFailureForDebug()
 #endif
 }
 
-bool USoulslikeGameInstance::ArmNextItemQuantitySaveFailureForDebug()
+bool USoulslikeGameInstance::ArmNextLoadedAmmoConsumeSaveFailureForDebug()
 {
 #if UE_BUILD_SHIPPING
-	UE_LOG(LogTemp, Warning, TEXT("Item quantity save failure injection is unavailable in Shipping builds."));
+	UE_LOG(LogTemp, Warning, TEXT("Loaded-ammo save failure injection is unavailable in Shipping builds."));
 	return false;
 #else
 	if (!EnsureCurrentSaveLoaded() || !CurrentSaveGame || !CurrentSaveGame->IsPersistable())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("Item quantity save failure injection failed: no usable current save."));
+		UE_LOG(LogTemp, Warning, TEXT("Loaded-ammo save failure injection failed: no usable current save."));
 		return false;
 	}
 
-	bFailNextItemQuantitySaveForDebug = true;
+	bFailNextLoadedAmmoConsumeSaveForDebug = true;
+	return true;
+#endif
+}
+
+bool USoulslikeGameInstance::ArmNextAmmoRefillSaveFailureForDebug()
+{
+#if UE_BUILD_SHIPPING
+	UE_LOG(LogTemp, Warning, TEXT("Ammo-refill save failure injection is unavailable in Shipping builds."));
+	return false;
+#else
+	if (!EnsureCurrentSaveLoaded() || !CurrentSaveGame || !CurrentSaveGame->IsPersistable())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Ammo-refill save failure injection failed: no usable current save."));
+		return false;
+	}
+
+	bFailNextAmmoRefillSaveForDebug = true;
 	return true;
 #endif
 }
 
 bool USoulslikeGameInstance::ActivateCheckpointAndSetRespawn(FName GameplayMapName, FName CheckpointId)
 {
+	const TArray<FTestAmmoRefillRequest> NoRefillRequests;
+	return ActivateCheckpointAndRefillAmmo(GameplayMapName, CheckpointId, NoRefillRequests);
+}
+
+bool USoulslikeGameInstance::ActivateCheckpointAndRefillAmmo(FName GameplayMapName, FName CheckpointId,
+	const TArray<FTestAmmoRefillRequest>& RefillRequests)
+{
 	if (GameplayMapName == NAME_None || CheckpointId == NAME_None)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("ActivateCheckpointAndSetRespawn rejected an empty map or checkpoint ID."));
+		UE_LOG(LogTemp, Warning, TEXT("Activate checkpoint and refill ammo rejected an empty map or checkpoint ID."));
 		return false;
 	}
 
 	if (!EnsureCurrentSaveLoaded() || !CurrentSaveGame || !CurrentSaveGame->IsPersistable())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("ActivateCheckpointAndSetRespawn failed: no persistable current save."));
+		UE_LOG(LogTemp, Warning, TEXT("Activate checkpoint and refill ammo failed: no persistable current save."));
 		return false;
 	}
 
 	const FName PreviousMapName = CurrentSaveGame->MapName;
 	const FName PreviousCheckpointId = CurrentSaveGame->LastCheckpointId;
 	const TSet<FName> PreviousActivatedCheckpointIds = CurrentSaveGame->ActivatedCheckpointIds;
+	const TArray<FTestItemInstanceRecord> PreviousItems = CurrentSaveGame->ItemInstances;
+	const TArray<FTestAmmoContainerRecord> PreviousLoadedAmmoContainers = CurrentSaveGame->LoadedAmmoContainers;
+	int32 TransferredAmmoQuantity = 0;
+	FString RefillFailureReason;
+	if (!ApplyAmmoRefillRequests(CurrentSaveGame->ItemInstances, CurrentSaveGame->LoadedAmmoContainers,
+		RefillRequests, TransferredAmmoQuantity, RefillFailureReason))
+	{
+		CurrentSaveGame->ItemInstances = PreviousItems;
+		CurrentSaveGame->LoadedAmmoContainers = PreviousLoadedAmmoContainers;
+		UE_LOG(LogTemp, Warning, TEXT("Activate checkpoint and refill ammo rejected: %s"), *RefillFailureReason);
+		return false;
+	}
 
 	CurrentSaveGame->MapName = GameplayMapName;
 	CurrentSaveGame->LastCheckpointId = CheckpointId;
 	CurrentSaveGame->ActivatedCheckpointIds.Add(CheckpointId);
 
-	if (!SaveNow())
+	const bool bInjectedFailure = TransferredAmmoQuantity > 0 && ConsumeAmmoRefillSaveFailureForDebug();
+	if (!bInjectedFailure && SaveNow())
 	{
-		CurrentSaveGame->MapName = PreviousMapName;
-		CurrentSaveGame->LastCheckpointId = PreviousCheckpointId;
-		CurrentSaveGame->ActivatedCheckpointIds = PreviousActivatedCheckpointIds;
+		PrepareGameplayTransition(GameplayMapName, CheckpointId);
+		return true;
+	}
+
+	CurrentSaveGame->MapName = PreviousMapName;
+	CurrentSaveGame->LastCheckpointId = PreviousCheckpointId;
+	CurrentSaveGame->ActivatedCheckpointIds = PreviousActivatedCheckpointIds;
+	CurrentSaveGame->ItemInstances = PreviousItems;
+	CurrentSaveGame->LoadedAmmoContainers = PreviousLoadedAmmoContainers;
+	return false;
+}
+
+bool USoulslikeGameInstance::VerifyAmmoRefillFixture(const FTestAmmoRefillRequest& RefillRequest)
+
+{
+#if UE_BUILD_SHIPPING
+	UE_LOG(LogTemp, Warning, TEXT("Ammo refill fixture verification is unavailable in Shipping builds."));
+	return false;
+#else
+	if (!EnsureCurrentSaveLoaded() || !CurrentSaveGame || !CurrentSaveGame->IsPersistable())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Ammo refill fixture verification failed: no usable current save."));
 		return false;
 	}
 
-	PrepareGameplayTransition(GameplayMapName, CheckpointId);
+	if (RefillRequest.DefinitionId == NAME_None || RefillRequest.ValidReserveInstances.IsEmpty())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Ammo refill fixture verification requires a transferable validated reserve request."));
+		return false;
+	}
+
+	TArray<FTestItemInstanceRecord> FixtureItems = CurrentSaveGame->ItemInstances;
+	FTestItemInstanceRecord InvalidFixtureRecord;
+	InvalidFixtureRecord.DefinitionId = RefillRequest.DefinitionId;
+	InvalidFixtureRecord.InstanceId = NAME_None;
+	InvalidFixtureRecord.Quantity = 777;
+	InvalidFixtureRecord.UpgradeLevel = 0;
+	FixtureItems.Insert(InvalidFixtureRecord, 0);
+	TArray<FTestAmmoContainerRecord> FixtureContainers = CurrentSaveGame->LoadedAmmoContainers;
+
+	FTestAmmoRefillRequest FixtureRequest = RefillRequest;
+	TSet<FName> ValidInstanceIdSet;
+	for (FTestItemInstanceSelection& Selection : FixtureRequest.ValidReserveInstances)
+	{
+		ValidInstanceIdSet.Add(Selection.InstanceId);
+		++Selection.SourceItemIndex;
+	}
+	auto SumValidatedQuantity = [&ValidInstanceIdSet](const TArray<FTestItemInstanceRecord>& ItemRecords)
+	{
+		int64 TotalQuantity = 0;
+		for (const FTestItemInstanceRecord& ItemRecord : ItemRecords)
+		{
+			if (ValidInstanceIdSet.Contains(ItemRecord.InstanceId))
+			{
+				TotalQuantity += ItemRecord.Quantity;
+			}
+		}
+		return TotalQuantity;
+	};
+
+	const int64 BeforeValidatedQuantity = SumValidatedQuantity(FixtureItems);
+	int32 TransferredAmmoQuantity = 0;
+	FString FailureReason;
+	TArray<FTestAmmoRefillRequest> FixtureRequests;
+	FixtureRequests.Add(FixtureRequest);
+	if (!ApplyAmmoRefillRequests(FixtureItems, FixtureContainers, FixtureRequests, TransferredAmmoQuantity, FailureReason))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Ammo refill fixture verification failed to apply the copied transaction: %s"),
+			*FailureReason);
+		return false;
+	}
+
+	const int64 AfterValidatedQuantity = SumValidatedQuantity(FixtureItems);
+	if (!FixtureItems.IsValidIndex(0) || FixtureItems[0].InstanceId != NAME_None || FixtureItems[0].Quantity != 777
+		|| TransferredAmmoQuantity <= 0 || BeforeValidatedQuantity - AfterValidatedQuantity != TransferredAmmoQuantity)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Ammo refill fixture verification failed: invalid raw record or validated quantity changed unexpectedly."));
+		return false;
+	}
+
+	UE_LOG(LogTemp, Display, TEXT("Ammo refill fixture verified: invalid raw record was untouched; %d validated '%s' ammo transferred in memory only."),
+		TransferredAmmoQuantity, *RefillRequest.DefinitionId.ToString());
 	return true;
+#endif
 }
 
 bool USoulslikeGameInstance::HasActivatedCheckpoint(FName CheckpointId)
@@ -474,7 +745,8 @@ bool USoulslikeGameInstance::HasActivatedCheckpoint(FName CheckpointId)
 void USoulslikeGameInstance::PrepareGameplayTransition(FName GameplayMapName, FName CheckpointId)
 {
 	ClearItemClaimSaveFailureForDebug();
-	ClearItemQuantitySaveFailureForDebug();
+	ClearLoadedAmmoConsumeSaveFailureForDebug();
+	ClearAmmoRefillSaveFailureForDebug();
 	PendingGameplayMapName = GameplayMapName;
 	PendingCheckpointId = CheckpointId;
 
@@ -501,7 +773,8 @@ void USoulslikeGameInstance::InvalidateCurrentSave(const FString& Reason)
 void USoulslikeGameInstance::ReturnToMainMenu()
 {
 	ClearItemClaimSaveFailureForDebug();
-	ClearItemQuantitySaveFailureForDebug();
+	ClearLoadedAmmoConsumeSaveFailureForDebug();
+	ClearAmmoRefillSaveFailureForDebug();
 	PendingGameplayMapName = NAME_None;
 	PendingCheckpointId = NAME_None;
 	UGameplayStatics::OpenLevel(this, MainMenuMapName);
@@ -615,6 +888,182 @@ bool USoulslikeGameInstance::AddPersistentId(TSet<FName>& TargetSet, FName Persi
 	return true;
 }
 
+bool USoulslikeGameInstance::ApplyAmmoRefillRequests(TArray<FTestItemInstanceRecord>& ItemInstances,
+	TArray<FTestAmmoContainerRecord>& LoadedAmmoContainers, const TArray<FTestAmmoRefillRequest>& RefillRequests,
+	int32& OutTransferredQuantity, FString& OutFailureReason) const
+{
+	OutTransferredQuantity = 0;
+	OutFailureReason.Reset();
+	TSet<FName> SeenDefinitionIds;
+	for (const FTestAmmoRefillRequest& RefillRequest : RefillRequests)
+	{
+		if (RefillRequest.DefinitionId == NAME_None || RefillRequest.LoadedCapacity <= 0
+			|| RefillRequest.ReserveStackLimit <= 0 || RefillRequest.ValidReserveInstances.IsEmpty())
+		{
+			OutFailureReason = TEXT("An ammo refill request is incomplete.");
+			return false;
+		}
+
+		if (SeenDefinitionIds.Contains(RefillRequest.DefinitionId))
+		{
+			OutFailureReason = FString::Printf(TEXT("Duplicate ammo refill definition '%s'."),
+				*RefillRequest.DefinitionId.ToString());
+			return false;
+		}
+		SeenDefinitionIds.Add(RefillRequest.DefinitionId);
+
+		if (RefillRequest.SourceContainerIndex != INDEX_NONE)
+		{
+			if (!LoadedAmmoContainers.IsValidIndex(RefillRequest.SourceContainerIndex))
+			{
+				OutFailureReason = FString::Printf(TEXT("Loaded-ammo source index is unavailable for '%s'."),
+					*RefillRequest.DefinitionId.ToString());
+				return false;
+			}
+
+			const FTestAmmoContainerRecord& ContainerRecord = LoadedAmmoContainers[RefillRequest.SourceContainerIndex];
+			if (ContainerRecord.DefinitionId != RefillRequest.DefinitionId
+				|| ContainerRecord.LoadedQuantity != RefillRequest.ExpectedLoadedQuantity
+				|| ContainerRecord.LoadedQuantity <= 0 || ContainerRecord.LoadedQuantity >= RefillRequest.LoadedCapacity)
+			{
+				OutFailureReason = FString::Printf(TEXT("Loaded-ammo source is stale or invalid for '%s'."),
+					*RefillRequest.DefinitionId.ToString());
+				return false;
+			}
+		}
+		else if (RefillRequest.ExpectedLoadedQuantity != 0)
+		{
+			OutFailureReason = FString::Printf(TEXT("Loaded-ammo request for '%s' has no source but a nonzero expected quantity."),
+				*RefillRequest.DefinitionId.ToString());
+			return false;
+		}
+
+		TSet<FName> SeenReserveInstanceIds;
+		TSet<int32> SeenReserveSourceIndices;
+		for (const FTestItemInstanceSelection& Selection : RefillRequest.ValidReserveInstances)
+		{
+			if (Selection.InstanceId == NAME_None || Selection.SourceItemIndex == INDEX_NONE
+				|| Selection.ExpectedQuantity <= 0 || SeenReserveInstanceIds.Contains(Selection.InstanceId)
+				|| SeenReserveSourceIndices.Contains(Selection.SourceItemIndex))
+			{
+				OutFailureReason = TEXT("An ammo refill request contains an invalid or duplicate reserve selection.");
+				return false;
+			}
+
+			if (!ItemInstances.IsValidIndex(Selection.SourceItemIndex))
+			{
+				OutFailureReason = FString::Printf(TEXT("Validated reserve source index is unavailable for InstanceId '%s'."),
+					*Selection.InstanceId.ToString());
+				return false;
+			}
+
+			const FTestItemInstanceRecord& ItemRecord = ItemInstances[Selection.SourceItemIndex];
+			if (ItemRecord.InstanceId != Selection.InstanceId || ItemRecord.DefinitionId != RefillRequest.DefinitionId
+				|| ItemRecord.Quantity != Selection.ExpectedQuantity)
+			{
+				OutFailureReason = FString::Printf(TEXT("Validated reserve InstanceId '%s' is stale."),
+					*Selection.InstanceId.ToString());
+				return false;
+			}
+
+			SeenReserveInstanceIds.Add(Selection.InstanceId);
+			SeenReserveSourceIndices.Add(Selection.SourceItemIndex);
+		}
+	}
+
+	TSet<int32> EmptySelectedItemIndices;
+	for (const FTestAmmoRefillRequest& RefillRequest : RefillRequests)
+	{
+		const int32 CurrentLoadedQuantity = RefillRequest.SourceContainerIndex != INDEX_NONE
+			? LoadedAmmoContainers[RefillRequest.SourceContainerIndex].LoadedQuantity
+			: 0;
+		int32 RemainingToLoad = RefillRequest.LoadedCapacity - CurrentLoadedQuantity;
+		if (RemainingToLoad <= 0)
+		{
+			continue;
+		}
+
+		const int32 TargetLoadedQuantity = RemainingToLoad;
+		for (const FTestItemInstanceSelection& Selection : RefillRequest.ValidReserveInstances)
+		{
+			if (RemainingToLoad <= 0)
+			{
+				break;
+			}
+
+			FTestItemInstanceRecord& ItemRecord = ItemInstances[Selection.SourceItemIndex];
+			const int32 ConsumedQuantity = FMath::Min(ItemRecord.Quantity, RemainingToLoad);
+			ItemRecord.Quantity -= ConsumedQuantity;
+			RemainingToLoad -= ConsumedQuantity;
+			if (ItemRecord.Quantity <= 0)
+			{
+				EmptySelectedItemIndices.Add(Selection.SourceItemIndex);
+			}
+		}
+
+		const int32 TransferredQuantity = TargetLoadedQuantity - RemainingToLoad;
+		if (TransferredQuantity <= 0)
+		{
+			continue;
+		}
+
+		if (RefillRequest.SourceContainerIndex != INDEX_NONE)
+		{
+			LoadedAmmoContainers[RefillRequest.SourceContainerIndex].LoadedQuantity += TransferredQuantity;
+		}
+		else
+		{
+			FTestAmmoContainerRecord NewContainer;
+			NewContainer.DefinitionId = RefillRequest.DefinitionId;
+			NewContainer.LoadedQuantity = TransferredQuantity;
+			LoadedAmmoContainers.Add(NewContainer);
+		}
+
+		OutTransferredQuantity += TransferredQuantity;
+	}
+
+	TArray<int32> SortedEmptyItemIndices;
+	for (const int32 ItemIndex : EmptySelectedItemIndices)
+	{
+		SortedEmptyItemIndices.Add(ItemIndex);
+	}
+	SortedEmptyItemIndices.Sort([](const int32 Left, const int32 Right)
+	{
+		return Left > Right;
+	});
+	for (const int32 ItemIndex : SortedEmptyItemIndices)
+	{
+		if (ItemInstances.IsValidIndex(ItemIndex) && ItemInstances[ItemIndex].Quantity <= 0)
+		{
+			ItemInstances.RemoveAt(ItemIndex);
+		}
+	}
+
+	return true;
+}
+
+int32 USoulslikeGameInstance::FindItemInstanceIndex(const TArray<FTestItemInstanceRecord>& ItemInstances,
+	FName InstanceId)
+{
+	return ItemInstances.IndexOfByPredicate([InstanceId](const FTestItemInstanceRecord& ItemRecord)
+	{
+		return ItemRecord.InstanceId == InstanceId;
+	});
+}
+
+FName USoulslikeGameInstance::GenerateUniqueItemInstanceId(const TArray<FTestItemInstanceRecord>& ItemInstances)
+{
+	for (;;)
+	{
+		const FName CandidateInstanceId = FName(*FString::Printf(TEXT("Item_%s"),
+			*FGuid::NewGuid().ToString(EGuidFormats::Digits)));
+		if (FindItemInstanceIndex(ItemInstances, CandidateInstanceId) == INDEX_NONE)
+		{
+			return CandidateInstanceId;
+		}
+	}
+}
+
 bool USoulslikeGameInstance::IsSupportedEquipmentSlotId(FName SlotId)
 {
 	return SlotId == FName(TEXT("MainHand")) || SlotId == FName(TEXT("OffHand"));
@@ -636,18 +1085,34 @@ bool USoulslikeGameInstance::ConsumeItemClaimSaveFailureForDebug(FName RewardId)
 #endif
 }
 
-bool USoulslikeGameInstance::ConsumeItemQuantitySaveFailureForDebug(FName DefinitionId)
+bool USoulslikeGameInstance::ConsumeLoadedAmmoSaveFailureForDebug(FName DefinitionId)
 {
 #if UE_BUILD_SHIPPING
 	return false;
 #else
-	if (!bFailNextItemQuantitySaveForDebug)
+	if (!bFailNextLoadedAmmoConsumeSaveForDebug)
 	{
 		return false;
 	}
 
-	bFailNextItemQuantitySaveForDebug = false;
-	UE_LOG(LogTemp, Warning, TEXT("Injected item quantity save failure for DefinitionId '%s'."), *DefinitionId.ToString());
+	bFailNextLoadedAmmoConsumeSaveForDebug = false;
+	UE_LOG(LogTemp, Warning, TEXT("Injected loaded-ammo save failure for DefinitionId '%s'."), *DefinitionId.ToString());
+	return true;
+#endif
+}
+
+bool USoulslikeGameInstance::ConsumeAmmoRefillSaveFailureForDebug()
+{
+#if UE_BUILD_SHIPPING
+	return false;
+#else
+	if (!bFailNextAmmoRefillSaveForDebug)
+	{
+		return false;
+	}
+
+	bFailNextAmmoRefillSaveForDebug = false;
+	UE_LOG(LogTemp, Warning, TEXT("Injected ammo-refill save failure."));
 	return true;
 #endif
 }
@@ -657,9 +1122,14 @@ void USoulslikeGameInstance::ClearItemClaimSaveFailureForDebug()
 	bFailNextItemClaimSaveForDebug = false;
 }
 
-void USoulslikeGameInstance::ClearItemQuantitySaveFailureForDebug()
+void USoulslikeGameInstance::ClearLoadedAmmoConsumeSaveFailureForDebug()
 {
-	bFailNextItemQuantitySaveForDebug = false;
+	bFailNextLoadedAmmoConsumeSaveForDebug = false;
+}
+
+void USoulslikeGameInstance::ClearAmmoRefillSaveFailureForDebug()
+{
+	bFailNextAmmoRefillSaveForDebug = false;
 }
 
 void USoulslikeGameInstance::OpenGameplayMap()

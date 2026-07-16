@@ -18,6 +18,9 @@ bool UItemOwnershipComponent::RestoreFromSave(const UTestSaveGame* SaveGame)
 {
 	OwnedItemInstances.Reset();
 	EquippedSlots.Reset();
+	LoadedAmmoContainers.Reset();
+	OwnedItemSourceIndices.Reset();
+	LoadedAmmoSourceIndices.Reset();
 	BuildDefinitionCatalog();
 
 	if (!SaveGame || !SaveGame->IsPersistable())
@@ -27,8 +30,9 @@ bool UItemOwnershipComponent::RestoreFromSave(const UTestSaveGame* SaveGame)
 	}
 
 	TSet<FName> SeenInstanceIds;
-	for (const FTestItemInstanceRecord& ItemRecord : SaveGame->ItemInstances)
+	for (int32 SourceIndex = 0; SourceIndex < SaveGame->ItemInstances.Num(); ++SourceIndex)
 	{
+		const FTestItemInstanceRecord& ItemRecord = SaveGame->ItemInstances[SourceIndex];
 		FString FailureReason;
 		if (!ValidateItemRecord(ItemRecord, FailureReason))
 		{
@@ -45,6 +49,31 @@ bool UItemOwnershipComponent::RestoreFromSave(const UTestSaveGame* SaveGame)
 
 		SeenInstanceIds.Add(ItemRecord.InstanceId);
 		OwnedItemInstances.Add(ItemRecord);
+		OwnedItemSourceIndices.Add(ItemRecord.InstanceId, SourceIndex);
+	}
+
+	TSet<FName> SeenAmmoDefinitionIds;
+	for (int32 SourceIndex = 0; SourceIndex < SaveGame->LoadedAmmoContainers.Num(); ++SourceIndex)
+	{
+		const FTestAmmoContainerRecord& ContainerRecord = SaveGame->LoadedAmmoContainers[SourceIndex];
+		FString FailureReason;
+		if (!ValidateLoadedAmmoContainer(ContainerRecord, FailureReason))
+		{
+			UE_LOG(LogTemp, Warning, TEXT("Ignoring saved loaded-ammo container '%s': %s"),
+				*ContainerRecord.DefinitionId.ToString(), *FailureReason);
+			continue;
+		}
+
+		if (SeenAmmoDefinitionIds.Contains(ContainerRecord.DefinitionId))
+		{
+			UE_LOG(LogTemp, Warning, TEXT("Ignoring duplicate saved loaded-ammo container '%s'."),
+				*ContainerRecord.DefinitionId.ToString());
+			continue;
+		}
+
+		SeenAmmoDefinitionIds.Add(ContainerRecord.DefinitionId);
+		LoadedAmmoContainers.Add(ContainerRecord);
+		LoadedAmmoSourceIndices.Add(ContainerRecord.DefinitionId, SourceIndex);
 	}
 
 	TSet<FName> SeenSlotIds;
@@ -112,11 +141,33 @@ bool UItemOwnershipComponent::TryGrantDefinitionQuantity(FName DefinitionId, int
 		return false;
 	}
 
-	if (!GetDefinition(DefinitionId))
+	const UItemDefinitionDataAsset* Definition = GetDefinition(DefinitionId);
+	if (!Definition)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("Grant item failed: DefinitionId '%s' is not in this player's catalog."),
 			*DefinitionId.ToString());
 		return false;
+	}
+
+	if (Definition->UsesAmmoContainer())
+	{
+		TArray<FTestItemInstanceSelection> ValidReserveInstances;
+		GetValidReserveInstances(DefinitionId, ValidReserveInstances);
+		if (!GameInstance->GrantAmmoReserve(DefinitionId, Quantity, Definition->GetReserveAmmoStackLimit(),
+			ValidReserveInstances, OutInstanceId))
+		{
+			return false;
+		}
+
+		if (!RestoreFromSave(GameInstance->GetCurrentSaveGame()))
+		{
+			UE_LOG(LogTemp, Error, TEXT("Grant ammo reserve succeeded but the local ownership cache could not be restored."));
+			return false;
+		}
+
+		BroadcastOwnedQuantity(DefinitionId);
+		BroadcastLoadedAmmoQuantity(DefinitionId);
+		return true;
 	}
 
 	FTestItemInstanceRecord NewRecord;
@@ -151,6 +202,13 @@ bool UItemOwnershipComponent::TryConsumeDefinitionQuantity(FName DefinitionId, i
 	if (Definition->GetEquipmentSlot() != EItemEquipmentSlot::None)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("Consume item '%s' rejected: equipped definitions cannot be consumed by quantity."),
+			*DefinitionId.ToString());
+		return false;
+	}
+
+	if (Definition->UsesAmmoContainer())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Consume item '%s' rejected: ammo definitions must consume loaded ammo."),
 			*DefinitionId.ToString());
 		return false;
 	}
@@ -192,6 +250,122 @@ bool UItemOwnershipComponent::TryConsumeDefinitionQuantity(FName DefinitionId, i
 	check(RemainingQuantity == 0);
 	BroadcastOwnedQuantity(DefinitionId);
 	return true;
+}
+
+bool UItemOwnershipComponent::TryConsumeLoadedAmmo(FName DefinitionId, int32 Quantity,
+	USoulslikeGameInstance* GameInstance)
+{
+	BuildDefinitionCatalog();
+	const UItemDefinitionDataAsset* Definition = GetDefinition(DefinitionId);
+	if (!GameInstance || !Definition || !Definition->UsesAmmoContainer() || Quantity <= 0)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Consume loaded ammo '%s' failed: GameInstance, ammo definition, or quantity is invalid."),
+			*DefinitionId.ToString());
+		return false;
+	}
+
+	const int32 LoadedQuantity = GetLoadedAmmoQuantity(DefinitionId);
+	if (LoadedQuantity < Quantity)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Consume loaded ammo '%s' rejected: not enough loaded ammo."),
+			*DefinitionId.ToString());
+		return false;
+	}
+
+	FTestAmmoContainerSelection Selection;
+	Selection.DefinitionId = DefinitionId;
+	Selection.ExpectedLoadedQuantity = LoadedQuantity;
+	if (const int32* SourceIndex = LoadedAmmoSourceIndices.Find(DefinitionId))
+	{
+		Selection.SourceContainerIndex = *SourceIndex;
+	}
+
+	if (Selection.SourceContainerIndex == INDEX_NONE
+		|| !GameInstance->ConsumeLoadedAmmo(Selection, Quantity))
+	{
+		return false;
+	}
+
+	if (!RestoreFromSave(GameInstance->GetCurrentSaveGame()))
+	{
+		UE_LOG(LogTemp, Error, TEXT("Consume loaded ammo succeeded but the local ownership cache could not be restored."));
+		return false;
+	}
+
+	BroadcastLoadedAmmoQuantity(DefinitionId);
+	return true;
+}
+
+bool UItemOwnershipComponent::TryRestockAmmoAtCheckpoint(FName GameplayMapName, FName CheckpointId,
+	USoulslikeGameInstance* GameInstance)
+{
+	BuildDefinitionCatalog();
+	if (!GameInstance || GameplayMapName == NAME_None || CheckpointId == NAME_None)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Restock ammo failed: GameInstance, map, or checkpoint is invalid."));
+		return false;
+	}
+
+	TArray<FName> AmmoDefinitionIds;
+	GetAmmoDefinitionIds(AmmoDefinitionIds);
+	TMap<FName, int32> PreviousReserveQuantities;
+	TMap<FName, int32> PreviousLoadedQuantities;
+	TArray<FTestAmmoRefillRequest> RefillRequests;
+	for (const FName DefinitionId : AmmoDefinitionIds)
+	{
+		PreviousReserveQuantities.Add(DefinitionId, GetReserveAmmoQuantity(DefinitionId));
+		PreviousLoadedQuantities.Add(DefinitionId, GetLoadedAmmoQuantity(DefinitionId));
+
+		FTestAmmoRefillRequest RefillRequest;
+		if (BuildAmmoRefillRequest(DefinitionId, RefillRequest))
+		{
+			RefillRequests.Add(MoveTemp(RefillRequest));
+		}
+	}
+
+	if (!GameInstance->ActivateCheckpointAndRefillAmmo(GameplayMapName, CheckpointId, RefillRequests))
+	{
+		return false;
+	}
+
+	if (!RestoreFromSave(GameInstance->GetCurrentSaveGame()))
+	{
+		UE_LOG(LogTemp, Error, TEXT("Checkpoint ammo refill succeeded but the local ownership cache could not be restored."));
+		return false;
+	}
+
+	for (const FName DefinitionId : AmmoDefinitionIds)
+	{
+		if (PreviousReserveQuantities.FindRef(DefinitionId) != GetReserveAmmoQuantity(DefinitionId))
+		{
+			BroadcastOwnedQuantity(DefinitionId);
+		}
+		if (PreviousLoadedQuantities.FindRef(DefinitionId) != GetLoadedAmmoQuantity(DefinitionId))
+		{
+			BroadcastLoadedAmmoQuantity(DefinitionId);
+		}
+	}
+
+	return true;
+}
+
+bool UItemOwnershipComponent::VerifyAmmoRefillFixture(FName DefinitionId, USoulslikeGameInstance* GameInstance) const
+{
+	if (!GameInstance)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Verify ammo refill fixture failed: GameInstance is unavailable."));
+		return false;
+	}
+
+	FTestAmmoRefillRequest RefillRequest;
+	if (!BuildAmmoRefillRequest(DefinitionId, RefillRequest))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Verify ammo refill fixture failed: '%s' has no transferable validated reserve ammo."),
+			*DefinitionId.ToString());
+		return false;
+	}
+
+	return GameInstance->VerifyAmmoRefillFixture(RefillRequest);
 }
 
 bool UItemOwnershipComponent::TryClaimWorldItem(FName PersistentId, FName DefinitionId,
@@ -334,8 +508,8 @@ void UItemOwnershipComponent::GetLoadoutOptions(EItemEquipmentSlot EquipmentSlot
 
 FString UItemOwnershipComponent::BuildDebugSummary() const
 {
-	FString Result = FString::Printf(TEXT("Runtime item ownership: %d instance(s), %d equipped slot(s)."),
-		OwnedItemInstances.Num(), EquippedSlots.Num());
+	FString Result = FString::Printf(TEXT("Runtime item ownership: %d instance(s), %d equipped slot(s), %d loaded ammo container(s)."),
+		OwnedItemInstances.Num(), EquippedSlots.Num(), LoadedAmmoContainers.Num());
 
 	for (const FTestItemInstanceRecord& ItemRecord : OwnedItemInstances)
 	{
@@ -348,6 +522,15 @@ FString UItemOwnershipComponent::BuildDebugSummary() const
 	{
 		Result += FString::Printf(TEXT("\n  Slot=%s Instance=%s"),
 			*SlotRecord.SlotId.ToString(), *SlotRecord.ItemInstanceId.ToString());
+	}
+
+	TArray<FName> AmmoDefinitionIds;
+	GetAmmoDefinitionIds(AmmoDefinitionIds);
+	for (const FName DefinitionId : AmmoDefinitionIds)
+	{
+		Result += FString::Printf(TEXT("\n  Ammo Definition=%s Loaded=%d/%d Reserve=%d Total=%d"),
+			*DefinitionId.ToString(), GetLoadedAmmoQuantity(DefinitionId), GetLoadedAmmoCapacity(DefinitionId),
+			GetReserveAmmoQuantity(DefinitionId), GetTotalAmmoQuantity(DefinitionId));
 	}
 
 	return Result;
@@ -434,6 +617,105 @@ bool UItemOwnershipComponent::ValidateItemRecord(const FTestItemInstanceRecord& 
 	return true;
 }
 
+bool UItemOwnershipComponent::ValidateLoadedAmmoContainer(const FTestAmmoContainerRecord& ContainerRecord,
+	FString& OutFailureReason) const
+{
+	if (ContainerRecord.DefinitionId == NAME_None)
+	{
+		OutFailureReason = TEXT("DefinitionId is empty.");
+		return false;
+	}
+
+	if (ContainerRecord.LoadedQuantity <= 0)
+	{
+		OutFailureReason = TEXT("LoadedQuantity must be positive; empty containers are not persisted.");
+		return false;
+	}
+
+	const UItemDefinitionDataAsset* Definition = GetDefinition(ContainerRecord.DefinitionId);
+	if (!Definition || !Definition->UsesAmmoContainer())
+	{
+		OutFailureReason = TEXT("Definition is missing or does not use an ammo container.");
+		return false;
+	}
+
+	if (ContainerRecord.LoadedQuantity > Definition->GetLoadedAmmoCapacity())
+	{
+		OutFailureReason = TEXT("LoadedQuantity exceeds the definition capacity.");
+		return false;
+	}
+
+	return true;
+}
+
+bool UItemOwnershipComponent::BuildAmmoRefillRequest(FName DefinitionId, FTestAmmoRefillRequest& OutRequest) const
+{
+	OutRequest = FTestAmmoRefillRequest{};
+	const UItemDefinitionDataAsset* Definition = GetDefinition(DefinitionId);
+	if (!Definition || !Definition->UsesAmmoContainer())
+	{
+		return false;
+	}
+
+	const int32 LoadedCapacity = Definition->GetLoadedAmmoCapacity();
+	const int32 LoadedQuantity = GetLoadedAmmoQuantity(DefinitionId);
+	if (LoadedCapacity <= LoadedQuantity || GetReserveAmmoQuantity(DefinitionId) <= 0)
+	{
+		return false;
+	}
+
+	OutRequest.DefinitionId = DefinitionId;
+	OutRequest.LoadedCapacity = LoadedCapacity;
+	OutRequest.ReserveStackLimit = Definition->GetReserveAmmoStackLimit();
+	OutRequest.ExpectedLoadedQuantity = LoadedQuantity;
+	if (const int32* SourceIndex = LoadedAmmoSourceIndices.Find(DefinitionId))
+	{
+		OutRequest.SourceContainerIndex = *SourceIndex;
+	}
+
+	GetValidReserveInstances(DefinitionId, OutRequest.ValidReserveInstances);
+	return OutRequest.ValidReserveInstances.Num() > 0;
+}
+
+void UItemOwnershipComponent::GetAmmoDefinitionIds(TArray<FName>& OutDefinitionIds) const
+{
+	OutDefinitionIds.Reset();
+	for (const TPair<FName, UItemDefinitionDataAsset*>& Pair : DefinitionsById)
+	{
+		if (Pair.Value && Pair.Value->UsesAmmoContainer())
+		{
+			OutDefinitionIds.Add(Pair.Key);
+		}
+	}
+
+	OutDefinitionIds.Sort([](const FName& Left, const FName& Right)
+	{
+		return Left.LexicalLess(Right);
+	});
+}
+
+void UItemOwnershipComponent::GetValidReserveInstances(FName DefinitionId,
+	TArray<FTestItemInstanceSelection>& OutSelections) const
+{
+	OutSelections.Reset();
+	for (const FTestItemInstanceRecord& ItemRecord : OwnedItemInstances)
+	{
+		if (ItemRecord.DefinitionId == DefinitionId && ItemRecord.InstanceId != NAME_None && ItemRecord.Quantity > 0)
+		{
+			const int32* SourceIndex = OwnedItemSourceIndices.Find(ItemRecord.InstanceId);
+			if (!SourceIndex)
+			{
+				continue;
+			}
+
+			FTestItemInstanceSelection& Selection = OutSelections.AddDefaulted_GetRef();
+			Selection.InstanceId = ItemRecord.InstanceId;
+			Selection.SourceItemIndex = *SourceIndex;
+			Selection.ExpectedQuantity = ItemRecord.Quantity;
+		}
+	}
+}
+
 const UItemDefinitionDataAsset* UItemOwnershipComponent::GetDefinition(FName DefinitionId) const
 {
 	if (UItemDefinitionDataAsset* const* FoundDefinition = DefinitionsById.Find(DefinitionId))
@@ -486,6 +768,37 @@ int32 UItemOwnershipComponent::GetOwnedQuantity(FName DefinitionId) const
 	return static_cast<int32>(FMath::Clamp<int64>(TotalQuantity, 0, MAX_int32));
 }
 
+int32 UItemOwnershipComponent::GetReserveAmmoQuantity(FName DefinitionId) const
+{
+	return GetOwnedQuantity(DefinitionId);
+}
+
+int32 UItemOwnershipComponent::GetLoadedAmmoQuantity(FName DefinitionId) const
+{
+	if (const FTestAmmoContainerRecord* ContainerRecord = LoadedAmmoContainers.FindByPredicate(
+		[DefinitionId](const FTestAmmoContainerRecord& Candidate)
+		{
+			return Candidate.DefinitionId == DefinitionId;
+		}))
+	{
+		return ContainerRecord->LoadedQuantity;
+	}
+
+	return 0;
+}
+
+int32 UItemOwnershipComponent::GetTotalAmmoQuantity(FName DefinitionId) const
+{
+	return static_cast<int32>(FMath::Clamp<int64>(
+		static_cast<int64>(GetReserveAmmoQuantity(DefinitionId)) + GetLoadedAmmoQuantity(DefinitionId), 0, MAX_int32));
+}
+
+int32 UItemOwnershipComponent::GetLoadedAmmoCapacity(FName DefinitionId) const
+{
+	const UItemDefinitionDataAsset* Definition = GetDefinition(DefinitionId);
+	return Definition && Definition->UsesAmmoContainer() ? Definition->GetLoadedAmmoCapacity() : 0;
+}
+
 bool UItemOwnershipComponent::IsSupportedEquipmentSlot(EItemEquipmentSlot EquipmentSlot)
 {
 	return EquipmentSlot == EItemEquipmentSlot::MainHand || EquipmentSlot == EItemEquipmentSlot::OffHand;
@@ -535,6 +848,11 @@ void UItemOwnershipComponent::UpdateLocalEquipmentSlot(FName SlotId, FName ItemI
 void UItemOwnershipComponent::BroadcastOwnedQuantity(FName DefinitionId)
 {
 	OnOwnedItemQuantityChanged.Broadcast(DefinitionId, GetOwnedQuantity(DefinitionId));
+}
+
+void UItemOwnershipComponent::BroadcastLoadedAmmoQuantity(FName DefinitionId)
+{
+	OnLoadedAmmoQuantityChanged.Broadcast(DefinitionId, GetLoadedAmmoQuantity(DefinitionId));
 }
 
 FName UItemOwnershipComponent::GenerateUniqueInstanceId() const

@@ -162,7 +162,7 @@ bool ATestGameMode::RequestRestAtCheckpoint(ACheckpointActor* Checkpoint, AMyCha
 	}
 
 	CapturePlayerGold();
-	if (!GameInstance->ActivateCheckpointAndSetRespawn(GetCurrentGameplayMapName(), Checkpoint->GetPersistentId()))
+	if (!Player->TryRestockAmmoAtCheckpoint(GetCurrentGameplayMapName(), Checkpoint->GetPersistentId()))
 	{
 		return false;
 	}
