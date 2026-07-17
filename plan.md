@@ -18,25 +18,33 @@
 
 ## 计划 (Plan)
 
-### TODO-04D-C: Archer Spacing And Escape v1
+### TODO-04D-D: Ranged Enemy Specialization And Attack Cancellation v1
 
-**状态：✅已通过。** 用户已完成 `TestEditor` 编译和 Erika / Paladin PIE 回归；本阶段仅提交纯 Projectile `RangedEscape`、Erika 距离配置与其攻击 DataAsset，不混入下一阶段的三档速度、`ARangedEnemy` 父类迁移或 LOS 攻击取消。
+**状态：✅已执行，已通过。** 本阶段创建 `ARangedEnemy : AEnemy`，迁移 D-C 的纯远程 Escape 运行时状态，建立慢/中/高速职责，并在 Draw/AimHold 期间持续失去 LOS `0.15 s` 后以 `Montage_Stop(0.12 s)` 取消未 Release 的攻击。`AEnemy` 保留共同敌人核心；不创建 `ABaseEnemy`、`AMeleeEnemy`、`AMageEnemy`、DataAsset、Controller、地图或动画资产。
 
-#### 已交付
+#### 固定边界
 
-- `AEnemy` 的私有 Combat HFSM 新增 `RangedEscape`：只有“至少一条可选 Projectile 且无可选 Melee 条目”的配置可进入，Paladin 与混合攻击配置保持原分支。
-- Erika 的已验证距离合同为：`<600 cm` Escape，`600-900` Retreat，`900-1000` BackDiag，`1000-1100` 安全 Strafe/fire，`>1100` Press 到约 `1050`；Escape 在 `>=1000 cm` 退出，并以固定导航腿、独立 request ID 和 BackDiag fallback 避免不断取消寻路。
-- 局部仲裁顺序固定为：已承诺攻击蒙太奇、Escape、pending AttackIntent、普通 MovementIntent。冷却 Timer 只释放 gate，下一帧由 `OnCombating()` 统一重评估。
-- Projectile 起手继续严格使用条目战术窗口和 LOS；合法起手后，Release 使用物理飞行距离加 LOS/状态/一次性 guard，玩家短暂后退不会再导致距离超限的空 Release。
+- `AEnemy` 继续拥有感知、目标、受击/死亡、通用导航、攻击条目、Projectile Release 与 Debug Probe。`ARangedEnemy` 只拥有纯远程 Escape、远程 CDO 默认值、攻击期 LOS 取消和对应调试。
+- `AEnemy` 的三档速度固定为 Patrol `200`、CombatManeuver `290`、Chase `330`；`ARangedEnemy` 构造阶段覆盖为 `220 / 300 / 330`。Retreat、BackDiag、Strafe 与 LOS 重定位使用中速；Press、Chase、Escape 使用高速。
+- `AEnemy` 的近战距离基线与现有 Paladin 对齐：Attack Max `220`、Preferred Min `240`；`ARangedEnemy` 继续只覆盖纯远程距离环。实际蓝图已更正为 `BP_Paladin`，旧路径 `BP_Pladin` 仅保留 redirector 以维持现有地图/Encounter 引用，不执行 Fix Up Redirectors。
+- Erika 的内层距离合同成为 `ARangedEnemy` CDO 默认：Escape `600 -> 1000`、Retreat `<900`、安全环 `1000-1100`、攻击上限 `1100`、Press Margin `50`、Retreat 最低倍率 `1.0`。外层追击/感知参数保持现有 Blueprint 作者值。
+- `AEnemy` 原生拥有所有敌人共用的 HealthBar/LockOnMarker 几何默认：HealthBar 使用屏幕空间与相对位置，但尺寸由 `WBP_EnemyHealthBar` 根 `SizeBox` 的期望大小驱动；锁定标记为 `4 x 4 @ Z=30`。具体 Widget Class 仍由敌人 Blueprint 作者化。
+- 取消只针对活动、未 Release、非 Debug Probe 的 Projectile 攻击。首次 LOS 失败开始计时，恢复 LOS 清除计时；持续 `0.15 s` 后先封锁 Release，再只停止当前攻击 Montage。取消沿用条目正常 cooldown；已 Release、近战、受击、死亡和 Dormant 不受影响。
 
-#### 验收与 Review
+#### 实施顺序
 
-- 用户 PIE 确认 Escape 进入/退出滞后、固定目标不抽搐、导航失败 fallback、冷却和 Pending 抢占、墙体 LOS、已承诺 Release、生命周期清理以及 Paladin 回归均符合预期。
-- 正常 review：未发现 P0/P1。纯 Projectile 门控、专属导航 request、状态退出与 `EndPlay()` 清理均有明确归属；C++ 与当前 Erika/DataAsset 资产范围一致。
-- 对抗性 review：已承诺攻击高于 Escape 可避免在 Draw/AimHold 中突兀改变移动语义；固定 Escape 腿避免追赶时反复取消 `MoveTo`；物理距离放宽不绕过 LOS、目标有效性或一次性 Release guard。未发现 D-C 阻塞。
-- 接受一个 P2 表现债务：玩家在 Release 前完全失去 LOS 时不会被隔墙射中，但当前蒙太奇没有 Cancel/Recover，可能仍播放一次无箭 Release。该项已登记到 `ROADMAP.md`，由 `TODO-04D-D` 处理。
+1. 在 `AEnemy` 提炼受保护的远程战术扩展点、窄移动辅助与攻击快照取消包装；删除其 `RangedEscape` 私有状态和第四档 Escape 速度。
+2. 新增抽象 `ARangedEnemy`，迁移固定导航腿、fallback、验证、Debug、状态清理与 LOS 取消，保持 Projectile 最终 Release LOS guard 在基类。
+3. 编译通过后以 Live Editor 顺序重设 `BP_ErikaArcher` 父类和 `BP_Paladin` / Erika CDO 覆盖；不手改 `.uasset`。
+4. 用户手动 PIE 验收取消、三档速度、D-C 距离环、Paladin 与 Debug Probe 回归；随后做两轮 review、文档收尾和独立提交。
 
-#### 文档与提交边界
+#### 当前执行记录
 
-- 已更新 `ARCHITECTURE.md` 与 `ROADMAP.md`；`README.md` 不改。
-- 提交仅包含 D-C C++、`BP_ErikaArcher.uasset`、`DA_EnemyAttack_ErikaArcher.uasset`、`plan.md`、`ARCHITECTURE.md`、`ROADMAP.md`，持续排除暂停菜单、覆盖确认和 Encounter WIP。
+- 已完成源码与调用链勘查；当前 D-C 的 Escape、Attack Tick、Montage End、导航完成和配置验证均集中在 `AEnemy`，适合通过钩子迁移而非覆写完整 `OnCombating()`。
+- 已查询 server-memory：`Montage_Stop`/迟到 Notify、Abstract Blueprint reparent/CDO、`FAIRequestID` 生命周期没有既有记录；编译前会执行针对性静态检查。
+- UnrealClaude 与 VibeUE 当前均不可连接；C++ 可先完成，所有资产改动等待用户编译并重新建立 live Editor 预检。
+- C++ 已完成：`ARangedEnemy` 承接纯远程 Escape、远程 CDO 默认值和未 Release 的 LOS 取消；`AEnemy` 只保留通用移动、攻击、投射物与 Debug Probe。`CombatManeuverSpeed` 已替代旧的第四档 Escape 速度，基类旧 Escape 状态/请求 ID 已删除。
+- 已将 Paladin 的通用近战 Attack Max / Preferred Min 基线收敛到 `AEnemy`，并把 Erika 重设父类后遗失的原生 Widget Component 展示默认收敛到 `AEnemy` 构造函数。HealthBar 现在通过 `DrawAtDesiredSize` 使用 `WBP_EnemyHealthBar` 根 `SizeBox` 的 `170 x 14` 期望尺寸，用户已重新编译并完成 PIE 验收。
+- 已完成轻量静态检查：没有残留基类 `RangedEscape` 枚举或字段；速度调用点符合 Patrol/Search、CombatManeuver、Chase/Press/Escape 职责；`git diff --check` 通过。
+- 严格 review 已完成。正常 review 与对抗性 review 均未发现 D-D C++ 行为阻塞：未 Release LOS 取消先封锁一次性 Release guard，再通过 Montage End 进入既有幂等 cooldown；Escape request、fallback、死亡、受击、Dormant、EndPlay 与 Paladin 隔离均有明确归属。
+- 文档已同步 D-D 的 `ARangedEnemy` 边界、三档速度、Escape 与 LOS 取消契约，并将阶段移入 `ROADMAP.md` Done Milestones。用户已批准将实际资源更正为 `BP_Paladin`，同时提交旧路径 `BP_Pladin` redirector；不执行 Fix Up Redirectors，也不修改地图/Encounter External Actor WIP。

@@ -51,14 +51,19 @@ AEnemy::AEnemy()
 	// 血条组件
 	HealthBarWidgetComp = CreateDefaultSubobject<UHealthBarComponent>(TEXT("HealthBar"));
 	HealthBarWidgetComp->SetupAttachment(RootComponent);
+	HealthBarWidgetComp->SetWidgetSpace(EWidgetSpace::Screen);
+	// 血条尺寸由 WBP_EnemyHealthBar 根 SizeBox 决定，避免角色类固定渲染画布。
+	HealthBarWidgetComp->SetDrawAtDesiredSize(true);
+	HealthBarWidgetComp->SetPivot(FVector2D(0.5f, 0.5f));
+	HealthBarWidgetComp->SetRelativeLocation(FVector(13.153872f, 8.550018f, 86.763085f));
 
-	// 锁定标记：WidgetClass 在敌人蓝图中指定，C++ 只负责组件入口和显隐。
+	// 锁定标记：WidgetClass 在敌人蓝图中指定，C++ 负责共用布局和显隐。
 	LockOnMarkerWidgetComp = CreateDefaultSubobject<UWidgetComponent>(TEXT("LockOnMarker"));
 	LockOnMarkerWidgetComp->SetupAttachment(RootComponent);
 	LockOnMarkerWidgetComp->SetWidgetSpace(EWidgetSpace::Screen);
-	LockOnMarkerWidgetComp->SetDrawSize(FVector2D(72.f, 72.f));
+	LockOnMarkerWidgetComp->SetDrawSize(FVector2D(4.f, 4.f));
 	LockOnMarkerWidgetComp->SetPivot(FVector2D(0.5f, 0.5f));
-	LockOnMarkerWidgetComp->SetRelativeLocation(FVector(0.f, 0.f, 105.f));
+	LockOnMarkerWidgetComp->SetRelativeLocation(FVector(0.f, 0.f, 30.f));
 	LockOnMarkerWidgetComp->SetVisibility(false);
 
 	// AI感知
@@ -220,11 +225,66 @@ void AEnemy::ApplyAuthoredPerceptionConfig()
 	}
 }
 
+bool AEnemy::HandleArchetypeCombatPriority(float, float, const FVector&)
+{
+	return false;
+}
+
+void AEnemy::TickArchetypeAttack(float)
+{
+}
+
+bool AEnemy::HandleArchetypeAttackCooldownEnded()
+{
+	return false;
+}
+
+bool AEnemy::HandleArchetypeMoveCompleted(FAIRequestID, EPathFollowingResult::Type)
+{
+	return false;
+}
+
+void AEnemy::ClearArchetypeCombatState()
+{
+}
+
+void AEnemy::ValidateArchetypeCombatConfig() const
+{
+}
+
+FString AEnemy::GetArchetypeCombatDebugText() const
+{
+	return FString();
+}
+
+void AEnemy::DrawArchetypeCombatDebug() const
+{
+}
+
+void AEnemy::SetArchetypeMovementDefaults(float InPatrolSpeed, float InCombatManeuverSpeed, float InChaseSpeed)
+{
+	PatrolSpeed = InPatrolSpeed;
+	CombatManeuverSpeed = InCombatManeuverSpeed;
+	ChaseSpeed = InChaseSpeed;
+	GetCharacterMovement()->MaxWalkSpeed = PatrolSpeed;
+}
+
+void AEnemy::SetArchetypeCombatSpacingDefaults(float InTooCloseRadius, float InAttackMaxRadius,
+	float InPreferredMinRadius, float InPreferredMaxRadius, float InPressMargin, float InRetreatMinSpeedRatio)
+{
+	CombatTooCloseRadius = InTooCloseRadius;
+	CombatAttackMaxRadius = InAttackMaxRadius;
+	CombatPreferredMinRadius = InPreferredMinRadius;
+	CombatPreferredMaxRadius = InPreferredMaxRadius;
+	CombatPressMargin = InPressMargin;
+	CombatRetreatMinSpeedRatio = InRetreatMinSpeedRatio;
+}
+
 void AEnemy::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	// 兜底：定时器全量清理，覆盖 Die() 未执行的路径（关卡切换、编辑器 Stop 等）
 	ClearAllTimers();
-	ClearRangedEscape();
+	ClearArchetypeCombatState();
 	ClearActiveProjectileAttack();
 #if !UE_BUILD_SHIPPING
 	bRangedDebugProbeActive = false;
@@ -307,7 +367,7 @@ float AEnemy::TakeDamage(float DamageAmount, const struct FDamageEvent& DamageEv
 void AEnemy::Die()
 {
 	ClearAllTimers();
-	ClearRangedEscape();
+	ClearArchetypeCombatState();
 #if !UE_BUILD_SHIPPING
 	bRangedDebugProbeActive = false;
 	bRangedDebugProbeCompleted = true;
@@ -402,7 +462,7 @@ void AEnemy::SetEncounterDormant(AEncounterController* CurrentOwner)
 	bAttackOnCooldown = false;
 	ClearCurrentAttackConfig(false);
 	ClearPendingAttack();
-	ClearRangedEscape();
+	ClearArchetypeCombatState();
 	LastBlockedPendingAttackIndex = INDEX_NONE;
 	PendingAttackRetryBlockUntil = 0.f;
 	CombatSubState = EEnemyCombatSubState::None;
@@ -864,6 +924,53 @@ bool AEnemy::IsProjectileAttackWithinCommittedReleaseRange(const FActiveProjecti
 	return DistanceToTarget <= PhysicalTravelRange;
 }
 
+bool AEnemy::HasUnreleasedActiveProjectileAttack() const
+{
+	return EnemyState == EEnemyState::EES_Attacking
+		&& ActiveProjectileAttack.IsValid()
+		&& !ActiveProjectileAttack.bDebugProbe
+		&& !ActiveProjectileAttack.bReleaseAttempted;
+}
+
+bool AEnemy::HasClearActiveProjectileLineOfSight() const
+{
+	if (!HasUnreleasedActiveProjectileAttack())
+	{
+		return false;
+	}
+
+	FVector SpawnLocation;
+	FVector TargetLocation;
+	return HasClearProjectileLineOfSight(ActiveProjectileAttack, SpawnLocation, TargetLocation);
+}
+
+bool AEnemy::CancelUnreleasedActiveProjectileAttack(float BlendOutTime, const TCHAR* Reason)
+{
+	if (!HasUnreleasedActiveProjectileAttack())
+	{
+		return false;
+	}
+
+	// 先封锁 Release，再停止 Montage，防止同帧或迟到 Notify 在状态恢复前补射。
+	ActiveProjectileAttack.bReleaseAttempted = true;
+	UE_LOG(LogTemp, Display, TEXT("%s cancelled unreleased projectile attack because %s."),
+		*GetName(), Reason ? Reason : TEXT("the cancellation guard was triggered"));
+
+	UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
+	UAnimMontage* CurrentMontage = EnemyAttackConfig && EnemyAttackConfig->Attacks.IsValidIndex(CurrentAttackIndex)
+		? EnemyAttackConfig->Attacks[CurrentAttackIndex].Montage
+		: nullptr;
+	if (AnimInstance && CurrentMontage && AnimInstance->Montage_IsActive(CurrentMontage))
+	{
+		AnimInstance->Montage_Stop(BlendOutTime, CurrentMontage);
+		return true;
+	}
+
+	// 缺失动画实例或 Montage 已结束时仍必须离开攻击态，避免卡在 EES_Attacking。
+	CheckCombatTarget();
+	return true;
+}
+
 void AEnemy::ClearActiveProjectileAttack()
 {
 	GetWorldTimerManager().ClearTimer(ProjectileReleaseTimer);
@@ -947,10 +1054,10 @@ void AEnemy::ValidateEnemyAttackConfig() const
 {
 	if (!EnemyAttackConfig)
 	{
+		ValidateArchetypeCombatConfig();
 		return;
 	}
 
-	const bool bPureProjectileProfile = IsPureProjectileAttackProfile();
 	if (CombatTooCloseRadius >= CombatPreferredMinRadius
 		|| CombatPreferredMinRadius > CombatPreferredMaxRadius)
 	{
@@ -994,49 +1101,55 @@ void AEnemy::ValidateEnemyAttackConfig() const
 				       *GetName(), *Entry.AttackName.ToString(), Entry.MaxDistance, CombatAttackMaxRadius);
 		}
 
-		if (bPureProjectileProfile && EnemyAttackConfig->IsEntrySelectable(Entry)
-			&& Entry.DeliveryType == EEnemyAttackDeliveryType::Projectile)
-		{
-			const float EffectiveMaxDistance = FMath::Min(Entry.MaxDistance, CombatAttackMaxRadius);
-			if (CombatPreferredMinRadius < Entry.MinDistance || CombatPreferredMaxRadius > EffectiveMaxDistance)
-			{
-				UE_LOG(LogTemp, Warning,
-					TEXT("%s: Pure Projectile safe interval %.1f-%.1f must stay inside entry '%s' launch range %.1f-%.1f."),
-					*GetName(), CombatPreferredMinRadius, CombatPreferredMaxRadius,
-					*Entry.AttackName.ToString(), Entry.MinDistance, EffectiveMaxDistance);
-			}
+	}
 
-			if (RangedEscapeEnterRadius > Entry.MinDistance)
-			{
-				UE_LOG(LogTemp, Warning,
-					TEXT("%s: RangedEscapeEnterRadius %.1f is greater than Projectile entry '%s' MinDistance %.1f; the interval between them can start a shot instead of Escape."),
-					*GetName(), RangedEscapeEnterRadius, *Entry.AttackName.ToString(), Entry.MinDistance);
-			}
+	ValidateArchetypeCombatConfig();
+}
+
+void AEnemy::ValidatePureProjectileTacticalConfig(float EscapeEnterRadius, float EscapeExitRadius) const
+{
+	if (!EnemyAttackConfig || !IsPureProjectileAttackProfile())
+	{
+		return;
+	}
+
+	for (const FEnemyAttackEntry& Entry : EnemyAttackConfig->Attacks)
+	{
+		if (!EnemyAttackConfig->IsEntrySelectable(Entry)
+			|| Entry.DeliveryType != EEnemyAttackDeliveryType::Projectile)
+		{
+			continue;
+		}
+
+		const float EffectiveMaxDistance = FMath::Min(Entry.MaxDistance, CombatAttackMaxRadius);
+		if (CombatPreferredMinRadius < Entry.MinDistance || CombatPreferredMaxRadius > EffectiveMaxDistance)
+		{
+			UE_LOG(LogTemp, Warning,
+				TEXT("%s: Pure Projectile safe interval %.1f-%.1f must stay inside entry '%s' launch range %.1f-%.1f."),
+				*GetName(), CombatPreferredMinRadius, CombatPreferredMaxRadius,
+				*Entry.AttackName.ToString(), Entry.MinDistance, EffectiveMaxDistance);
+		}
+
+		if (EscapeEnterRadius > Entry.MinDistance)
+		{
+			UE_LOG(LogTemp, Warning,
+				TEXT("%s: Ranged Escape enter radius %.1f is greater than Projectile entry '%s' MinDistance %.1f; the interval between them can start a shot instead of Escape."),
+				*GetName(), EscapeEnterRadius, *Entry.AttackName.ToString(), Entry.MinDistance);
 		}
 	}
 
-	if (bPureProjectileProfile && !HasValidRangedEscapeConfig())
+	if (EscapeEnterRadius > CombatTooCloseRadius)
 	{
 		UE_LOG(LogTemp, Warning,
-			TEXT("%s: Pure Projectile attack profile requires RangedEscapeEnterRadius > 0, RangedEscapeExitRadius > EnterRadius, and RangedEscapeSpeed > 0."),
-			*GetName());
+			TEXT("%s: Ranged Escape enter radius %.1f must not exceed CombatTooCloseRadius %.1f; Escape and normal Retreat would overlap."),
+			*GetName(), EscapeEnterRadius, CombatTooCloseRadius);
 	}
-	else if (bPureProjectileProfile)
-	{
-		if (RangedEscapeEnterRadius > CombatTooCloseRadius)
-		{
-			UE_LOG(LogTemp, Warning,
-				TEXT("%s: RangedEscapeEnterRadius %.1f must not exceed CombatTooCloseRadius %.1f; Escape and normal Retreat would overlap."),
-				*GetName(), RangedEscapeEnterRadius, CombatTooCloseRadius);
-		}
 
-		if (RangedEscapeExitRadius < CombatPreferredMinRadius
-			|| RangedEscapeExitRadius > CombatPreferredMaxRadius)
-		{
-			UE_LOG(LogTemp, Warning,
-				TEXT("%s: RangedEscapeExitRadius %.1f must lie inside the pure Projectile safe interval %.1f-%.1f."),
-				*GetName(), RangedEscapeExitRadius, CombatPreferredMinRadius, CombatPreferredMaxRadius);
-		}
+	if (EscapeExitRadius < CombatPreferredMinRadius || EscapeExitRadius > CombatPreferredMaxRadius)
+	{
+		UE_LOG(LogTemp, Warning,
+			TEXT("%s: Ranged Escape exit radius %.1f must lie inside the pure Projectile safe interval %.1f-%.1f."),
+			*GetName(), EscapeExitRadius, CombatPreferredMinRadius, CombatPreferredMaxRadius);
 	}
 }
 
@@ -1461,7 +1574,7 @@ void AEnemy::OnAttackCooldownEnd()
 	}
 
 	bAttackOnCooldown = false;
-	if (CombatSubState == EEnemyCombatSubState::RangedEscape)
+	if (HandleArchetypeAttackCooldownEnded())
 	{
 		return;
 	}
@@ -1478,7 +1591,7 @@ void AEnemy::OnAttackCooldownEnd()
 		return;
 	}
 
-	// Timer 回调不自行判断距离、LOS、朝向或攻击协调。OnCombating() 以 Escape -> AttackIntent -> MovementIntent 的唯一顺序重评估。
+	// Timer 回调不自行判断距离、LOS、朝向或攻击协调。OnCombating() 以原型优先级 -> AttackIntent -> MovementIntent 的唯一顺序重评估。
 	ResetCombatReposition();
 }
 
@@ -1518,11 +1631,6 @@ void AEnemy::SetCombatSubState(EEnemyCombatSubState NewSubState, float AllySugge
 	if (CombatSubState == NewSubState) return;
 
 	const EEnemyCombatSubState OldSubState = CombatSubState;
-	if (OldSubState == EEnemyCombatSubState::RangedEscape)
-	{
-		ClearRangedEscape();
-	}
-
 	if (OldSubState == EEnemyCombatSubState::CooldownSpacing || OldSubState == EEnemyCombatSubState::CoordinatedWaiting)
 	{
 		ClearCombatRetreatSpeedEase();
@@ -1540,11 +1648,6 @@ void AEnemy::SetCombatSubState(EEnemyCombatSubState NewSubState, float AllySugge
 		float NewCooldown = FMath::Clamp(AllySuggestedWaitTime, 0.1f, MaxAttackCoordinationWait);
 		GetWorldTimerManager().SetTimer(AttackCooldownTimer, this, &AEnemy::OnAttackCooldownEnd, NewCooldown, false);
 		bAttackOnCooldown = true;
-	}
-	else if (CombatSubState == EEnemyCombatSubState::RangedEscape)
-	{
-		ClearPendingAttack();
-		ClearCombatRetreatSpeedEase();
 	}
 }
 
@@ -1581,9 +1684,6 @@ void AEnemy::TickCombatSubState(float DeltaTime, EEnemyCombatSubState SubState, 
 	case EEnemyCombatSubState::CooldownSpacing:
 		HandleCooldownPositioning(DeltaTime, DistanceToTarget, ToTarget);
 		break;
-	case EEnemyCombatSubState::RangedEscape:
-		HandleRangedEscape(DeltaTime, DistanceToTarget, ToTarget);
-		break;
 	default:
 		break;
 	}
@@ -1599,7 +1699,6 @@ FString AEnemy::GetCombatSubStateDebugText() const
 	case EEnemyCombatSubState::AttackReadyPressing: StateStr = TEXT("Pressing"); break;
 	case EEnemyCombatSubState::CoordinatedWaiting: StateStr = TEXT("WaitAlly"); break;
 	case EEnemyCombatSubState::CooldownSpacing: StateStr = TEXT("Cooldown"); break;
-	case EEnemyCombatSubState::RangedEscape: StateStr = TEXT("RangedEscape"); break;
 	}
 
 	if (!CombatMoveDetailDebug.IsEmpty())
@@ -1670,17 +1769,17 @@ void AEnemy::SetEnemyState(EEnemyState NewState)
 		ClearPatrolTimers();
 		bSearchingLostTarget = false;
 	}
+	if ((OldState == EEnemyState::EES_Combating || OldState == EEnemyState::EES_Attacking)
+		&& OldState != NewState)
+	{
+		ClearArchetypeCombatState();
+	}
 	if (OldState == EEnemyState::EES_Attacking && NewState != EEnemyState::EES_Attacking)
 	{
 		ClearCurrentAttackConfig(NewState != EEnemyState::EES_Dead);
 	}
 	if (OldState == EEnemyState::EES_Combating && NewState != EEnemyState::EES_Combating)
 	{
-		if (CombatSubState == EEnemyCombatSubState::RangedEscape)
-		{
-			ClearRangedEscape();
-			StopEnemyMovementIfPossible();
-		}
 		CombatSubState = EEnemyCombatSubState::None;
 	}
 	if (NewState != EEnemyState::EES_Combating && NewState != EEnemyState::EES_Attacking)
@@ -1707,6 +1806,7 @@ void AEnemy::SetEnemyState(EEnemyState NewState)
 		break;
 	case EEnemyState::EES_Searching:
 		// OnSearching / OnLostTargetSearch 首次 Tick 时处理启动逻辑
+		GetCharacterMovement()->MaxWalkSpeed = PatrolSpeed;
 		break;
 	case EEnemyState::EES_Chasing:
 		GetCharacterMovement()->MaxWalkSpeed = ChaseSpeed;
@@ -1796,6 +1896,7 @@ void AEnemy::Tick(float DeltaTime)
 	{
 		// 只有远程攻击在蒙太奇期间持续转向；近战维持既有攻击锁定朝向。
 		TickActiveProjectileAttackFacing(DeltaTime);
+		TickArchetypeAttack(DeltaTime);
 		DrawDebugInfo();
 		return;
 	}
@@ -1837,14 +1938,29 @@ void AEnemy::Tick(float DeltaTime)
 
 void AEnemy::DrawDebugInfo() const
 {
-	// 保持 Tick 早退状态的调试契约：只显示破防 BREAK，不显示完整敌人面板。
+	// 受击/死亡保持简洁；攻击态额外保留原型调试，便于确认远程 LOS 取消的运行时状态。
 	const bool bTickBlockedState = EnemyState == EEnemyState::EES_Dead || EnemyState == EEnemyState::EES_Stunned
 		|| EnemyState == EEnemyState::EES_Attacking || EnemyState == EEnemyState::EES_StanceBreak;
 	if (bTickBlockedState)
 	{
-		if (FDebugDrawHelper::IsEnemyEnabled() && EnemyState == EEnemyState::EES_StanceBreak)
+		if (FDebugDrawHelper::IsEnemyEnabled())
 		{
-			FDebugDrawHelper::Add(TEXT("BREAK"), FColor::Red);
+			if (EnemyState == EEnemyState::EES_StanceBreak)
+			{
+				FDebugDrawHelper::Add(TEXT("BREAK"), FColor::Red);
+			}
+			else if (EnemyState == EEnemyState::EES_Attacking)
+			{
+				const float MaxWalkSpeed = GetCharacterMovement() ? GetCharacterMovement()->MaxWalkSpeed : 0.f;
+				FDebugDrawHelper::Add(FString::Printf(TEXT("EnemyState: %s | Speed: %.0f / Max: %.0f"),
+					*UEnum::GetValueAsString(EnemyState), GroundSpeed, MaxWalkSpeed), FColor::White);
+
+				const FString ArchetypeCombatDebugText = GetArchetypeCombatDebugText();
+				if (!ArchetypeCombatDebugText.IsEmpty())
+				{
+					FDebugDrawHelper::Add(FString::Printf(TEXT("Combat: %s"), *ArchetypeCombatDebugText), FColor::Cyan);
+				}
+			}
 		}
 		return;
 	}
@@ -1852,8 +1968,9 @@ void AEnemy::DrawDebugInfo() const
 	if (FDebugDrawHelper::IsEnemyEnabled())
 	{
 		// TODO: 多敌人时调试文字会混在一起，加 GetName() 或编号区分。
-		FDebugDrawHelper::Add(FString::Printf(TEXT("EnemyState: %s | Speed: %.0f"),
-			*UEnum::GetValueAsString(EnemyState), GroundSpeed), FColor::White);
+		const float MaxWalkSpeed = GetCharacterMovement() ? GetCharacterMovement()->MaxWalkSpeed : 0.f;
+		FDebugDrawHelper::Add(FString::Printf(TEXT("EnemyState: %s | Speed: %.0f / Max: %.0f"),
+			*UEnum::GetValueAsString(EnemyState), GroundSpeed, MaxWalkSpeed), FColor::White);
 
 		// 在头顶渲染血量和韧性（解决多敌人文字混在一起的问题）
 		if (Attributes)
@@ -1872,7 +1989,11 @@ void AEnemy::DrawDebugInfo() const
 
 		if (EnemyState == EEnemyState::EES_Combating)
 		{
-			FDebugDrawHelper::Add(FString::Printf(TEXT("CombatMove: %s"), *GetCombatSubStateDebugText()), FColor::Cyan);
+			const FString ArchetypeCombatDebugText = GetArchetypeCombatDebugText();
+			const FString CombatDebugText = ArchetypeCombatDebugText.IsEmpty()
+				? GetCombatSubStateDebugText()
+				: FString::Printf(TEXT("%s | %s"), *GetCombatSubStateDebugText(), *ArchetypeCombatDebugText);
+			FDebugDrawHelper::Add(FString::Printf(TEXT("CombatMove: %s"), *CombatDebugText), FColor::Cyan);
 			FDebugDrawHelper::Add(FString::Printf(TEXT("AttackPlan: %s | CD: %.1f"),
 				*GetPendingAttackDebugString(), GetAttackCooldownRemaining()), FColor::Orange);
 		}
@@ -1885,11 +2006,8 @@ void AEnemy::DrawDebugInfo() const
 		FDebugDrawHelper::AddSphere(GetWorld(), GetActorLocation(), CombatAttackMaxRadius, FColor::Red, 16);
 	}
 
-	if (CombatSubState == EEnemyCombatSubState::RangedEscape && FDebugDrawHelper::IsRangesEnabled())
-	{
-		DrawDebugLine(GetWorld(), GetActorLocation(), RangedEscapeGoalLocation, FColor::Magenta, false, -1.f, 0, 2.f);
-		DrawDebugSphere(GetWorld(), RangedEscapeGoalLocation, 18.f, 12, FColor::Magenta, false, -1.f, 0, 1.5f);
-	}
+
+	DrawArchetypeCombatDebug();
 }
 
 void AEnemy::OnPatrolling(float DeltaTime)
@@ -1988,8 +2106,8 @@ void AEnemy::OnCombating(float DeltaTime)
 	float Dot = CalcForwardDot2D(ToTarget);
 	float DistanceToTarget = FVector::Dist2D(GetActorLocation(), ChasingTarget->GetActorLocation());
 
-	// 已承诺的攻击由 Tick() 的 EES_Attacking 分支独占。本处的仲裁顺序固定为 Escape -> AttackIntent -> MovementIntent。
-	if (HandleRangedEscape(DeltaTime, DistanceToTarget, ToTarget))
+	// 已承诺的攻击由 Tick() 的 EES_Attacking 分支独占。本处的仲裁顺序固定为原型优先级 -> AttackIntent -> MovementIntent。
+	if (HandleArchetypeCombatPriority(DeltaTime, DistanceToTarget, ToTarget))
 	{
 		return;
 	}
@@ -2097,8 +2215,6 @@ const TCHAR* AEnemy::GetCombatMoveDebugName(EEnemyCombatMoveType MoveType)
 		return TEXT("Strafe");
 	case EEnemyCombatMoveType::Press:
 		return TEXT("Press");
-	case EEnemyCombatMoveType::Escape:
-		return TEXT("Escape");
 	default:
 		return TEXT("Ready");
 	}
@@ -2119,7 +2235,7 @@ AEnemy::FEnemyCombatMovePlan AEnemy::BuildCombatMovePlanForRange(float DistanceT
 		return Plan;
 	}
 
-	Plan.MoveSpeed = PatrolSpeed;
+	Plan.MoveSpeed = CombatManeuverSpeed;
 
 	const FVector Right = FVector::CrossProduct(FVector::UpVector, ToTarget).GetSafeNormal2D();
 	const float SideDir = FMath::RandBool() ? 1.f : -1.f;
@@ -2431,6 +2547,23 @@ void AEnemy::ResetCombatReposition()
 	CombatMoveDetailDebug.Empty();
 }
 
+void AEnemy::FinishCombatReposition()
+{
+	bRepositionInProgress = false;
+	ClearCombatRetreatSpeedEase();
+}
+
+void AEnemy::SetCombatRepositionDelay(float Delay)
+{
+	const UWorld* World = GetWorld();
+	NextCombatRepositionTime = World ? World->GetTimeSeconds() + FMath::Max(0.f, Delay) : 0.f;
+}
+
+void AEnemy::SetCombatMoveDebugDetail(const FString& Detail)
+{
+	CombatMoveDetailDebug = Detail;
+}
+
 bool AEnemy::IsPureProjectileAttackProfile() const
 {
 	if (!EnemyAttackConfig)
@@ -2460,184 +2593,6 @@ bool AEnemy::IsPureProjectileAttackProfile() const
 	return bHasSelectableProjectile;
 }
 
-bool AEnemy::HasValidRangedEscapeConfig() const
-{
-	return RangedEscapeEnterRadius > 0.f
-		&& RangedEscapeExitRadius > RangedEscapeEnterRadius
-		&& RangedEscapeSpeed > 0.f;
-}
-
-bool AEnemy::HandleRangedEscape(float DeltaTime, float DistanceToTarget, const FVector& ToTarget)
-{
-	const bool bEscapeActive = CombatSubState == EEnemyCombatSubState::RangedEscape;
-	if (!IsPureProjectileAttackProfile() || !HasValidRangedEscapeConfig())
-	{
-		if (bEscapeActive)
-		{
-			SetCombatSubState(EEnemyCombatSubState::None);
-			StopEnemyMovementIfPossible();
-		}
-		return bEscapeActive;
-	}
-
-	if (!bEscapeActive)
-	{
-		if (DistanceToTarget >= RangedEscapeEnterRadius)
-		{
-			return false;
-		}
-
-		RangedEscapeGoalLocation = BuildRangedEscapeGoal(ToTarget);
-		StopEnemyMovementIfPossible();
-		bRepositionInProgress = false;
-		NextCombatRepositionTime = 0.f;
-		SetCombatSubState(EEnemyCombatSubState::RangedEscape);
-		CombatMoveDetailDebug = TEXT("EscapeStart");
-	}
-
-	if (DistanceToTarget >= RangedEscapeExitRadius)
-	{
-		SetCombatSubState(EEnemyCombatSubState::None);
-		StopEnemyMovementIfPossible();
-		GetCharacterMovement()->MaxWalkSpeed = PatrolSpeed;
-		NextCombatRepositionTime = 0.f;
-		CombatMoveDetailDebug = TEXT("EscapeExit");
-		return true;
-	}
-
-	ClearPendingAttack();
-	if (bHasRangedEscapeFallbackMoveRequest)
-	{
-		UpdateCombatRetreatSpeedEase();
-	}
-	else
-	{
-		ClearCombatRetreatSpeedEase();
-	}
-	TickRangedEscapeFacing(DeltaTime);
-
-	const UWorld* World = GetWorld();
-	const float CurrentTime = World ? World->GetTimeSeconds() : 0.f;
-	if (CurrentTime < NextCombatRepositionTime || bHasRangedEscapeMoveRequest || bHasRangedEscapeFallbackMoveRequest)
-	{
-		return true;
-	}
-
-	if (bRangedEscapeNavigationFailed)
-	{
-		TryStartRangedEscapeFallback(CurrentTime, DistanceToTarget, ToTarget);
-		return true;
-	}
-
-	// 一段 Escape MoveTo 结束后才用目标的最新位置计算下一段，避免追赶时不断取消导航造成抽搐。
-	RangedEscapeGoalLocation = BuildRangedEscapeGoal(ToTarget);
-	if (!TryStartRangedEscapeNavigation(CurrentTime, RangedEscapeGoalLocation))
-	{
-		bRangedEscapeNavigationFailed = true;
-	}
-
-	return true;
-}
-
-FVector AEnemy::BuildRangedEscapeGoal(const FVector& ToTarget) const
-{
-	if (!ChasingTarget)
-	{
-		return GetActorLocation();
-	}
-
-	FVector EscapeDirection = ToTarget;
-	if (EscapeDirection.IsNearlyZero())
-	{
-		EscapeDirection = GetActorForwardVector().GetSafeNormal2D();
-	}
-
-	return ChasingTarget->GetActorLocation() - EscapeDirection * RangedEscapeExitRadius;
-}
-
-void AEnemy::TickRangedEscapeFacing(float DeltaTime)
-{
-	FVector FacingDirection = GetVelocity().GetSafeNormal2D();
-	if (FacingDirection.IsNearlyZero())
-	{
-		FacingDirection = (RangedEscapeGoalLocation - GetActorLocation()).GetSafeNormal2D();
-	}
-
-	if (FacingDirection.IsNearlyZero())
-	{
-		return;
-	}
-
-	const FRotator DesiredRotation = FacingDirection.Rotation();
-	SetActorRotation(FMath::RInterpTo(GetActorRotation(), DesiredRotation, DeltaTime, CombatRotationSpeed));
-}
-
-bool AEnemy::TryStartRangedEscapeNavigation(float CurrentTime, const FVector& EscapeGoal)
-{
-	FEnemyCombatMovePlan EscapePlan;
-	EscapePlan.MoveType = EEnemyCombatMoveType::Escape;
-	EscapePlan.GoalLocation = EscapeGoal;
-	EscapePlan.MoveSpeed = RangedEscapeSpeed;
-	EscapePlan.RetryDelay = 0.15f;
-	RangedEscapeGoalLocation = EscapePlan.GoalLocation;
-
-	ClearCombatRetreatSpeedEase();
-	GetCharacterMovement()->MaxWalkSpeed = EscapePlan.MoveSpeed;
-	CombatMoveDetailDebug = TEXT("EscapeNav");
-	if (MoveToCombatLocation(EscapePlan.GoalLocation, &RangedEscapeMoveRequestId))
-	{
-		bHasRangedEscapeMoveRequest = true;
-		bRangedEscapeNavigationFailed = false;
-		NextCombatRepositionTime = CurrentTime + EscapePlan.RetryDelay;
-		return true;
-	}
-
-	CombatMoveDetailDebug = TEXT("EscapeMoveFail");
-	NextCombatRepositionTime = CurrentTime + EscapePlan.RetryDelay;
-	return false;
-}
-
-bool AEnemy::TryStartRangedEscapeFallback(float CurrentTime, float DistanceToTarget, const FVector& ToTarget)
-{
-	const FEnemyCombatMovePlan FallbackPlan = BuildCombatMovePlanForRange(DistanceToTarget, ToTarget,
-		0.f, CombatPreferredMinRadius, CombatPreferredMaxRadius, false);
-	if (!FallbackPlan.IsValid())
-	{
-		CombatMoveDetailDebug = TEXT("EscapeFallbackInvalid");
-		NextCombatRepositionTime = CurrentTime + 0.15f;
-		return false;
-	}
-
-	if (ExecuteCombatMovePlan(FallbackPlan, CurrentTime, &RangedEscapeFallbackMoveRequestId))
-	{
-		bHasRangedEscapeFallbackMoveRequest = true;
-		CombatMoveDetailDebug = FString::Printf(TEXT("EscapeFallback%s"), GetCombatMoveDebugName(FallbackPlan.MoveType));
-		return true;
-	}
-
-	CombatMoveDetailDebug = TEXT("EscapeFallbackFail");
-	return false;
-}
-
-void AEnemy::ClearRangedEscape()
-{
-	const bool bWasEscaping = CombatSubState == EEnemyCombatSubState::RangedEscape
-		|| bHasRangedEscapeMoveRequest || bHasRangedEscapeFallbackMoveRequest;
-	bHasRangedEscapeMoveRequest = false;
-	bHasRangedEscapeFallbackMoveRequest = false;
-	bRangedEscapeNavigationFailed = false;
-	RangedEscapeMoveRequestId = FAIRequestID();
-	RangedEscapeFallbackMoveRequestId = FAIRequestID();
-	RangedEscapeGoalLocation = FVector::ZeroVector;
-
-	if (bWasEscaping)
-	{
-		bRepositionInProgress = false;
-		NextCombatRepositionTime = 0.f;
-		ClearCombatRetreatSpeedEase();
-	}
-}
-
 void AEnemy::StartCombatRetreatSpeedEase(const FVector& GoalLocation)
 {
 	RetreatSpeedEaseGoalLocation = GoalLocation;
@@ -2655,8 +2610,8 @@ void AEnemy::UpdateCombatRetreatSpeedEase()
 	const float RemainingDistance = FVector::Dist2D(GetActorLocation(), RetreatSpeedEaseGoalLocation);
 	const float Progress = 1.f - FMath::Clamp(RemainingDistance / RetreatSpeedEaseTotalDistance, 0.f, 1.f);
 	const float SlowAlpha = FMath::Square(Progress);
-	const float MinSpeed = PatrolSpeed * CombatRetreatMinSpeedRatio;
-	GetCharacterMovement()->MaxWalkSpeed = FMath::Lerp(PatrolSpeed, MinSpeed, SlowAlpha);
+	const float MinSpeed = CombatManeuverSpeed * CombatRetreatMinSpeedRatio;
+	GetCharacterMovement()->MaxWalkSpeed = FMath::Lerp(CombatManeuverSpeed, MinSpeed, SlowAlpha);
 }
 
 void AEnemy::ClearCombatRetreatSpeedEase()
@@ -2673,56 +2628,12 @@ void AEnemy::OnRepositionMoveCompleted(FAIRequestID RequestID, EPathFollowingRes
 		return;
 	}
 
-	if (bHasRangedEscapeMoveRequest && RequestID.IsEquivalent(RangedEscapeMoveRequestId))
-	{
-		bHasRangedEscapeMoveRequest = false;
-		bRepositionInProgress = false;
-		ClearCombatRetreatSpeedEase();
-		const float GoalTolerance = FMath::Max(CombatRepositionAcceptanceRadius + 10.f, 25.f);
-		const bool bReachedRequestedGoal = FVector::Dist2D(GetActorLocation(), RangedEscapeGoalLocation) <= GoalTolerance;
-		if (Result != EPathFollowingResult::Success || !bReachedRequestedGoal)
-		{
-			bRangedEscapeNavigationFailed = true;
-			CombatMoveDetailDebug = Result == EPathFollowingResult::Success
-				? TEXT("EscapeNavPartial")
-				: TEXT("EscapeNavFailed");
-		}
-		else
-		{
-			CombatMoveDetailDebug = TEXT("EscapeNavReached");
-		}
-		NextCombatRepositionTime = GetWorld() ? GetWorld()->GetTimeSeconds() + 0.15f : 0.f;
-		return;
-	}
-
-	if (bHasRangedEscapeFallbackMoveRequest && RequestID.IsEquivalent(RangedEscapeFallbackMoveRequestId))
-	{
-		bHasRangedEscapeFallbackMoveRequest = false;
-		bRepositionInProgress = false;
-		ClearCombatRetreatSpeedEase();
-		const float CurrentTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
-		if (Result == EPathFollowingResult::Success)
-		{
-			// 后撤已完成后再按普通重定位节奏尝试下一段固定 Escape，避免每帧重发导航。
-			bRangedEscapeNavigationFailed = false;
-			CombatMoveDetailDebug = TEXT("EscapeFallbackReached");
-			NextCombatRepositionTime = CurrentTime + FMath::Max(0.15f, CombatRepositionIntervalMin);
-		}
-		else
-		{
-			CombatMoveDetailDebug = TEXT("EscapeFallbackFailed");
-			NextCombatRepositionTime = CurrentTime + 0.15f;
-		}
-		return;
-	}
-
-	if (CombatSubState == EEnemyCombatSubState::RangedEscape)
+	if (HandleArchetypeMoveCompleted(RequestID, Result))
 	{
 		return;
 	}
 
-	bRepositionInProgress = false;
-	ClearCombatRetreatSpeedEase();
+	FinishCombatReposition();
 }
 
 // ==================== 导航/工具 ====================

@@ -132,6 +132,78 @@ protected:
 	virtual void HandleAttackReadyPositioning(float DistanceToTarget, const FVector& ToTarget);
 	virtual void HandleCooldownPositioning(float DeltaTime, float DistanceToTarget, const FVector& ToTarget);
 
+	/* 敌人原型战术扩展。默认实现为空，避免派生类复制整个 Combat HFSM。 */
+	enum class EEnemyCombatMoveType : uint8
+	{
+		None,
+		Retreat,
+		BackDiag,
+		Strafe,
+		Press
+	};
+
+	struct FEnemyCombatMovePlan
+	{
+		EEnemyCombatMoveType MoveType = EEnemyCombatMoveType::None;
+		FVector GoalLocation = FVector::ZeroVector;
+		float MoveSpeed = 0.f;
+		bool bUseRetreatSpeedEase = false;
+		float RetryDelay = 0.15f;
+
+		bool IsValid() const
+		{
+			return MoveType != EEnemyCombatMoveType::None;
+		}
+	};
+
+	virtual bool HandleArchetypeCombatPriority(float DeltaTime, float DistanceToTarget, const FVector& ToTarget);
+	virtual void TickArchetypeAttack(float DeltaTime);
+	virtual bool HandleArchetypeAttackCooldownEnded();
+	virtual bool HandleArchetypeMoveCompleted(FAIRequestID RequestID, EPathFollowingResult::Type Result);
+	virtual void ClearArchetypeCombatState();
+	virtual void ValidateArchetypeCombatConfig() const;
+	virtual FString GetArchetypeCombatDebugText() const;
+	virtual void DrawArchetypeCombatDebug() const;
+
+	/* 仅供原型构造函数写入 CDO 基准值，不暴露为 Blueprint 运行时接口。 */
+	void SetArchetypeMovementDefaults(float InPatrolSpeed, float InCombatManeuverSpeed, float InChaseSpeed);
+	void SetArchetypeCombatSpacingDefaults(float InTooCloseRadius, float InAttackMaxRadius,
+		float InPreferredMinRadius, float InPreferredMaxRadius, float InPressMargin, float InRetreatMinSpeedRatio);
+
+	FORCEINLINE AActor* GetCombatTarget() const { return ChasingTarget; }
+	FORCEINLINE float GetCombatPreferredMinRadius() const { return CombatPreferredMinRadius; }
+	FORCEINLINE float GetCombatPreferredMaxRadius() const { return CombatPreferredMaxRadius; }
+	FORCEINLINE float GetCombatRepositionAcceptanceRadius() const { return CombatRepositionAcceptanceRadius; }
+	FORCEINLINE float GetCombatRepositionIntervalMin() const { return CombatRepositionIntervalMin; }
+	FORCEINLINE float GetCombatManeuverSpeed() const { return CombatManeuverSpeed; }
+	FORCEINLINE float GetChaseSpeed() const { return ChaseSpeed; }
+	FORCEINLINE bool IsCombatRepositionReady(float CurrentTime) const
+	{
+		return !bRepositionInProgress && CurrentTime >= NextCombatRepositionTime;
+	}
+
+	bool IsPureProjectileAttackProfile() const;
+	bool HasUnreleasedActiveProjectileAttack() const;
+	bool HasClearActiveProjectileLineOfSight() const;
+	bool CancelUnreleasedActiveProjectileAttack(float BlendOutTime, const TCHAR* Reason);
+	void ValidatePureProjectileTacticalConfig(float EscapeEnterRadius, float EscapeExitRadius) const;
+	void ClearPendingAttack();
+
+	FEnemyCombatMovePlan BuildCombatMovePlanForRange(float DistanceToTarget, const FVector& ToTarget,
+		float TooCloseRadius, float PreferredMinRadius, float PreferredMaxRadius, bool bForceStrafe) const;
+	static const TCHAR* GetCombatMoveDebugName(EEnemyCombatMoveType MoveType);
+	bool ExecuteCombatMovePlan(const FEnemyCombatMovePlan& MovePlan, float CurrentTime,
+		FAIRequestID* OutMoveRequestId = nullptr);
+	bool MoveToCombatLocation(const FVector& Location, FAIRequestID* OutMoveRequestId = nullptr);
+	void ResetCombatReposition();
+	void FinishCombatReposition();
+	void SetCombatRepositionDelay(float Delay);
+	void StartCombatRetreatSpeedEase(const FVector& GoalLocation);
+	void UpdateCombatRetreatSpeedEase();
+	void ClearCombatRetreatSpeedEase();
+	void TickCombatFacing(float DeltaTime, const FVector& ToTarget);
+	void SetCombatMoveDebugDetail(const FString& Detail);
+
 	/* 导航/工具 */
 	void StopEnemyMovementIfPossible(); // 收敛：AI 停止移动
 	void MoveToTarget(const AActor* Target); // 导航移动到目标
@@ -211,15 +283,15 @@ private:
 	// --- 战斗拉扯参数 ---
 	// 距离关系提醒：
 	// 近战常规环：CombatTooCloseRadius < CombatAttackMaxRadius <= CombatPreferredMinRadius <= CombatPreferredMaxRadius < CombatingRadius < ChasingRadius。
-	// 纯 Projectile 安全环：RangedEscapeEnterRadius <= CombatTooCloseRadius < CombatPreferredMinRadius <= RangedEscapeExitRadius <= CombatPreferredMaxRadius <= CombatAttackMaxRadius < CombatingRadius < ChasingRadius。
+	// 纯 Projectile 安全环由 ARangedEnemy 在其作者化距离中额外保证，不影响近战敌人的常规环。
 	// CombatAttackMaxRadius 控制可出手距离；CombatPreferredMin/Max 控制冷却期想保持的距离环或纯远程安全横移区。
 	// CombatPressMargin 必须大于 CombatRepositionAcceptanceRadius，且不超过 Preferred 距离环宽度，避免前压目标落在安全区外。
-	UPROPERTY(EditAnywhere, Category = "Combat|Spacing", meta = (ClampMin = "0.0", ToolTip = "普通后撤阈值。纯 Projectile 配置中必须不小于 RangedEscapeEnterRadius，避免 Escape 与普通 Retreat 区间重叠。"))
+	UPROPERTY(EditAnywhere, Category = "Combat|Spacing", meta = (ClampMin = "0.0", ToolTip = "普通后撤阈值。纯远程派生原型会额外验证它与 Escape 进入半径不重叠。"))
 	float CombatTooCloseRadius = 90.f;
 	UPROPERTY(EditAnywhere, Category = "Combat|Spacing", meta = (ClampMin = "0.0", ToolTip = "可出手的最大距离。贴近实际武器射程即可，不要为了增大后撤距离而调高此值。"))
-	float CombatAttackMaxRadius = 170.f;
+	float CombatAttackMaxRadius = 220.f;
 	UPROPERTY(EditAnywhere, Category = "Combat|Spacing", meta = (ClampMin = "0.0", ToolTip = "冷却期拉扯距离环内圈。近战通常 >= CombatAttackMaxRadius；纯 Projectile 配置可作为安全横移区内圈，必须不小于 CombatTooCloseRadius。"))
-	float CombatPreferredMinRadius = 210.f;
+	float CombatPreferredMinRadius = 240.f;
 	UPROPERTY(EditAnywhere, Category = "Combat|Spacing", meta = (ClampMin = "0.0", ToolTip = "冷却期拉扯距离环外圈。必须 >= CombatPreferredMinRadius 且 < CombatingRadius；纯 Projectile 安全横移区不应超过实际最大出手距离。"))
 	float CombatPreferredMaxRadius = 270.f;
 	UPROPERTY(EditAnywhere, Category = "Combat|Spacing", meta = (ClampMin = "0.0", ClampMax = "90.0", ToolTip = "冷却期在拉扯距离环内的横移角度（绕目标旋转）。"))
@@ -232,24 +304,18 @@ private:
 	float CombatRepositionIntervalMax = 1.4f;
 	UPROPERTY(EditAnywhere, Category = "Combat|Spacing", meta = (ClampMin = "0.0", ToolTip = "前压时从 PreferredMaxRadius 扣减的余量。必须大于 CombatRepositionAcceptanceRadius，小于 CombatAttackMaxRadius / CombatPreferredMaxRadius，且不超过 Preferred 距离环宽度，确保前压目标仍在安全区内。"))
 	float CombatPressMargin = 25.f;
-	UPROPERTY(EditAnywhere, Category = "Combat|Spacing", meta = (ClampMin = "0.1", ClampMax = "1.0", ToolTip = "后撤/斜后撤接近目标点时的最低速度倍率。1.0 表示始终保持 PatrolSpeed，不做末段降速。"))
+	UPROPERTY(EditAnywhere, Category = "Combat|Spacing", meta = (ClampMin = "0.1", ClampMax = "1.0", ToolTip = "后撤/斜后撤接近目标点时的最低速度倍率。1.0 表示始终保持 CombatManeuverSpeed，不做末段降速。"))
 	float CombatRetreatMinSpeedRatio = 0.55f;
 
-	UPROPERTY(EditAnywhere, Category = "Combat|Spacing|Ranged Escape", meta = (ClampMin = "0.0", ToolTip = "纯远程攻击配置进入高速逃离的距离阈值（cm）。距离必须严格小于该值，且不应大于 CombatTooCloseRadius。"))
-	float RangedEscapeEnterRadius = 300.f;
-
-	UPROPERTY(EditAnywhere, Category = "Combat|Spacing|Ranged Escape", meta = (ClampMin = "0.0", ToolTip = "纯远程攻击配置退出高速逃离的距离阈值（cm）。距离达到或超过该值才退出；应落在 CombatPreferredMinRadius 到 CombatPreferredMaxRadius 的安全区间内。"))
-	float RangedEscapeExitRadius = 650.f;
-
-	UPROPERTY(EditAnywhere, Category = "Combat|Spacing|Ranged Escape", meta = (ClampMin = "0.0", ToolTip = "纯远程攻击配置高速逃离时的移动速度（cm/s）。"))
-	float RangedEscapeSpeed = 330.f;
-
 	// 巡逻移动速度
-	UPROPERTY(EditAnywhere, Category = "Combat", meta = (ToolTip = "巡逻状态的移动速度（cm/s）。"))
-	float PatrolSpeed = 150.f;
+	UPROPERTY(EditAnywhere, Category = "Combat", meta = (ToolTip = "非战斗 Patrol / Search 移动速度（cm/s）。"))
+	float PatrolSpeed = 200.f;
+
+	UPROPERTY(EditAnywhere, Category = "Combat", meta = (ToolTip = "普通战斗机动速度（cm/s），用于 Retreat、BackDiag、Strafe 与 LOS 重定位。"))
+	float CombatManeuverSpeed = 290.f;
 
 	// 追击移动速度
-	UPROPERTY(EditAnywhere, Category = "Combat", meta = (ToolTip = "追击状态的移动速度（cm/s）。"))
+	UPROPERTY(EditAnywhere, Category = "Combat", meta = (ToolTip = "高速 Chase / Press 移动速度（cm/s）；ARangedEnemy 的 Escape 也使用此值。"))
 	float ChaseSpeed = 330.f;
 
 	// 死亡后尸体销毁时间（秒）
@@ -328,41 +394,10 @@ private:
 	UPROPERTY(EditAnywhere, Category = "Combat", meta = (AllowPrivateAccess = "true", ToolTip = "追丢搜寻时的导航到达判定半径（cm）。"))
 	float SearchAcceptanceRadius = 50.f;
 
-	/* 战斗拉扯 */
-	enum class EEnemyCombatMoveType : uint8
-	{
-		None,
-		Retreat,
-		BackDiag,
-		Strafe,
-		Press,
-		Escape
-	};
-
-	struct FEnemyCombatMovePlan
-	{
-		EEnemyCombatMoveType MoveType = EEnemyCombatMoveType::None;
-		FVector GoalLocation = FVector::ZeroVector;
-		float MoveSpeed = 0.f;
-		bool bUseRetreatSpeedEase = false;
-		float RetryDelay = 0.15f;
-
-		bool IsValid() const
-		{
-			return MoveType != EEnemyCombatMoveType::None;
-		}
-	};
-
+	/* 通用战斗拉扯 */
 	void UpdateCombatMovement(float DeltaTime, float DistanceToTarget, const FVector& ToTarget);
 	FEnemyCombatMovePlan BuildCombatMovePlan(float DistanceToTarget, const FVector& ToTarget) const;
-	FEnemyCombatMovePlan BuildCombatMovePlanForRange(float DistanceToTarget, const FVector& ToTarget,
-		float TooCloseRadius, float PreferredMinRadius, float PreferredMaxRadius, bool bForceStrafe) const;
-	static const TCHAR* GetCombatMoveDebugName(EEnemyCombatMoveType MoveType);
-	bool ExecuteCombatMovePlan(const FEnemyCombatMovePlan& MovePlan, float CurrentTime,
-		FAIRequestID* OutMoveRequestId = nullptr);
-	bool MoveToCombatLocation(const FVector& Location, FAIRequestID* OutMoveRequestId = nullptr);
 	bool MoveToCombatTarget(float AcceptanceRadiusOverride = -1.f); // 攻击 ready 时动态追踪目标 Actor
-	void ResetCombatReposition();
 
 	// 攻击协调：检查同目标附近队友是否正在攻击，返回建议等待时间
 	bool IsAllyAttackingNearby(float& OutSuggestedWaitTime) const;
@@ -371,9 +406,6 @@ private:
 	mutable float CachedAllySuggestedWaitTime = 0.f;
 	// 只用来做目标地址比较，不解引用，避免缓存目标生命周期耦合。
 	mutable const AActor* CachedAllyCheckTarget = nullptr;
-	void StartCombatRetreatSpeedEase(const FVector& GoalLocation);
-	void UpdateCombatRetreatSpeedEase();
-	void ClearCombatRetreatSpeedEase();
 	UFUNCTION()
 	void OnRepositionMoveCompleted(FAIRequestID RequestID, EPathFollowingResult::Type Result);
 	float NextCombatRepositionTime = 0.f;
@@ -381,12 +413,6 @@ private:
 	bool bRetreatSpeedEaseActive = false;
 	FVector RetreatSpeedEaseGoalLocation = FVector::ZeroVector;
 	float RetreatSpeedEaseTotalDistance = 0.f;
-	FAIRequestID RangedEscapeMoveRequestId;
-	FAIRequestID RangedEscapeFallbackMoveRequestId;
-	FVector RangedEscapeGoalLocation = FVector::ZeroVector;
-	bool bHasRangedEscapeMoveRequest = false;
-	bool bHasRangedEscapeFallbackMoveRequest = false;
-	bool bRangedEscapeNavigationFailed = false;
 
 	enum class EEnemyCombatSubState : uint8
 	{
@@ -394,8 +420,7 @@ private:
 		Orienting,
 		AttackReadyPressing,
 		CoordinatedWaiting,
-		CooldownSpacing,
-		RangedEscape
+		CooldownSpacing
 	};
 
 	EEnemyCombatSubState CombatSubState = EEnemyCombatSubState::None;
@@ -459,7 +484,6 @@ private:
 	void ValidateEnemyAttackConfig() const;
 	void WarnNoEnemyAttackCandidate(float DistanceToTarget);
 	bool HasPendingAttack() const;
-	void ClearPendingAttack();
 	void RollPendingAttackIntent();
 	/**
 	 * 尝试执行已抽中的 PendingAttack。
@@ -501,15 +525,6 @@ private:
 
 	void SetCombatSubState(EEnemyCombatSubState NewSubState, float AllySuggestedWaitTime = 0.f);
 	EEnemyCombatSubState EvaluateCombatSubState(float DistanceToTarget, float ForwardDot, float& OutAllySuggestedWaitTime) const;
-	void TickCombatFacing(float DeltaTime, const FVector& ToTarget);
-	bool IsPureProjectileAttackProfile() const;
-	bool HasValidRangedEscapeConfig() const;
-	bool HandleRangedEscape(float DeltaTime, float DistanceToTarget, const FVector& ToTarget);
-	FVector BuildRangedEscapeGoal(const FVector& ToTarget) const;
-	void TickRangedEscapeFacing(float DeltaTime);
-	bool TryStartRangedEscapeNavigation(float CurrentTime, const FVector& EscapeGoal);
-	bool TryStartRangedEscapeFallback(float CurrentTime, float DistanceToTarget, const FVector& ToTarget);
-	void ClearRangedEscape();
 	void TickActiveProjectileAttackFacing(float DeltaTime);
 	void TickCombatSubState(float DeltaTime, EEnemyCombatSubState SubState, float DistanceToTarget, const FVector& ToTarget, float AllySuggestedWaitTime);
 	FString GetCombatSubStateDebugText() const;
