@@ -67,6 +67,9 @@ struct FEnemyAttackEntry
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Projectile", meta = (EditCondition = "DeliveryType == EEnemyAttackDeliveryType::Projectile", ToolTip = "发射 Socket。None 时使用敌人 GetActorEyesViewPoint()；正式射手应在 D-B 配置真实 Socket。"))
 	FName ProjectileSpawnSocketName = NAME_None;
 
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Projectile", meta = (EditCondition = "DeliveryType == EEnemyAttackDeliveryType::Projectile", ClampMin = "-500.0", ClampMax = "500.0", ToolTip = "相对目标眼点的垂直瞄准偏移（cm）。负值向胸部/躯干下移；该值在攻击开始时快照，LOS 与实际发射共用同一目标点。"))
+	float ProjectileTargetHeightOffset = 0.f;
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Motion Warping", meta = (ToolTip = "是否为该招式启用 Motion Warping。v1 只建议用于跳劈/跃进类 root motion 攻击。"))
 	bool bUseMotionWarping = false;
 

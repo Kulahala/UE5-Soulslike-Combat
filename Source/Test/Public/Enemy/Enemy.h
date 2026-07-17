@@ -22,6 +22,8 @@ class AEnemy;
 class AEncounterController;
 class AController;
 class UAIPerceptionComponent;
+class UAISenseConfig_Hearing;
+class UAISenseConfig_Sight;
 class AAIController;
 class UHealthBarComponent;
 class UWidgetComponent;
@@ -155,6 +157,12 @@ private:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true", ToolTip = "AI 感知组件，负责视觉/听觉检测。"))
 	UAIPerceptionComponent* AIPerceptionComp;
 
+	UPROPERTY()
+	UAISenseConfig_Sight* SightConfig;
+
+	UPROPERTY()
+	UAISenseConfig_Hearing* HearingConfig;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true", ToolTip = "头顶血条组件。"))
 	UHealthBarComponent* HealthBarWidgetComp;
 
@@ -261,6 +269,9 @@ private:
 	// 选择武器类，BeginPlay自动生成
 	UPROPERTY(EditAnywhere, Category = "Combat", meta = (ToolTip = "敌人使用的武器类，BeginPlay 时自动生成并装备。"))
 	TSubclassOf<AWeapon> WeaponClass;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Combat", meta = (AllowPrivateAccess = "true", ToolTip = "运行时生成武器附着到角色 Skeletal Mesh 的 Socket。默认 RightHandSocket 保持现有近战敌人行为；远程敌人应填写动画实际握武器手上的 Socket。"))
+	FName WeaponAttachSocketName = FName(TEXT("RightHandSocket"));
 
 	/* 巡逻 */
 	UPROPERTY()
@@ -384,6 +395,7 @@ private:
 		TSubclassOf<ACombatProjectile> ProjectileClass;
 		FProjectileDeliveryConfig DeliveryConfig;
 		FName SpawnSocketName = NAME_None;
+		float TargetHeightOffset = 0.f;
 		float MinDistance = 0.f;
 		float MaxDistance = 0.f;
 		float MinCooldown = 0.f;
@@ -406,6 +418,7 @@ private:
 	bool BuildDebugProbeProjectileSnapshot(FActiveProjectileAttack& OutSnapshot) const;
 #endif
 	bool ResolveProjectileSpawnLocation(const FActiveProjectileAttack& Snapshot, FVector& OutSpawnLocation) const;
+	bool ResolveProjectileTargetLocation(const FActiveProjectileAttack& Snapshot, FVector& OutTargetLocation) const;
 	bool HasClearProjectileLineOfSight(const FActiveProjectileAttack& Snapshot, FVector& OutSpawnLocation,
 		FVector& OutTargetLocation) const;
 	bool IsProjectileAttackWithinReleaseRange(const FActiveProjectileAttack& Snapshot, float DistanceToTarget) const;
@@ -472,8 +485,10 @@ private:
 	void SetCombatSubState(EEnemyCombatSubState NewSubState, float AllySuggestedWaitTime = 0.f);
 	EEnemyCombatSubState EvaluateCombatSubState(float DistanceToTarget, float ForwardDot, float& OutAllySuggestedWaitTime) const;
 	void TickCombatFacing(float DeltaTime, const FVector& ToTarget);
+	void TickActiveProjectileAttackFacing(float DeltaTime);
 	void TickCombatSubState(float DeltaTime, EEnemyCombatSubState SubState, float DistanceToTarget, const FVector& ToTarget, float AllySuggestedWaitTime);
 	FString GetCombatSubStateDebugText() const;
+	void ApplyAuthoredPerceptionConfig();
 
 	FString CombatMoveDetailDebug;
 

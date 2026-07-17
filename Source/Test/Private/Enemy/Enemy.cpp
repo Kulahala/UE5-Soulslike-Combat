@@ -68,7 +68,7 @@ AEnemy::AEnemy()
 	MotionWarpingComponent = CreateDefaultSubobject<UMotionWarpingComponent>(TEXT("MotionWarpingComponent"));
 
 	// 视觉配置
-	UAISenseConfig_Sight* SightConfig = CreateDefaultSubobject<UAISenseConfig_Sight>(TEXT("SightConfig"));
+	SightConfig = CreateDefaultSubobject<UAISenseConfig_Sight>(TEXT("SightConfig"));
 	SightConfig->SightRadius = ChasingRadius;
 	SightConfig->LoseSightRadius = ChasingRadius + 200.f;
 	SightConfig->PeripheralVisionAngleDegrees = VisionAngleDegrees;
@@ -79,7 +79,7 @@ AEnemy::AEnemy()
 	AIPerceptionComp->SetDominantSense(SightConfig->GetSenseImplementation());
 
 	// 听觉配置
-	UAISenseConfig_Hearing* HearingConfig = CreateDefaultSubobject<UAISenseConfig_Hearing>(TEXT("HearingConfig"));
+	HearingConfig = CreateDefaultSubobject<UAISenseConfig_Hearing>(TEXT("HearingConfig"));
 	HearingConfig->HearingRange = HearingRange;
 	HearingConfig->DetectionByAffiliation.bDetectEnemies = true;
 	HearingConfig->DetectionByAffiliation.bDetectNeutrals = true;
@@ -127,7 +127,14 @@ void AEnemy::WeaponInit()
 			return;
 		}
 
-		Weapon->Equip(GetMesh(), FName("RightHandSocket"), this, this);
+		if (!Weapon->Equip(GetMesh(), WeaponAttachSocketName, this, this))
+		{
+			UE_LOG(LogTemp, Warning, TEXT("%s failed to equip weapon '%s' to configured socket '%s'."),
+				*GetName(), *GetNameSafe(Weapon), *WeaponAttachSocketName.ToString());
+			Weapon->Destroy();
+			return;
+		}
+
 		EquippedWeapon = Weapon;
 	}
 }
@@ -136,6 +143,7 @@ void AEnemy::BeginPlay()
 {
 	Super::BeginPlay();
 	Tags.Add(FName("Enemy"));
+	ApplyAuthoredPerceptionConfig();
 
 	// 韧性初始化
 	CurrentPoise = MaxPoise;
@@ -185,9 +193,32 @@ void AEnemy::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
 {
 	Super::PostEditChangeProperty(PropertyChangedEvent);
 
+	ApplyAuthoredPerceptionConfig();
 	ValidateEnemyAttackConfig();
 }
 #endif
+
+void AEnemy::ApplyAuthoredPerceptionConfig()
+{
+	if (!AIPerceptionComp)
+	{
+		return;
+	}
+
+	if (SightConfig)
+	{
+		SightConfig->SightRadius = ChasingRadius;
+		SightConfig->LoseSightRadius = ChasingRadius + 200.f;
+		SightConfig->PeripheralVisionAngleDegrees = VisionAngleDegrees;
+		AIPerceptionComp->ConfigureSense(*SightConfig);
+	}
+
+	if (HearingConfig)
+	{
+		HearingConfig->HearingRange = HearingRange;
+		AIPerceptionComp->ConfigureSense(*HearingConfig);
+	}
+}
 
 void AEnemy::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
@@ -714,6 +745,7 @@ bool AEnemy::BuildProjectileAttackSnapshot(const FEnemyAttackEntry& Entry,
 	OutSnapshot.DeliveryConfig.bCanBeParried = Entry.ProjectileDeliveryConfig.bCanBeParried
 		&& !Entry.bCannotBeParried;
 	OutSnapshot.SpawnSocketName = Entry.ProjectileSpawnSocketName;
+	OutSnapshot.TargetHeightOffset = Entry.ProjectileTargetHeightOffset;
 	OutSnapshot.MinDistance = Entry.MinDistance;
 	OutSnapshot.MaxDistance = EffectiveMaxDistance;
 	OutSnapshot.MinCooldown = Entry.MinCooldown;
@@ -766,16 +798,27 @@ bool AEnemy::ResolveProjectileSpawnLocation(const FActiveProjectileAttack& Snaps
 	return true;
 }
 
-bool AEnemy::HasClearProjectileLineOfSight(const FActiveProjectileAttack& Snapshot, FVector& OutSpawnLocation,
-	FVector& OutTargetLocation) const
+bool AEnemy::ResolveProjectileTargetLocation(const FActiveProjectileAttack& Snapshot, FVector& OutTargetLocation) const
 {
-	if (!GetWorld() || !IsValidCombatTarget(ChasingTarget) || !ResolveProjectileSpawnLocation(Snapshot, OutSpawnLocation))
+	if (!IsValidCombatTarget(ChasingTarget))
 	{
 		return false;
 	}
 
 	FRotator TargetEyeRotation;
 	ChasingTarget->GetActorEyesViewPoint(OutTargetLocation, TargetEyeRotation);
+	OutTargetLocation.Z += Snapshot.TargetHeightOffset;
+	return true;
+}
+
+bool AEnemy::HasClearProjectileLineOfSight(const FActiveProjectileAttack& Snapshot, FVector& OutSpawnLocation,
+	FVector& OutTargetLocation) const
+{
+	if (!GetWorld() || !ResolveProjectileSpawnLocation(Snapshot, OutSpawnLocation)
+		|| !ResolveProjectileTargetLocation(Snapshot, OutTargetLocation))
+	{
+		return false;
+	}
 
 	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(EnemyProjectileLineOfSight), false, this);
 	QueryParams.AddIgnoredActor(this);
@@ -1416,6 +1459,20 @@ void AEnemy::TickCombatFacing(float DeltaTime, const FVector& ToTarget)
 	SetActorRotation(FMath::RInterpTo(GetActorRotation(), TargetRot, DeltaTime, CombatRotationSpeed));
 }
 
+void AEnemy::TickActiveProjectileAttackFacing(float DeltaTime)
+{
+	if (!ActiveProjectileAttack.IsValid() || !IsValidCombatTarget(ChasingTarget))
+	{
+		return;
+	}
+
+	const FVector ToTarget = (ChasingTarget->GetActorLocation() - GetActorLocation()).GetSafeNormal2D();
+	if (!ToTarget.IsNearlyZero())
+	{
+		TickCombatFacing(DeltaTime, ToTarget);
+	}
+}
+
 void AEnemy::TickCombatSubState(float DeltaTime, EEnemyCombatSubState SubState, float DistanceToTarget, const FVector& ToTarget, float AllySuggestedWaitTime)
 {
 	switch (SubState)
@@ -1627,8 +1684,16 @@ void AEnemy::Tick(float DeltaTime)
 		return;
 	}
 
-	if (EnemyState == EEnemyState::EES_Dead || EnemyState == EEnemyState::EES_Stunned || EnemyState ==
-		EEnemyState::EES_Attacking || EnemyState == EEnemyState::EES_StanceBreak)
+	if (EnemyState == EEnemyState::EES_Attacking)
+	{
+		// 只有远程攻击在蒙太奇期间持续转向；近战维持既有攻击锁定朝向。
+		TickActiveProjectileAttackFacing(DeltaTime);
+		DrawDebugInfo();
+		return;
+	}
+
+	if (EnemyState == EEnemyState::EES_Dead || EnemyState == EEnemyState::EES_Stunned
+		|| EnemyState == EEnemyState::EES_StanceBreak)
 	{
 		DrawDebugInfo();
 		return;

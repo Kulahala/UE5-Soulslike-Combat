@@ -124,6 +124,9 @@ Completed roadmap work is retained here as a compact, durable record. Do not ret
 - [x] **TODO-04D-B0: Shared Character Animation Data v1**
   Delivered Skeleton-independent `UBaseCharacterAnimInstance` for root AnimBPs owned by `ABaseCharacter`. It reads authoritative `GroundSpeed`/`Direction` plus CharacterMovement falling and vertical-speed data; `USlashAnimInstance` now contains only player weapon/block/stun state. `ABP_Paladin` and `ABP_ErikaArcher` use the native base, while DarkKnight's linked MainState/IK graphs keep their explicit Exposable Properties inputs. No enemy state, death, hit, AI, or Skeleton-specific asset state was duplicated. User compilation and PIE validation covered player movement/jump, sword/shield combat and hit/death, Paladin locomotion/hit/death, and Erika locomotion preview. Normal and adversarial review found no B0 blocker.
 
+- [x] **TODO-04D-B: Erika Archer Authoring And TestMap v1**
+  Delivered the first authored archer on `SK_ErikaArcher`: dedicated locomotion, a one-shot `Draw -> AimHold -> Release` Montage, state-guarded projectile Release, hit/death presentation, left-hand bow attachment, release socket, visible arrow presentation, and one deliberate `TestMap` placement. `AEnemy` remains the sole enemy base: the Projectile entry's immutable snapshot now includes a shared LOS/launch chest-height target offset and permits montage-period facing only for active Projectile attacks, while Melee/Paladin behavior remains unchanged. Reciprocal Owner/Instigator movement ignores prevent a firing actor from blocking itself on its own arrow without relaxing normal projectile collisions. User compilation and PIE validation covered visual attachment/release, range/LOS/retreat, shield blocking, interruption/death cleanup, self-arrow movement, chest aiming, and Paladin regression; normal and adversarial review found no D-B blocker.
+
 ## TODO Queue
 
 These TODOs are accepted future work, not permission to start implementation immediately. A queued item must be small enough to produce one independently verifiable result. Queue position follows prerequisites, validation dependencies, and the player-facing loop rather than numeric ID or append order. When an item becomes the next stage, move only that item out of this queue and write its complete implementation plan in `plan.md` first. On completion, record stable facts in `ARCHITECTURE.md` and move the compact result into `Done Milestones`; do not turn this roadmap into a stage log.
@@ -132,8 +135,8 @@ These TODOs are accepted future work, not permission to start implementation imm
 
 ### Ranged Combat
 
-- [ ] **TODO-04D-B: Erika Archer Authoring And TestMap v1**
-  Prerequisite: `TODO-04D-A` and `TODO-04D-B0` are validated. Author the Erika Archer presentation on her own `SK_ErikaArcher`: AnimBP/locomotion, a `Draw -> AimLoop -> Release` attack Montage, state-guarded release Notify, hit/death presentation, Enemy Blueprint, sockets, and one deliberate TestMap placement. Confirm a visible bow source before this stage; do not fake final presentation with an invisible or unrelated weapon asset.
+- [ ] **TODO-04D-C: Archer Spacing And Escape v1**
+  Prerequisite: `TODO-04D-B` has passed its authored Erika validation. Add a Projectile-only local Combat HFSM Escape substate inside `AEnemy`, not a ranged base class or shared outer `EEnemyState`. At very close range, a ranged attacker turns toward its navigation escape direction, temporarily suppresses attack/Release, and exits only after a higher hysteresis radius; navigation failure falls back to the existing diagonal retreat. Paladin and all Melee entries retain their current combat-facing and close-range behavior. Start with `EscapeEnterRadius=300 cm` and `EscapeExitRadius=650 cm`, then tune only after observing real Erika pressure in PIE.
 
 - [ ] **TODO-04C: Lock Target Switching v1**
   Prerequisite: the first authored archer has passed `TODO-04D-B`, so the new target-selection behavior is validated against actual mixed melee/ranged pressure. While locked on, use horizontal mouse movement on the existing `LookAction` to select the nearest valid target on the requested screen side. Include a configurable swipe threshold, re-arm threshold, and cooldown; preserve the current target when no eligible target exists. This stage changes targeting only, not projectile behavior.
@@ -232,6 +235,12 @@ Adoption conditions: 在加入第二张 gameplay map 前，或在同一存档可
 Recommendation: keep the existing `AEnemy` local HFSM for melee, archer, and first caster behavior. Use attack/profile data to vary range, line-of-sight, retreat distance, attack delivery, cooldown, and presentation before splitting C++ classes.
 
 Adoption conditions: introduce enemy profile DataAssets when three or more enemy variants repeat the same AI, stat, reward, sensing, and attack setup with only configuration differences. Consider StateTree or Behavior Tree only when the local HFSM becomes unreadable across multiple enemy families, repeated tactical branches dominate `AEnemy`, or future enemies need multi-step plans that cannot remain clear in the existing flow. Introduce a Boss-specific class or component only when a Boss needs persistent phase state, encounter-owned UI/objectives, arena rules, or lifecycle logic outside normal enemies.
+
+### Enemy Vertical Aim Offset
+
+Recommendation: retain the D-B authored one-shot `Draw -> AimHold -> Release` Montage as the initial archer aim presentation; do not add `Aim Offset 1D` merely because a bow exists. The current projectile still uses its authoritative Socket-to-target launch direction even without a matching upper-body pitch pose.
+
+Adoption conditions: add a focused Mesh Space additive `Aim Offset 1D` stage only after D-B proves a visible vertical-aim mismatch on stairs, slopes, elevated targets, or a long aim hold. That stage must use a real held-bow Center pose rather than the Skeleton reference/idle pose, add authored Up/Center/Down poses, derive one transient `AimPitch` snapshot from the same launch direction used by `AEnemy`, and apply it only to the archer's ranged upper body. Keep `UBaseCharacterAnimInstance` generic; do not duplicate target, AI, hit, or death state into the shared base.
 
 ### Combo Montage Granularity
 

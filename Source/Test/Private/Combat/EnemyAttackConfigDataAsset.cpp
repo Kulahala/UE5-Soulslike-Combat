@@ -139,6 +139,7 @@ void UEnemyAttackConfigDataAsset::NormalizeEntries()
 		Entry.DamageMultiplier = FMath::Max(0.f, Entry.DamageMultiplier);
 		Entry.BlockStaminaDamageMultiplier = FMath::Max(0.f, Entry.BlockStaminaDamageMultiplier);
 		Entry.Weight = FMath::Max(0.f, Entry.Weight);
+		Entry.ProjectileTargetHeightOffset = FMath::Clamp(Entry.ProjectileTargetHeightOffset, -500.f, 500.f);
 		Entry.WarpStopDistance = FMath::Max(0.f, Entry.WarpStopDistance);
 		Entry.MaxWarpDistance = FMath::Max(0.f, Entry.MaxWarpDistance);
 	}

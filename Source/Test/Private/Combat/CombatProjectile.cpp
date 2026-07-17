@@ -2,6 +2,7 @@
 
 #include "Combat/CombatHitResolver.h"
 #include "Combat/CombatHitTypes.h"
+#include "Components/PrimitiveComponent.h"
 #include "Components/SphereComponent.h"
 #include "DrawDebugHelpers.h"
 #include "Engine/World.h"
@@ -144,10 +145,28 @@ void ACombatProjectile::BeginPlay()
 	// Commit 语义由原生碰撞根与移动组件独占；Blueprint 表现不能替换投递 UpdatedComponent。
 	ProjectileMovement->SetUpdatedComponent(CollisionSphere);
 	CollisionSphere->SetSphereRadius(ActiveDeliveryConfig.CollisionRadius, true);
-	CollisionSphere->IgnoreActorWhenMoving(LaunchAttacker, true);
+	// IgnoreActorWhenMoving 只影响调用组件的 sweep；发射者移动时也必须忽略这枚箭，避免其胶囊被自己的投射物卡住。
+	auto AddMutualLaunchIgnore = [this](AActor* ActorToIgnore)
+	{
+		if (!IsValid(ActorToIgnore))
+		{
+			return;
+		}
+
+		CollisionSphere->IgnoreActorWhenMoving(ActorToIgnore, true);
+		if (UPrimitiveComponent* LaunchActorRoot = Cast<UPrimitiveComponent>(ActorToIgnore->GetRootComponent()))
+		{
+			LaunchActorRoot->IgnoreActorWhenMoving(this, true);
+		}
+	};
+
+	AddMutualLaunchIgnore(LaunchAttacker);
 	if (APawn* InstigatorPawn = GetInstigator())
 	{
-		CollisionSphere->IgnoreActorWhenMoving(InstigatorPawn, true);
+		if (InstigatorPawn != LaunchAttacker)
+		{
+			AddMutualLaunchIgnore(InstigatorPawn);
+		}
 	}
 	ProjectileMovement->OnProjectileStop.AddDynamic(this, &ACombatProjectile::OnProjectileStopped);
 	bNativePreparationComplete = true;
