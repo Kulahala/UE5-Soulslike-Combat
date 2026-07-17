@@ -129,14 +129,20 @@ These TODOs are accepted future work, not permission to start implementation imm
 
 ### Ranged Combat
 
+- [ ] **TODO-04D-B0: Shared Character Animation Data v1**
+  Prerequisite: `TODO-04D-A` is validated. Before finalizing Erika locomotion, add a Skeleton-independent native `UBaseCharacterAnimInstance` that reads the already-authoritative `ABaseCharacter` movement values (`GroundSpeed`, `Direction`) plus CharacterMovement falling/vertical-speed data. Migrate `USlashAnimInstance` to derive from it while retaining only player-specific weapon/block/stun state, and make the Paladin and Erika AnimBPs use the same native base. Do not introduce an `ARangedEnemy`, an enemy-specific AnimBP asset hierarchy, duplicated per-AnimBP EventGraph speed calculation, `EEnemyState` caching, or a second death/hit source of truth: current hit/death Montages and `UHitReactionConfigDataAsset` remain authoritative. Validate player, Paladin, and Erika locomotion plus existing Montage paths before D-B resumes.
+
 - [ ] **TODO-04D-B: Erika Archer Authoring And TestMap v1**
-  Prerequisite: `TODO-04D-A` is validated. Author the Erika Archer presentation on her own `SK_ErikaArcher`: AnimBP/locomotion, a `Draw -> AimLoop -> Release` attack Montage, state-guarded release Notify, hit/death presentation, Enemy Blueprint, sockets, and one deliberate TestMap placement. Confirm a visible bow source before this stage; do not fake final presentation with an invisible or unrelated weapon asset.
+  Prerequisite: `TODO-04D-A` and `TODO-04D-B0` are validated. Author the Erika Archer presentation on her own `SK_ErikaArcher`: AnimBP/locomotion, a `Draw -> AimLoop -> Release` attack Montage, state-guarded release Notify, hit/death presentation, Enemy Blueprint, sockets, and one deliberate TestMap placement. Confirm a visible bow source before this stage; do not fake final presentation with an invisible or unrelated weapon asset.
 
 - [ ] **TODO-04C: Lock Target Switching v1**
   Prerequisite: the first authored archer has passed `TODO-04D-B`, so the new target-selection behavior is validated against actual mixed melee/ranged pressure. While locked on, use horizontal mouse movement on the existing `LookAction` to select the nearest valid target on the requested screen side. Include a configurable swipe threshold, re-arm threshold, and cooldown; preserve the current target when no eligible target exists. This stage changes targeting only, not projectile behavior.
 
 - [ ] **TODO-04B-B: Bow Presentation And World Pickup v1**
   Prerequisite: `TODO-04B-B0` is validated, and a legal DarkKnight-compatible bow mesh plus aim/release animations and needed audio assets are selected. Author the visible bow, visible arrow, persistent `TestMap` bow and 20-arrow bundle pickups, permanent loaded-arrow HUD, and aim-only dot reticle. Do not substitute sword animations as a final bow presentation. This remains blocked on final player assets and follows the enemy archer/target-switching validation path.
+
+- [ ] **TODO-04E: Third-Person Camera Experience Polish v1**
+  Prerequisite: the authored Erika archer, lock-target switching, and the visible player bow have all passed their focused PIE validation, so camera behavior is judged under actual mixed melee/ranged pressure rather than an isolated root-motion clip. First distinguish unstable root motion, Motion Warping, capsule collision, and SpringArm follow behavior. Then improve only proven camera issues through centralized, state-aware SpringArm position smoothing and obstruction recovery. Preserve direct mouse response, lock-on framing, and bow aim; do not globally enable rotation lag or use camera lag to hide invalid character displacement. Validate free running, lock-on switching, bow aim, attack, dodge, hit reaction, wall obstruction/recovery, and 30/60 FPS feel. This is a dedicated polish stage, not incidental tuning inside enemy or bow authoring.
 
 ### Combat Punish And Criticals
 

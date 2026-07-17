@@ -18,38 +18,49 @@
 
 ## 计划 (Plan)
 
-### TODO-04D-A: Enemy Ranged Delivery And Local HFSM v1
+### TODO-04D-B0: Shared Character Animation Data v1
 
-**状态：✅ 已执行，已通过验证与两轮严格 review，等待提交批准**
+**状态：已获准规划，尚未实现。`TODO-04D-B` 的已创建 Erika 资产保留，正式作者化暂停在 locomotion 接线之前；本阶段先建立不绑定任何 Skeleton 或具体动画资产的原生共享数据父类。**
 
-#### 范围与边界
+#### 目标与成功标准
 
-- 保持 `AEnemy` 为唯一敌人基类；不新增 `AMeleeEnemy` / `ARangedEnemy`，不迁移 Paladin、Erika、地图或任何正式资产。
-- 在 `FEnemyAttackEntry` 中区分 `Melee` 与 `Projectile` 投递。Projectile 正式条目仍必须具备 Montage、权重、距离、有效投射物类和有效 Delivery Config；无效条目不可被选择。
-- `AEnemy` 在既有 Pending Attack、本地 Combat HFSM、攻击协调和冷却流程内处理远程距离环、LOS 重定位、攻击快照与一次性 Release。远程贴身时撤退，不改为近战、不贴身发射。
-- 远程 Release 只经 `ACombatProjectile::SpawnConfiguredProjectile()`，不进入玩家弓的 Prepared/Commit 或箭矢持久化路径。
-- 调试使用非 Shipping `EnemyRangedDebugProbe [ReleaseDelay]`：临时原生 Enemy + AIController，Timer 仅替代未来 Montage Notify 的 Release 时机；不创建、保存或伪装正式射手资产。
+- 创建 `UBaseCharacterAnimInstance`，只从 `ABaseCharacter` 与 `UCharacterMovementComponent` 读取统一动画数据：`GroundSpeed`、`Direction`、`IsFalling` 与 `ZSpeed`。
+- `USlashAnimInstance` 改为继承该基类，并只维护玩家特有的 `WeaponState`、`bIsBlocking` 与 `bIsStunning`。
+- Paladin 和 Erika 的 AnimBP 直接使用 `UBaseCharacterAnimInstance`，不再各自在 Event Graph 重复计算速度和方向。
+- 玩家、Paladin 与 Erika 的 locomotion 和既有攻击/受击/死亡 Montage 均保持原行为。
 
-#### 实施顺序
+#### 已锁定的范围与边界
 
-1. 扩展敌人攻击 DataAsset 的投递类型、Projectile 配置、候选选择和编辑器校验。
-2. 为 `AEnemy` 增加远程攻击快照、LOS/距离/发射来源检查、Pending 远程移动策略、受状态保护的一次性 Release，并统一攻击中断与 Timer 清理。
-3. 将 Controller 绑定收束到 `PossessedBy()`，支持 Probe 动态 Possess 后的导航回调生命周期。
-4. 添加 `UAnimNotify_EnemyProjectileRelease` 和仅非 Shipping Probe 命令；Probe 只驱动真实远程判定和 Release guard。
-5. 静态审查后由用户编译 `TestEditor`，再按开阔地、格挡、墙体 LOS、贴身撤退、长延迟中断、Paladin 与 04A 回归做 PIE 验收。
+- 这是 `ABaseCharacter` 级的共享动画数据，不创建 `ARangedEnemy`、`AMeleeEnemy`、共享敌人 AnimBP 资产或跨 Skeleton 的 AnimGraph 父类。
+- 只同步已存在的稳定移动数据；`ABaseCharacter::Tick()` 已是 `GroundSpeed` 与 `Direction` 的唯一计算源。AnimInstance 不得再次根据自身 Velocity 产生第二套结果。
+- 不在本阶段缓存 `EEnemyState`、死亡、受击硬直、攻击或 Encounter Dormant。当前攻击、受击与死亡由 C++ 状态和 Montage 驱动；过早复制会形成可能陈旧的第二状态源。
+- `UHitReactionConfigDataAsset` 继续拥有 Hit React Montage 与 `FrontSection`、`BackSection`、`LeftSection`、`RightSection`。单一通用受击动画通过把四个字段明确指向同一 Section 实现，不增加隐式 DefaultSection 降级。
+- 不改 `AEnemy` HFSM、投射物、SaveGame、奖励、输入、武器、骨骼 Socket 或 TestMap。
 
-#### 验证与 Review 结论
+#### 执行顺序
 
-- 用户已完成 `TestEditor` 编译和 PIE。日志证据显示开阔地 Probe 每次只 Release 一枚投射物；玩家持盾时命中走现有格挡；最小距离外的 Release 被拒绝；长延迟 Probe 在 PIE 结束后没有迟到投射物。用户同时确认墙体 LOS、重定位、贴身撤退、Paladin 与 04A 回归符合预期。
-- 正常 review：未发现 D-A 阻塞项。Projectile 条目无法因缺类、无效 Delivery Config、缺 Montage 或无效距离静默退化为近战；正式 Release 复查状态、目标、距离、LOS 和一次性 guard；攻击中断、硬直、破防、死亡、Dormant、Controller 丢失与 `EndPlay` 都会拒绝或清理延迟 Release。
-- 对抗性 review：保留 `AEnemy` 作为唯一 C++ 基类是当前可辩护的边界，近战和远程仅在攻击条目投递、局部 Pending 移动与 Release 路径分叉，原 Paladin 仍使用默认 `Melee`。无资产 Probe 仅替代未来 Montage Notify 的时间来源，未伪装为正式 Erika 验收。未发现需要记录到 `ROADMAP.md` 的 D-A 风险。
+1. 先做 C++ 静态检查与针对 `UAnimInstance::NativeInitializeAnimation`、`NativeUpdateAnimation`、反射属性继承和 AnimBP Parent Class 迁移的 server-memory 查询；用户手动编译 `TestEditor`，代理不运行 UBT。
+2. 新建 `UBaseCharacterAnimInstance`，缓存 `ABaseCharacter` 与 `UCharacterMovementComponent`；在 `NativeUpdateAnimation()` 中读取角色 Getter 和移动组件，只暴露通用只读动画变量。
+3. 精简 `USlashAnimInstance`：调用 `Super`，保留玩家专属缓存与状态同步，删除重复的移动变量、重复角色移动缓存和重复速度/方向更新。
+4. 在 Editor 中依次将 Paladin 与 `ABP_ErikaArcher` 的 Parent Class 设为 `UBaseCharacterAnimInstance`，编译保存；Erika 的 `Direction` / `GroundSpeed` 使用继承变量，删除当前手工变量和 Event Graph 更新节点。
+5. 用户 PIE 回归：玩家移动、跳跃/下落、剑盾/弓动作；Paladin 前压、后退、受击与死亡；Erika BlendSpace 样本切换及 Montage Slot。正式弓 Mesh、Socket、TestMap 摆放仍留给恢复后的 D-B。
+6. 通过编译、PIE、正常 review、对抗性 review 后，再更新稳定 `ARCHITECTURE.md`，将 B0 移入 `ROADMAP.md` Done Milestones，并单独请求提交批准。
 
-#### 文档与提交边界
+#### 当前 Editor 接线核验
 
-- 验证和两轮 review 通过后，才更新 `ARCHITECTURE.md`、`ROADMAP.md` 并完成 D-A 单独提交。
-- 不纳入 Erika、`WBP_PauseMenu.uasset`、`WBP_OverwriteConfirmation.uasset` 或 `Content/__ExternalActors__/_GAME/BP/Maps/TestMap/E/RS/`。
+- 用户已将错误的 `Instanced Struct` 变体替换为 Object `Is Valid` 宏；实时只读 MCP 确认 `Try Get Pawn Owner` 同时连接到该 Object 输入、`Get Velocity` 与 `Get Actor Rotation`，并确认 Event Update 的有效分支依次驱动 `Set GroundSpeed -> Set Direction`。Editor 编译成功。
+- `Locomotion/Idle` 中 `BS_ErikaArcher_Locomotion` 的 `Direction` 和 `GroundSpeed` 输入也已显式连接，当前可作为 B0 迁移前的有效对照基线。
+- B0 上线后这段 Event Graph 和两个局部变量应被移除，改用继承变量，避免同一移动数据存在 C++ 和 Blueprint 两个写入来源。
 
-#### 收尾状态
+#### D-B 已创建资产保留与恢复条件
 
-- 已同步 `ARCHITECTURE.md` 与 `ROADMAP.md`；README 不改，因为尚无正式玩家可见射手内容。
-- 提交边界只包含 D-A C++、`plan.md`、`ARCHITECTURE.md` 与 `ROADMAP.md`。尚未提交，等待用户明确批准。
+- 已创建：`BP_ErikaArrow`、`BP_ErikaArcher`、`ABP_ErikaArcher`、`BS_ErikaArcher_Locomotion`、`AM_Attack_ErikaArcher_Ranged`、`AM_HitReact_ErikaArcher`、`AM_Death_ErikaArcher`、`DA_EnemyAttack_ErikaArcher`、`DA_EnemyHitReaction_ErikaArcher`。
+- `BP_ErikaArcher` 继续继承 `BP_BaseEnemy`，并在正式弓 Mesh 到位前保持 `WeaponClass = None`。
+- D-B 恢复条件：B0 已通过玩家/Paladin/Erika 动画回归；同时具备合法可见弓 Mesh、`RightHandSocket`、`ArrowReleaseSocket` 与一个明确的 TestMap 放置位置。
+
+#### 验证、文档与提交边界
+
+- B0 的验证不要求地图新 Actor 或弓资产；只验证原生动画数据的初始化、更新、父类迁移和现有 Montage 回归。
+- 敌人状态机保持一个名为 `Locomotion` 的基础 State，它播放完整 2D locomotion BlendSpace，并非只播放 Idle。攻击、受击与死亡继续由 C++ 发起的 Montage 经 `DefaultSlot` 覆盖；本阶段不增加第二套 `Dead` State。D-B 验收必须确认死亡 Montage 的终止姿势会保持到 Actor 销毁，不能 Auto Blend Out 后回落为 locomotion Idle。
+- 本阶段完成并稳定后才更新 `ARCHITECTURE.md`；当前只更新 `plan.md` 与 `ROADMAP.md` 记录计划和顺序。
+- 提交只包含 B0 C++、必要的 Paladin/Erika AnimBP Parent Class 资产、`plan.md`、`ROADMAP.md` 和稳定文档；持续排除 `WBP_PauseMenu.uasset`、`WBP_OverwriteConfirmation.uasset` 与 `Content/__ExternalActors__/_GAME/BP/Maps/TestMap/E/RS/` 用户 WIP。
