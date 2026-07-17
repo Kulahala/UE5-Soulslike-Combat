@@ -1,35 +1,25 @@
 #include "Character/SlashAnimInstance.h"
 
 #include "Character/MyCharacter.h"
-#include "GameFramework/CharacterMovementComponent.h"
 
 void USlashAnimInstance::NativeInitializeAnimation()
 {
 	Super::NativeInitializeAnimation();
-	MyCharacter = Cast<AMyCharacter>(TryGetPawnOwner());
-	if (MyCharacter)
-	{
-		CharacterMovement = MyCharacter->GetCharacterMovement();
-	}
+	MyCharacter = Cast<AMyCharacter>(GetBaseCharacter());
 }
 
 void USlashAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 {
 	Super::NativeUpdateAnimation(DeltaSeconds);
 
-	if (!CharacterMovement || !MyCharacter)
+	MyCharacter = Cast<AMyCharacter>(GetBaseCharacter());
+	if (!MyCharacter)
 	{
+		WeaponState = EWeaponState::EWS_Unequipped;
+		bIsBlocking = false;
+		bIsStunning = false;
 		return;
 	}
-
-	const FVector Velocity = CharacterMovement->Velocity;
-	ZSpeed = Velocity.Z;
-
-	GroundSpeed = MyCharacter->GetGroundSpeed();
-	Direction = MyCharacter->GetDirection();
-
-	IsFalling = CharacterMovement->IsFalling();
-
 
 	// 同步角色状态
 	WeaponState = MyCharacter->GetCharacterState();

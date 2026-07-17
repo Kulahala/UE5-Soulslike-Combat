@@ -20,7 +20,7 @@
 
 ### TODO-04D-B0: Shared Character Animation Data v1
 
-**状态：已获准规划，尚未实现。`TODO-04D-B` 的已创建 Erika 资产保留，正式作者化暂停在 locomotion 接线之前；本阶段先建立不绑定任何 Skeleton 或具体动画资产的原生共享数据父类。**
+**状态：已完成。用户已编译 `TestEditor` 并完成 PIE 验收；正常 review 和对抗性 review 均未发现 B0 阻塞项。`TODO-04D-B` 的已创建 Erika 资产保留，正式作者化可在弓 Mesh、Socket 对位和 TestMap 摆放前置满足后恢复。**
 
 #### 目标与成功标准
 
@@ -46,11 +46,19 @@
 5. 用户 PIE 回归：玩家移动、跳跃/下落、剑盾/弓动作；Paladin 前压、后退、受击与死亡；Erika BlendSpace 样本切换及 Montage Slot。正式弓 Mesh、Socket、TestMap 摆放仍留给恢复后的 D-B。
 6. 通过编译、PIE、正常 review、对抗性 review 后，再更新稳定 `ARCHITECTURE.md`，将 B0 移入 `ROADMAP.md` Done Milestones，并单独请求提交批准。
 
+#### 完成记录
+
+- 已新增 `UBaseCharacterAnimInstance`：缓存 `ABaseCharacter` 与 `UCharacterMovementComponent`，读取唯一的 `ABaseCharacter::GroundSpeed` / `Direction` 以及落地、垂直速度数据；无 Owner 时清空输出，避免 Pawn 替换后的旧动画值残留。
+- 已将 `USlashAnimInstance` 迁移为该基类的玩家专属派生，只继续同步 `WeaponState`、`bIsBlocking`、`bIsStunning`。
+- 已将 `ABP_Paladin` 与 `ABP_ErikaArcher` 设为根 `UBaseCharacterAnimInstance` AnimBP；DarkKnight 的 MainState 和 IK Linked AnimGraph 保持 `UAnimInstance`，继续通过 Exposable Properties 接收根 AnimBP 数据。
+- Erika 已删除本地 `Direction` / `GroundSpeed` 和 Event Graph 重复更新；Paladin 的 `ActionState -> BisDead` 线程安全死亡路径保持不变。
+- 用户已验证玩家移动/跳跃、剑盾攻击/格挡/受击/死亡，Paladin 移动/受击/死亡，以及 Erika locomotion Preview；正常 review 与对抗性 review 均无阻塞项。
+
 #### 当前 Editor 接线核验
 
 - 用户已将错误的 `Instanced Struct` 变体替换为 Object `Is Valid` 宏；实时只读 MCP 确认 `Try Get Pawn Owner` 同时连接到该 Object 输入、`Get Velocity` 与 `Get Actor Rotation`，并确认 Event Update 的有效分支依次驱动 `Set GroundSpeed -> Set Direction`。Editor 编译成功。
 - `Locomotion/Idle` 中 `BS_ErikaArcher_Locomotion` 的 `Direction` 和 `GroundSpeed` 输入也已显式连接，当前可作为 B0 迁移前的有效对照基线。
-- B0 上线后这段 Event Graph 和两个局部变量应被移除，改用继承变量，避免同一移动数据存在 C++ 和 Blueprint 两个写入来源。
+- 已移除这段 Event Graph 和两个局部变量，Erika BlendSpace 现只读取继承变量，避免同一移动数据存在 C++ 和 Blueprint 两个写入来源。
 
 #### D-B 已创建资产保留与恢复条件
 
@@ -62,5 +70,5 @@
 
 - B0 的验证不要求地图新 Actor 或弓资产；只验证原生动画数据的初始化、更新、父类迁移和现有 Montage 回归。
 - 敌人状态机保持一个名为 `Locomotion` 的基础 State，它播放完整 2D locomotion BlendSpace，并非只播放 Idle。攻击、受击与死亡继续由 C++ 发起的 Montage 经 `DefaultSlot` 覆盖；本阶段不增加第二套 `Dead` State。D-B 验收必须确认死亡 Montage 的终止姿势会保持到 Actor 销毁，不能 Auto Blend Out 后回落为 locomotion Idle。
-- 本阶段完成并稳定后才更新 `ARCHITECTURE.md`；当前只更新 `plan.md` 与 `ROADMAP.md` 记录计划和顺序。
+- 已更新 `ARCHITECTURE.md`、`ROADMAP.md` 与本计划记录；README 无需更新，因为 B0 不增加玩家可见功能或操作。
 - 提交只包含 B0 C++、必要的 Paladin/Erika AnimBP Parent Class 资产、`plan.md`、`ROADMAP.md` 和稳定文档；持续排除 `WBP_PauseMenu.uasset`、`WBP_OverwriteConfirmation.uasset` 与 `Content/__ExternalActors__/_GAME/BP/Maps/TestMap/E/RS/` 用户 WIP。
