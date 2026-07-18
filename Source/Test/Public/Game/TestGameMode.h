@@ -27,6 +27,8 @@ public:
 	void RequestUseCheckpoint(ACheckpointActor* Checkpoint, AMyCharacter* Player);
 	bool RequestRestAtCheckpoint(ACheckpointActor* Checkpoint, AMyCharacter* Player);
 	bool CanUseCheckpoint(const ACheckpointActor* Checkpoint, const AMyCharacter* Player) const;
+	/** 复用敌人当前目标和外层 AI 状态判断玩家是否正被主动交战。 */
+	bool IsPlayerEngagedByEnemy(const AMyCharacter* Player) const;
 	void HandlePlayerDeath(AMyCharacter* Player);
 	void RequestReturnToMainMenu(ACharacterController* RequestingController);
 
@@ -34,7 +36,6 @@ public:
 
 private:
 	ACheckpointActor* FindCheckpointById(FName PersistentId) const;
-	bool IsPlayerEngagedByEnemy(const AMyCharacter* Player) const;
 	FName GetCurrentGameplayMapName() const;
 	void HandlePlayerSpawned(APlayerController* NewPlayer);
 	void RestorePlayerFromSave(AMyCharacter* Player);

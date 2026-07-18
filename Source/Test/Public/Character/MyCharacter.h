@@ -144,6 +144,8 @@ public:
 	void Walk();
 	void StopWalking();
 	void UpdateMovementSpeed(); // 每帧根据方向/状态动态调整移速
+	/** 共享命中结算确认了一次玩家与敌人的敌对碰撞后刷新运行时战斗存在。 */
+	void MarkCombatPresenceFromConfirmedHostileHit();
 
 	/* 锁定 */
 	void ToggleLockOn();
@@ -190,6 +192,9 @@ protected:
 
 	UPROPERTY(EditDefaultsOnly, Category = "Movement", meta = (ToolTip = "冲刺速度。"))
 	float SprintSpeed = 360.f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Combat|Stamina", meta = (ClampMin = "0.0", ToolTip = "敌人主动交战或有效敌我命中结束后，冲刺继续消耗体力的保持时间（秒）。"))
+	float CombatPresenceExitDelay = 4.f;
 
 private:
 	/* 动作状态恢复 Helpers */
@@ -247,6 +252,10 @@ private:
 	void StopBlockMontage(float BlendOutTime);
 	bool ShouldInterruptBlock() const;
 	void TickSprintStamina();
+	void RefreshCombatPresenceFromEnemyEngagement();
+	void MarkCombatPresence();
+	void ClearCombatPresence();
+	bool IsCombatPresenceActive() const;
 	float CalcBaseSpeed(float DotProduct) const;
 	void UpdateLockOnCamera(float DeltaTime);
 	void GetLockOnCameraTargets(FVector& OutSocketTarget, float& OutArmLengthTarget, float& OutInterpSpeed) const;
@@ -337,6 +346,9 @@ private:
 
 	UPROPERTY(BlueprintReadOnly, Category = "State", meta = (AllowPrivateAccess = "true", ToolTip = "当前是否处于冲刺状态。"))
 	bool bIsSprinting = false;
+
+	// 仅当前 Pawn 的运行时战斗存在时间戳；不持久化，也不向 Blueprint / UMG 暴露。
+	float LastCombatPresenceTime = -1.f;
 
 	UPROPERTY(BlueprintReadOnly, Category = "State", meta = (AllowPrivateAccess = "true", ToolTip = "当前是否处于步行状态。"))
 	bool bIsWalking = false;

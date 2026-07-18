@@ -181,10 +181,17 @@ flowchart LR
 ```
 
 - The project intentionally allows a final committed action to overdraw stamina before the public value clamps to zero.
-- Positive-cost successful blocks and jumps reset `StaminaRegenDelay`; sprint resets it continuously while it is actually consuming stamina. Attacks and dodges additionally pause regeneration during their committed montage and reset the delay when they recover.
+- Positive-cost successful blocks and jumps reset `StaminaRegenDelay`; sprint resets it continuously only while its normal movement-consumption gate and Combat Presence are both active. Attacks and dodges additionally pause regeneration during their committed montage and reset the delay when they recover.
 - Montage end handlers must check the exhaustion timer before restoring `EAS_UnOccupied`. The current `EAS_Exhausted` recovery duration is `3 s`.
 - Attack recovery uses `ShouldRecoverToExhausted_Attack()` because attack has the extra `bPendingExhaustedAfterAttack` flag. Dodge / parry / potion use `RecoverActionStateAfterMontage(...)` and the generic exhaustion check.
 - Guard Break clears the ordinary exhaustion timer, then recovers only through its state-guarded Montage End Delegate. It resets the exhaustion flag and restores at least one stamina instead of stacking a second timed Exhausted penalty.
+
+### Combat-Aware Sprint Presence
+
+- `AMyCharacter` owns Combat Presence as one runtime-only timestamp, `LastCombatPresenceTime`, with editable `CombatPresenceExitDelay` (default `4 s`). It is not an `EActionState`, component, SaveGame field, HUD state, or cross-Pawn timer.
+- Presence refreshes from either the existing `ATestGameMode::IsPlayerEngagedByEnemy()` query or a confirmed shared-resolver `AMyCharacter <-> AEnemy` hostile hit. The former requires an alive, non-Dormant enemy to retain the player as `ChasingTarget` while in `Chasing`, `Combating`, `Attacking`, `Stunned`, or `StanceBreak`; the latter excludes invalid, same-team, suppressed and Dormant interactions while preserving valid blocks, parries and zero-damage combat hits.
+- `TickSprintStamina()` is the sole consumer. While Presence is active, the existing valid Shift sprint path still debits `12/s` and resets stamina recovery delay. Outside Presence, Shift retains its speed, input, Free-Run and hearing-noise behavior but neither debits stamina nor prolongs the recovery delay.
+- Death, bonfire-service protection and `EndPlay()` clear the timestamp. The checkpoint gate deliberately keeps querying only current enemy engagement, not the player's four-second Presence tail.
 
 ### Weapon State (`EWeaponState`)
 
@@ -553,7 +560,7 @@ FCombatTeamHelper (static helper: ShareTeamTag for same-team detection via Actor
 - `UAttributeComponent` manages stamina: `UseStamina()`, `AddStamina()`, `CheckStamina()`.
 - A final committed stamina action may overdraw internally before `UseStamina()` clamps the public current value to zero and broadcasts `OnExhausted`.
 - Default recovery is `20/s` after the configured `2 s` delay. Blocking uses the ActionConfig multiplier (`0.7` by default), and exiting or interrupting Block restores the multiplier to `1.0`.
-- Every successful jump and positive-cost successful block resets the delay. Sprint resets it only while its existing valid-consumption gate is true; attack and dodge also pause recovery during their committed montage.
+- Every successful jump and positive-cost successful block resets the delay. Sprint resets it only while its existing valid-consumption gate and Combat Presence are true; attack and dodge also pause recovery during their committed montage.
 - When stamina reaches zero outside the Guard Break request path, `OnExhausted` → `HandleExhausted()` sets `EAS_Exhausted` and starts the current `3 s` recovery timer. Exhausted permits normal `RunSpeed` movement but rejects sprint, jump, attack, dodge, block, parry, and bow-aim entry.
 - **"最后一击"设计**：透支时允许播放动作；蒙太奇结束回调检查耗尽计时器，再恢复到 `EAS_Exhausted`。`RecoverFromExhaustion()` is state-guarded and clears the exhaustion latch before restoring at least one stamina.
 - A valid depleted block, or an unblocked hit received while already Exhausted, instead enters `EAS_GuardBroken`: the resolver still applies its ordinary damage decision once, then the dedicated Guard Break Montage owns the separate recovery contract.

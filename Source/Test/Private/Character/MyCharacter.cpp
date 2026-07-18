@@ -123,6 +123,7 @@ void AMyCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	bBonfireServiceProtected = false;
 	bFailNextProjectilePrepareForDebug = false;
+	ClearCombatPresence();
 	CancelBowAim(true);
 	DestroyMaterializedLoadout();
 
@@ -188,6 +189,8 @@ void AMyCharacter::Tick(float DeltaTime)
 		RefreshCurrentInteractable();
 	}
 
+	RefreshCombatPresenceFromEnemyEngagement();
+
 	if (ActionState == EActionState::EAS_Stunning
 		|| ActionState == EActionState::EAS_GuardBroken
 		|| ActionState == EActionState::EAS_Dead) return;
@@ -200,6 +203,57 @@ void AMyCharacter::Tick(float DeltaTime)
 	UpdateMovementSpeed();
 	ApplyLockOnRotationMode();
 	DrawDebugInfo();  // [调试] 角色状态面板，放在更新之后读取本帧最终状态
+}
+
+void AMyCharacter::MarkCombatPresenceFromConfirmedHostileHit()
+{
+	if (bBonfireServiceProtected || ActionState == EActionState::EAS_Dead
+		|| !Attributes || !Attributes->IsAlive())
+	{
+		return;
+	}
+
+	MarkCombatPresence();
+}
+
+void AMyCharacter::MarkCombatPresence()
+{
+	if (const UWorld* World = GetWorld())
+	{
+		LastCombatPresenceTime = World->GetTimeSeconds();
+	}
+}
+
+bool AMyCharacter::IsCombatPresenceActive() const
+{
+	if (LastCombatPresenceTime < 0.f || bBonfireServiceProtected || ActionState == EActionState::EAS_Dead
+		|| !Attributes || !Attributes->IsAlive())
+	{
+		return false;
+	}
+
+	const UWorld* World = GetWorld();
+	return World && World->GetTimeSeconds() - LastCombatPresenceTime <= CombatPresenceExitDelay;
+}
+
+void AMyCharacter::RefreshCombatPresenceFromEnemyEngagement()
+{
+	if (bBonfireServiceProtected || ActionState == EActionState::EAS_Dead || !Attributes || !Attributes->IsAlive())
+	{
+		ClearCombatPresence();
+		return;
+	}
+
+	if (ATestGameMode* GameMode = GetWorld() ? GetWorld()->GetAuthGameMode<ATestGameMode>() : nullptr;
+		GameMode && GameMode->IsPlayerEngagedByEnemy(this))
+	{
+		MarkCombatPresence();
+	}
+}
+
+void AMyCharacter::ClearCombatPresence()
+{
+	LastCombatPresenceTime = -1.f;
 }
 
 // ==================== 战斗 ====================
@@ -831,6 +885,7 @@ void AMyCharacter::Die()
 {
 	bBonfireServiceProtected = false;
 	bFailNextProjectilePrepareForDebug = false;
+	ClearCombatPresence();
 
 	// 先清理暂停状态（如果死亡时正在暂停）
 	if (ACharacterController* CC = Cast<ACharacterController>(GetController()))
@@ -1397,6 +1452,7 @@ void AMyCharacter::SetBonfireServiceProtection(bool bEnabled)
 		return;
 	}
 
+	ClearCombatPresence();
 	ResetCombo();
 	CloseActionCancelWindow();
 	CancelChargeInputState();
@@ -2722,7 +2778,7 @@ void AMyCharacter::UpdateMovementSpeed()
 void AMyCharacter::TickSprintStamina()
 {
 	if (bIsSprinting && ActionState == EActionState::EAS_UnOccupied
-		&& !GetCharacterMovement()->IsFalling() && !bIsBlocking)
+		&& !GetCharacterMovement()->IsFalling() && !bIsBlocking && IsCombatPresenceActive())
 	{
 		FVector Velocity = GetVelocity();
 		Velocity.Z = 0.f;
@@ -3289,13 +3345,19 @@ void AMyCharacter::DrawDebugInfo() const
 	FDebugDrawHelper::Add(PotionInfo, FColor::Cyan);
 
 	static const TCHAR* ActionStateNames[] = {
-		TEXT("UnOccupied"), TEXT("Attacking"), TEXT("Stunning"), TEXT("Exhausted"), TEXT("Parrying"), TEXT("Dodging"), TEXT("UsingPotion"), TEXT("Dead"), TEXT("Aiming")
+		TEXT("UnOccupied"), TEXT("Attacking"), TEXT("Stunning"), TEXT("Exhausted"), TEXT("Parrying"), TEXT("Dodging"), TEXT("UsingPotion"), TEXT("Dead"), TEXT("Aiming"), TEXT("GuardBroken")
 	};
 	const uint8 ActionStateIndex = static_cast<uint8>(ActionState);
 	const TCHAR* ActionStateName = ActionStateIndex < UE_ARRAY_COUNT(ActionStateNames)
 		? ActionStateNames[ActionStateIndex]
 		: TEXT("Invalid");
 	FDebugDrawHelper::Add(FString::Printf(TEXT("State: %s"), ActionStateName), FColor::Yellow);
+	if (IsCombatPresenceActive())
+	{
+		const float Remaining = FMath::Max(0.f, CombatPresenceExitDelay -
+			(GetWorld()->GetTimeSeconds() - LastCombatPresenceTime));
+		FDebugDrawHelper::Add(FString::Printf(TEXT("Combat Presence: %.1fs"), Remaining), FColor::Orange);
+	}
 
 	UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
 	UAnimMontage* ActiveMontage = AnimInstance ? AnimInstance->GetCurrentActiveMontage() : nullptr;

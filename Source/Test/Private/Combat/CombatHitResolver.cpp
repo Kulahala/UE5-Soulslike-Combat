@@ -1,11 +1,41 @@
 #include "Combat/CombatHitResolver.h"
 
 #include "Character/BaseCharacter.h"
+#include "Character/MyCharacter.h"
 #include "Combat/CombatTeamHelper.h"
 #include "Enemy/Enemy.h"
 #include "Interfaces/BlockableInterface.h"
 #include "Interfaces/HitInterface.h"
 #include "Kismet/GameplayStatics.h"
+
+namespace
+{
+	void MarkCombatPresenceForConfirmedPlayerEnemyHit(const FCombatHitRequest& Request,
+		const FCombatHitResult& Result)
+	{
+		if (!Result.bResolved || Result.bSuppressed || Result.bSameTeam)
+		{
+			return;
+		}
+
+		if (const AEnemy* AttackingEnemy = Cast<AEnemy>(Request.Attacker);
+			AttackingEnemy && AttackingEnemy->IsEncounterDormant())
+		{
+			return;
+		}
+
+		if (AMyCharacter* AttackingPlayer = Cast<AMyCharacter>(Request.Attacker);
+			AttackingPlayer && Cast<AEnemy>(Request.HitActor))
+		{
+			AttackingPlayer->MarkCombatPresenceFromConfirmedHostileHit();
+		}
+		else if (AMyCharacter* HitPlayer = Cast<AMyCharacter>(Request.HitActor);
+			HitPlayer && Cast<AEnemy>(Request.Attacker))
+		{
+			HitPlayer->MarkCombatPresenceFromConfirmedHostileHit();
+		}
+	}
+}
 
 FCombatHitResult FCombatHitResolver::ResolveAndApply(const FCombatHitRequest& Request)
 {
@@ -87,6 +117,8 @@ FCombatHitResult FCombatHitResolver::ResolveAndApply(const FCombatHitRequest& Re
 	{
 		HitEnemy->ApplyStanceBreak(HitEnemy->GetStanceBreakDuration(), HitEnemy->GetStanceBreakPlayRate());
 	}
+
+	MarkCombatPresenceForConfirmedPlayerEnemyHit(Request, Result);
 
 	return Result;
 }
