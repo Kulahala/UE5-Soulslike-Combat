@@ -27,6 +27,7 @@ public:
 	void SetPotionCooldown(float RemainingTime, float TotalTime);
 	void BindToAttributes(UAttributeComponent* Attributes);
 	void SetPendingDamageFlashScale(float Scale);
+	void SetAimReticleVisible(bool bVisible);
 
 	UPROPERTY(meta = (BindWidget))
 	UProgressBar* PB_Health;
@@ -99,6 +100,7 @@ private:
 	float PotionCooldownRemaining = 0.f;
 	float PotionCooldownDuration = 0.f;
 	bool bPotionCooldownActive = false;
+	bool bAimReticleVisible = false;
 
 	UPROPERTY(EditAnywhere, Category = "Potion UI", meta = (ClampMin = "0.0", ClampMax = "1.0", ToolTip = "药瓶冷却遮罩的不透明度。"))
 	float PotionCooldownOverlayOpacity = 0.65f;

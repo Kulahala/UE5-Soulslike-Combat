@@ -2138,6 +2138,7 @@ bool AMyCharacter::StartBowAimAction()
 	bIsSprinting = false;
 	bBowDrawInputHeld = false;
 	ActionState = EActionState::EAS_Aiming;
+	UpdateAimReticleHUD();
 	return true;
 }
 
@@ -2669,6 +2670,8 @@ void AMyCharacter::CancelBowAim(bool bClearBlockHeld, bool bResetReleaseCooldown
 	{
 		ActionState = EActionState::EAS_UnOccupied;
 	}
+
+	UpdateAimReticleHUD();
 }
 
 void AMyCharacter::ResetBowReleaseCooldown()
@@ -2734,18 +2737,19 @@ void AMyCharacter::UpdateMovementSpeed()
 	FVector Velocity = GetVelocity();
 	Velocity.Z = 0.f;
 
-	float SpeedMultiplier = (bIsBlocking && EquippedShield) ? EquippedShield->GetBlockMoveSpeedMultiplier() : 1.0f;
-	if (const ABow* Bow = GetEquippedBow(); Bow && IsBowAiming())
-	{
-		SpeedMultiplier *= Bow->GetAimMoveSpeedMultiplier();
-	}
+	const ABow* Bow = GetEquippedBow();
+	const bool bBowAiming = Bow && IsBowAiming();
+	const float AimMoveSpeed = bBowAiming ? WalkSpeed * Bow->GetAimMoveSpeedMultiplier() : 0.f;
+	const float SpeedMultiplier = (bIsBlocking && EquippedShield) ? EquippedShield->GetBlockMoveSpeedMultiplier() : 1.0f;
 
 	if (!Velocity.IsNearlyZero())
 	{
 		float DotProduct = CalcForwardDot2D(Velocity);
 		const bool bLockOnFreeRun = ShouldUseLockOnFreeRun();
 		// free-run 时传 1.f，让 CalcBaseSpeed 的冲刺判断无条件生效
-		float BaseSpeed = CalcBaseSpeed((IsLockingOn() && !bLockOnFreeRun) ? DotProduct : 1.f);
+		float BaseSpeed = bBowAiming
+			? AimMoveSpeed
+			: CalcBaseSpeed((IsLockingOn() && !bLockOnFreeRun) ? DotProduct : 1.f);
 		float DirectionMultiplier = 1.f;
 
 		// 普通锁定战斗步伐：在前/侧/后之间连续插值；free-run 时不吃降速。
@@ -2766,7 +2770,7 @@ void AMyCharacter::UpdateMovementSpeed()
 	}
 	else
 	{
-		GetCharacterMovement()->MaxWalkSpeed = RunSpeed * SpeedMultiplier;
+		GetCharacterMovement()->MaxWalkSpeed = (bBowAiming ? AimMoveSpeed : RunSpeed) * SpeedMultiplier;
 	}
 
 	if (IsLocallyControlled() && FDebugDrawHelper::IsPlayerEnabled())
@@ -3309,6 +3313,7 @@ void AMyCharacter::InitializePlayerHUD()
 		PlayerHUDWidget->AddToViewport();
 		PlayerHUDWidget->BindToAttributes(Attributes);
 		UpdatePotionCooldownHUD();
+		UpdateAimReticleHUD();
 	}
 }
 
@@ -3323,6 +3328,14 @@ void AMyCharacter::UpdatePotionCooldownHUD() const
 		                        ? GetWorldTimerManager().GetTimerRemaining(PotionCooldownTimer)
 		                        : 0.f;
 	PlayerHUDWidget->SetPotionCooldown(Remaining, bPotionOnCooldown ? GetPotionCooldown(false) : 0.f);
+}
+
+void AMyCharacter::UpdateAimReticleHUD() const
+{
+	if (PlayerHUDWidget)
+	{
+		PlayerHUDWidget->SetAimReticleVisible(IsBowAiming());
+	}
 }
 
 void AMyCharacter::DrawDebugInfo() const

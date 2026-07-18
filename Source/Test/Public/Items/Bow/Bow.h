@@ -42,8 +42,8 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Bow|Projectile", meta = (AllowPrivateAccess = "true", ToolTip = "本次箭矢发射时复制的不可变命中与移动配置。"))
 	FProjectileDeliveryConfig ProjectileDeliveryConfig;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Bow|Aim", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0", ToolTip = "瞄准期间的移动速度倍率。"))
-	float AimMoveSpeedMultiplier = 0.35f;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Bow|Aim", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0", ToolTip = "瞄准期间相对角色步行速度的移动倍率。默认 1.0 表示与按住步行键时一致。"))
+	float AimMoveSpeedMultiplier = 1.0f;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Bow|Aim", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0", ToolTip = "成功放箭后的最短再次释放间隔。"))
 	float ShotCooldown = 0.35f;

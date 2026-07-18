@@ -5,6 +5,7 @@
 #include "Utils/DebugDrawHelper.h"
 #include "Styling/CoreStyle.h"
 #include "Rendering/DrawElements.h"
+#include "Widgets/InvalidateWidgetReason.h"
 #include "Engine/Texture2D.h"
 #include "Components/Image.h"
 #include "Components/TextBlock.h"
@@ -152,6 +153,17 @@ void UPlayerHUDWidget::SetPendingDamageFlashScale(float Scale)
 	PendingDamageFlashScale = FMath::Max(0.f, Scale);
 }
 
+void UPlayerHUDWidget::SetAimReticleVisible(bool bVisible)
+{
+	if (bAimReticleVisible == bVisible)
+	{
+		return;
+	}
+
+	bAimReticleVisible = bVisible;
+	Invalidate(EInvalidateWidgetReason::Paint);
+}
+
 void UPlayerHUDWidget::RefreshPotionVisuals()
 {
 	const bool bHasPotion = CurrentPotionCount > 0;
@@ -272,8 +284,37 @@ int32 UPlayerHUDWidget::NativePaint(const FPaintArgs& Args, const FGeometry& All
 					AllottedGeometry.ToPaintGeometry(FVector2f(300.f, LineHeight), FSlateLayoutTransform(Position)),
 					Entries[i].Text, FontInfo, ESlateDrawEffect::None, Entries[i].Color);
 			}
-			return TextLayer;
+			MaxLayer = TextLayer;
 		}
+	}
+
+	if (bAimReticleVisible)
+	{
+		const FVector2f LocalSize = FVector2f(AllottedGeometry.GetLocalSize());
+		const FVector2f Center = LocalSize * 0.5f;
+		constexpr float ReticleHalfGap = 3.f;
+		constexpr float ReticleOuterRadius = 10.f;
+
+		const FVector2f Segments[][2] = {
+			{ FVector2f(Center.X - ReticleOuterRadius, Center.Y), FVector2f(Center.X - ReticleHalfGap, Center.Y) },
+			{ FVector2f(Center.X + ReticleHalfGap, Center.Y), FVector2f(Center.X + ReticleOuterRadius, Center.Y) },
+			{ FVector2f(Center.X, Center.Y - ReticleOuterRadius), FVector2f(Center.X, Center.Y - ReticleHalfGap) },
+			{ FVector2f(Center.X, Center.Y + ReticleHalfGap), FVector2f(Center.X, Center.Y + ReticleOuterRadius) }
+		};
+
+		const int32 OutlineLayer = MaxLayer + 1;
+		const int32 InnerLayer = OutlineLayer + 1;
+		for (const FVector2f (&Segment)[2] : Segments)
+		{
+			TArray<FVector2f> OutlinePoints = { Segment[0], Segment[1] };
+			FSlateDrawElement::MakeLines(OutDrawElements, OutlineLayer, AllottedGeometry.ToPaintGeometry(),
+				MoveTemp(OutlinePoints), ESlateDrawEffect::None, FLinearColor(0.02f, 0.03f, 0.04f, 0.7f), true, 3.f);
+
+			TArray<FVector2f> InnerPoints = { Segment[0], Segment[1] };
+			FSlateDrawElement::MakeLines(OutDrawElements, InnerLayer, AllottedGeometry.ToPaintGeometry(),
+				MoveTemp(InnerPoints), ESlateDrawEffect::None, FLinearColor(0.94f, 0.96f, 0.98f, 0.95f), true, 1.25f);
+		}
+		MaxLayer = InnerLayer;
 	}
 
 	return MaxLayer;
