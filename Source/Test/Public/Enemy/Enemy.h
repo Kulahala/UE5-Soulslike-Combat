@@ -342,9 +342,6 @@ private:
 	UPROPERTY(EditAnywhere, Category = "Combat", meta = (ToolTip = "敌人使用的武器类，BeginPlay 时自动生成并装备。"))
 	TSubclassOf<AWeapon> WeaponClass;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Combat", meta = (AllowPrivateAccess = "true", ToolTip = "运行时生成武器附着到角色 Skeletal Mesh 的 Socket。默认 RightHandSocket 保持现有近战敌人行为；远程敌人应填写动画实际握武器手上的 Socket。"))
-	FName WeaponAttachSocketName = FName(TEXT("RightHandSocket"));
-
 	/* 巡逻 */
 	UPROPERTY()
 	AActor* SpawnPoint; // 动态生成的出生点

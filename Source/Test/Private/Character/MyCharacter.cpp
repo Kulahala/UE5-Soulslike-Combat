@@ -1862,7 +1862,7 @@ bool AMyCharacter::PrepareMaterializedLoadoutActorFromDefinition(EItemEquipmentS
 	{
 		if (AWeapon* Weapon = Cast<AWeapon>(SpawnedItem))
 		{
-			bAttached = Weapon->Equip(GetMesh(), Weapon->GetPlayerEquipSocketName(), this, this, false);
+			bAttached = Weapon->Equip(GetMesh(), Weapon->GetDefaultEquipSocketName(), this, this, false);
 		}
 	}
 	else if (EquipmentSlot == EItemEquipmentSlot::OffHand)

@@ -2,7 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Combat/CombatProjectile.h"
-#include "Items/Weapon/Weapon.h"
+#include "Items/Bow/BowBase.h"
 #include "Bow.generated.h"
 
 class USceneComponent;
@@ -11,7 +11,7 @@ class UAnimMontage;
 
 /** 主手弓的静态投递配置；物品所有权、箭数和玩家动作仍由各自系统持有。 */
 UCLASS()
-class TEST_API ABow : public AWeapon
+class TEST_API ABow : public ABowBase
 {
 	GENERATED_BODY()
 

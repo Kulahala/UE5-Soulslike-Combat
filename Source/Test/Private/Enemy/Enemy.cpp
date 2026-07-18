@@ -132,10 +132,11 @@ void AEnemy::WeaponInit()
 			return;
 		}
 
-		if (!Weapon->Equip(GetMesh(), WeaponAttachSocketName, this, this))
+		const FName AttachSocketName = Weapon->GetDefaultEquipSocketName();
+		if (!Weapon->Equip(GetMesh(), AttachSocketName, this, this))
 		{
-			UE_LOG(LogTemp, Warning, TEXT("%s failed to equip weapon '%s' to configured socket '%s'."),
-				*GetName(), *GetNameSafe(Weapon), *WeaponAttachSocketName.ToString());
+			UE_LOG(LogTemp, Warning, TEXT("%s failed to equip weapon '%s' to its default socket '%s'."),
+				*GetName(), *GetNameSafe(Weapon), *AttachSocketName.ToString());
 			Weapon->Destroy();
 			return;
 		}
