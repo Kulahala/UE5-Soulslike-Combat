@@ -149,6 +149,7 @@ public:
 	void ToggleLockOn();
 	void ClearLockOn();
 	bool IsLockingOn() const;
+	bool SwitchLockOnTarget(bool bSwitchToRight);
 
 	/* 相机归中 */
 	FORCEINLINE bool IsRecenteringCamera() const { return bRecenteringCamera; }
@@ -251,6 +252,7 @@ private:
 	void RestoreCachedRotationState();
 	void ClearCurrentLockOnTarget();
 	void SetLockOnTarget(AEnemy* NewTarget);
+	bool TryRetargetLockOnAfterTargetDeath();
 	bool IsLockOnTargetValid() const;
 	void UpdateLockOnControlRotation(float DeltaTime) const;
 	void UpdateLockOnActorFacing(float DeltaTime);

@@ -7,6 +7,7 @@
 #include "PlayerLockOnComponent.generated.h"
 
 class AEnemy;
+class APlayerController;
 
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
 class TEST_API UPlayerLockOnComponent : public UActorComponent
@@ -17,6 +18,8 @@ public:
 	UPlayerLockOnComponent();
 
 	AEnemy* FindBestTarget(const FVector& PlayerLoc, const FVector& CameraForward) const;
+	/** 查找当前锁定目标屏幕指定侧最近的可切换敌人；无候选时返回 nullptr。 */
+	AEnemy* FindScreenSideTarget(APlayerController* PlayerController, bool bSwitchToRight) const;
 	void SetLockedTarget(AEnemy* NewTarget);
 	void ClearLockedTarget();
 	bool IsCurrentTargetValid(const FVector& PlayerLoc) const;
@@ -37,6 +40,7 @@ public:
 
 private:
 	float ScoreTarget(const AEnemy* Enemy, const FVector& PlayerLoc, const FVector& CameraForward) const;
+	bool IsValidScreenSwitchCandidate(const AEnemy* Enemy, const FVector& PlayerLoc) const;
 
 	UPROPERTY()
 	AEnemy* LockedTarget = nullptr;

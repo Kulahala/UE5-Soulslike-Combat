@@ -582,9 +582,11 @@ FCombatTeamHelper (static helper: ShareTeamTag for same-team detection via Actor
 
 ![Lock-on approach and target feedback](docs/media/architecture-lockon-approach.gif)
 
-- **组件架构**：`UPlayerLockOnComponent` 拥有锁定状态、目标搜索/评分逻辑、所有 `LockOn*` 参数。`AMyCharacter` 保留 facade + 旋转/相机实际写入。
-- **目标搜索**：`FindBestTarget()` 遍历所有 `AEnemy`，`ScoreTarget()` 按 `IsAlive()` + 距离 + Camera forward 视角角度评分。
+- **组件架构**：`UPlayerLockOnComponent` 拥有锁定状态、初始目标搜索/评分、屏幕侧候选筛选和所有 `LockOn*` 参数。`AMyCharacter` 保留 facade + 旋转/相机实际写入；`ACharacterController` 拥有 Enhanced Input 的滚轮节流和 UI gate。
+- **目标搜索**：`FindBestTarget()` 遍历所有 `AEnemy`，`ScoreTarget()` 按 `IsAlive()` + 距离 + Camera forward 视角角度评分。锁定内滚轮切换使用独立 `IA_LockTargetSwitch` 的 `Axis1D`：下滚选择当前目标屏幕右侧、上滚选择左侧的最近存活 viewport 候选；候选必须在 `LockOnRadius` 内，不复用初始锁定的视角角度过滤。没有同侧候选时保持当前目标，不环绕也不解锁。
 - **旋转模式切换**：开启时缓存 `bOrientRotationToMovement` / `bUseControllerRotationYaw` / `bUsePawnControlRotation`，切换到锁定模式。普通锁定不再用 `bUseControllerRotationYaw` 硬贴控制器朝向，而是由角色侧独立插值面向目标；解锁时恢复缓存状态。
+- **锁定内目标交接**：手动屏幕侧切换和死亡自动重定向都直接调用组件的 `SetLockedTarget()`，只转交旧/新目标标记，不能复用首次锁定用的 `AMyCharacter::SetLockOnTarget()`，否则会污染解除锁定时应恢复的旋转缓存。
+- **死亡与失效**：当前锁定敌人死亡时，`AMyCharacter` 使用既有 `FindBestTarget()` 在当前前方、`LockOnRadius` 内自动选择下一有效敌人；无候选则正常解锁。跑出 `LockOnBreakRadius`、Actor 无效、玩家死亡或玩家硬直均不自动换锁，沿用既有解锁路径。
 - **角色朝向与相机朝向拆分**：`LockOnRotationInterpSpeed` 只控制 Controller/Camera 朝向目标的插值速度；`LockOnFacingTurnRate` 控制非 free-run 锁定状态下角色模型每秒最大转向角度，避免锁定开始或松开 Shift 后瞬间吸回目标 yaw。
 - **锁定相机**：默认使用居中后上方构图，`LockOnSocketOffset` 负责 SpringArm 高度偏移，`LockOnCameraPitch` 负责控制器俯视角；不再使用右肩越肩构图。
 - **锁定目标反馈**：`AEnemy::SetTargetedByPlayer()` 是敌人被玩家锁定的统一反馈入口；锁定时保持血条可见，并显示 Enemy 自持的 `LockOnMarker` screen-space WidgetComponent，解锁时隐藏标记并恢复血条延迟隐藏流程。

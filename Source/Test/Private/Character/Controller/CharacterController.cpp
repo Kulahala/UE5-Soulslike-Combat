@@ -197,6 +197,12 @@ void ACharacterController::SetupInputComponent()
 		EnhancedInputComponent->BindAction(BlockAction, ETriggerEvent::Canceled, this, &ACharacterController::Input_BlockEnd);  // [调试] 防止 held 挂住
 
 		EnhancedInputComponent->BindAction(LockOnAction, ETriggerEvent::Started, this, &ACharacterController::Input_LockOn);
+		if (LockTargetSwitchAction)
+		{
+			EnhancedInputComponent->BindAction(LockTargetSwitchAction, ETriggerEvent::Triggered, this, &ACharacterController::Input_LockTargetSwitch);
+			EnhancedInputComponent->BindAction(LockTargetSwitchAction, ETriggerEvent::Completed, this, &ACharacterController::Input_LockTargetSwitchEnd);
+			EnhancedInputComponent->BindAction(LockTargetSwitchAction, ETriggerEvent::Canceled, this, &ACharacterController::Input_LockTargetSwitchEnd);
+		}
 
 		if (ParryAction)
 		{
@@ -409,6 +415,49 @@ void ACharacterController::Input_LockOn()
 	}
 }
 
+void ACharacterController::Input_LockTargetSwitch(const FInputActionValue& Value)
+{
+	if (bIsPaused || bBonfireMenuOpen)
+	{
+		Input_LockTargetSwitchEnd();
+		return;
+	}
+
+	const float InputValue = Value.Get<float>();
+	const float AbsoluteInputValue = FMath::Abs(InputValue);
+	if (AbsoluteInputValue <= LockTargetSwitchRearmThreshold)
+	{
+		bLockTargetSwitchInputArmed = true;
+		return;
+	}
+
+	if (!bLockTargetSwitchInputArmed || AbsoluteInputValue < LockTargetSwitchInputThreshold)
+	{
+		return;
+	}
+
+	bLockTargetSwitchInputArmed = false;
+	UWorld* World = GetWorld();
+	if (!World || World->GetTimeSeconds() < NextLockTargetSwitchTime)
+	{
+		return;
+	}
+
+	if (AMyCharacter* MyCharacter = GetMyCharacter())
+	{
+		// UE Mouse Wheel Axis 正值为上滚，对应当前锁定目标的屏幕左侧。
+		if (MyCharacter->SwitchLockOnTarget(InputValue < 0.f))
+		{
+			NextLockTargetSwitchTime = World->GetTimeSeconds() + LockTargetSwitchCooldown;
+		}
+	}
+}
+
+void ACharacterController::Input_LockTargetSwitchEnd()
+{
+	bLockTargetSwitchInputArmed = true;
+}
+
 void ACharacterController::Input_Parry()
 {
 	DebugParryExpireTime = GetWorld()->GetTimeSeconds() + 0.15f;  // [调试]
@@ -538,6 +587,7 @@ void ACharacterController::HandleApplicationActivationChanged(bool bIsActive)
 	Input_BlockEnd();
 	Input_SprintEnd();
 	Input_WalkEnd();
+	Input_LockTargetSwitchEnd();
 	Input_MoveEnd();
 	Input_StopJumping();
 	UE_LOG(LogTemp, Display, TEXT("%s: cleared held gameplay input after application focus loss."), *GetName());

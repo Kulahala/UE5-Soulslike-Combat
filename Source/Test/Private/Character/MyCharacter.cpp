@@ -12,6 +12,7 @@
 
 #include "Camera/CameraComponent.h"
 #include "Animation/AnimInstance.h"
+#include "GameFramework/PlayerController.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "Items/Weapon/Weapon.h"
@@ -2719,6 +2720,34 @@ void AMyCharacter::ToggleLockOn()
 	}
 }
 
+bool AMyCharacter::SwitchLockOnTarget(bool bSwitchToRight)
+{
+	if (!LockOnComponent || !IsLockingOn()
+		|| ActionState == EActionState::EAS_Dead || ActionState == EActionState::EAS_Stunning)
+	{
+		return false;
+	}
+
+	if (!IsLockOnTargetValid())
+	{
+		ClearLockOn();
+		return false;
+	}
+
+	APlayerController* PlayerController = Cast<APlayerController>(GetController());
+	AEnemy* NextTarget = PlayerController
+		? LockOnComponent->FindScreenSideTarget(PlayerController, bSwitchToRight)
+		: nullptr;
+	if (!NextTarget)
+	{
+		return false;
+	}
+
+	// 仅转交组件内的目标标记；首次锁定路径会重缓存旋转状态，不能在锁定内复用。
+	LockOnComponent->SetLockedTarget(NextTarget);
+	return true;
+}
+
 void AMyCharacter::ClearLockOn()
 {
 	if (!IsLockingOn()) return;
@@ -2751,6 +2780,12 @@ void AMyCharacter::UpdateLockOn(float DeltaTime)
 	// 1. 有效性检查（无论是否应用旋转都必须执行，防止 targeted 标记残留）
 	if (!IsLockOnTargetValid())
 	{
+		if (ActionState != EActionState::EAS_Dead && ActionState != EActionState::EAS_Stunning
+			&& TryRetargetLockOnAfterTargetDeath())
+		{
+			return;
+		}
+
 		ClearLockOn();
 		return;
 	}
@@ -3002,6 +3037,26 @@ void AMyCharacter::SetLockOnTarget(AEnemy* NewTarget)
 	LockOnComponent->SetLockedTarget(NewTarget);
 	CacheLockOnRotationState();
 	EnterLockOnRotationMode();
+}
+
+bool AMyCharacter::TryRetargetLockOnAfterTargetDeath()
+{
+	AEnemy* CurrentTarget = GetLockedTarget();
+	if (!LockOnComponent || !Camera || !IsValid(CurrentTarget) || !CurrentTarget->GetAttributes()
+		|| CurrentTarget->GetAttributes()->IsAlive())
+	{
+		return false;
+	}
+
+	AEnemy* ReplacementTarget = LockOnComponent->FindBestTarget(GetActorLocation(), Camera->GetForwardVector());
+	if (!ReplacementTarget)
+	{
+		return false;
+	}
+
+	// 保持已有锁定旋转状态，只转交旧/新目标的锁定标记。
+	LockOnComponent->SetLockedTarget(ReplacementTarget);
+	return true;
 }
 
 bool AMyCharacter::IsLockOnTargetValid() const

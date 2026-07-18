@@ -18,33 +18,29 @@
 
 ## 计划 (Plan)
 
-### TODO-04D-D: Ranged Enemy Specialization And Attack Cancellation v1
+### TODO-04C: Scroll-Wheel Lock Target Switching v1
 
-**状态：✅已执行，已通过。** 本阶段创建 `ARangedEnemy : AEnemy`，迁移 D-C 的纯远程 Escape 运行时状态，建立慢/中/高速职责，并在 Draw/AimHold 期间持续失去 LOS `0.15 s` 后以 `Montage_Stop(0.12 s)` 取消未 Release 的攻击。`AEnemy` 保留共同敌人核心；不创建 `ABaseEnemy`、`AMeleeEnemy`、`AMageEnemy`、DataAsset、Controller、地图或动画资产。
+**状态：✅已执行，已通过。** 以独立 `Axis1D` 滚轮输入切换锁定目标：下滚选择当前目标屏幕右侧最近候选，上滚选择左侧最近候选。无同侧候选时保持原目标；不引入环绕、解锁、额外 UI、SaveGame、地图 Actor 或新的动作状态。
 
 #### 固定边界
 
-- `AEnemy` 继续拥有感知、目标、受击/死亡、通用导航、攻击条目、Projectile Release 与 Debug Probe。`ARangedEnemy` 只拥有纯远程 Escape、远程 CDO 默认值、攻击期 LOS 取消和对应调试。
-- `AEnemy` 的三档速度固定为 Patrol `200`、CombatManeuver `290`、Chase `330`；`ARangedEnemy` 构造阶段覆盖为 `220 / 300 / 330`。Retreat、BackDiag、Strafe 与 LOS 重定位使用中速；Press、Chase、Escape 使用高速。
-- `AEnemy` 的近战距离基线与现有 Paladin 对齐：Attack Max `220`、Preferred Min `240`；`ARangedEnemy` 继续只覆盖纯远程距离环。实际蓝图已更正为 `BP_Paladin`，旧路径 `BP_Pladin` 仅保留 redirector 以维持现有地图/Encounter 引用，不执行 Fix Up Redirectors。
-- Erika 的内层距离合同成为 `ARangedEnemy` CDO 默认：Escape `600 -> 1000`、Retreat `<900`、安全环 `1000-1100`、攻击上限 `1100`、Press Margin `50`、Retreat 最低倍率 `1.0`。外层追击/感知参数保持现有 Blueprint 作者值。
-- `AEnemy` 原生拥有所有敌人共用的 HealthBar/LockOnMarker 几何默认：HealthBar 使用屏幕空间与相对位置，但尺寸由 `WBP_EnemyHealthBar` 根 `SizeBox` 的期望大小驱动；锁定标记为 `4 x 4 @ Z=30`。具体 Widget Class 仍由敌人 Blueprint 作者化。
-- 取消只针对活动、未 Release、非 Debug Probe 的 Projectile 攻击。首次 LOS 失败开始计时，恢复 LOS 清除计时；持续 `0.15 s` 后先封锁 Release，再只停止当前攻击 Montage。取消沿用条目正常 cooldown；已 Release、近战、受击、死亡和 Dormant 不受影响。
+- `UPlayerLockOnComponent` 负责按存活、`LockOnRadius`、viewport 投影和当前目标屏幕 X 侧筛选候选；不加入 LOS Trace，不复用初始锁定的 `LockOnViewAngleDegrees`。
+- `AMyCharacter::SwitchLockOnTarget()` 只在现有有效锁定内直接调用组件的 `SetLockedTarget()`，不可调用首次锁定用的 `SetLockOnTarget()`，避免重复缓存旋转状态。
+- `ACharacterController` 只负责 `IA_LockTargetSwitch` 的输入阈值 `0.5`、re-arm `0.1`、成功切换冷却 `0.15 s`，以及暂停/火堆 UI 拦截。正轴（上滚）切左，负轴（下滚）切右。
+- 活动锁定时允许攻击、格挡、翻滚、喝药和瞄准切换；死亡、硬直、暂停与火堆 UI 拒绝。`Input_Look()`、中键 `IA_LockOn`、锁定相机和 FreeRun 合同保持不变。
+- 当前锁定目标死亡时，`AMyCharacter` 仅复用既有 `FindBestTarget()` 在当前相机前方和 `LockOnRadius` 内选择下一有效敌人，并直接转交组件目标标记；没有候选时沿用现有解锁。超出 `LockOnBreakRadius`、Actor 无效或玩家死亡不触发自动换目标。
 
 #### 实施顺序
 
-1. 在 `AEnemy` 提炼受保护的远程战术扩展点、窄移动辅助与攻击快照取消包装；删除其 `RangedEscape` 私有状态和第四档 Escape 速度。
-2. 新增抽象 `ARangedEnemy`，迁移固定导航腿、fallback、验证、Debug、状态清理与 LOS 取消，保持 Projectile 最终 Release LOS guard 在基类。
-3. 编译通过后以 Live Editor 顺序重设 `BP_ErikaArcher` 父类和 `BP_Paladin` / Erika CDO 覆盖；不手改 `.uasset`。
-4. 用户手动 PIE 验收取消、三档速度、D-C 距离环、Paladin 与 Debug Probe 回归；随后做两轮 review、文档收尾和独立提交。
+1. 更新 C++ 锁定组件、玩家入口与 Controller 输入绑定/锁存；完成轻量静态检查后由用户手动编译 `TestEditor`。
+2. 编译后完成 Live Editor MCP `initialize -> tools/list ->` 只读预检和恢复点，再创建 `IA_LockTargetSwitch`、在 `IMC_CharacterInput` 映射 `Mouse Wheel Axis`，并为 `BP_CharacterController` 赋值；工具不可用时提供精确手工接线步骤。
+3. 使用现有 TestMap 的 Paladin 和 Erika 手动 PIE 验收方向、无候选保持、输入节流、动作中切换、死亡自动重定向/UI gate 和现有锁定/敌人回归。
+4. 通过后进行正常及对抗性 review，并同步 `ARCHITECTURE.md`、`ROADMAP.md`、`plan.md` 后等待独立提交批准。
 
 #### 当前执行记录
 
-- 已完成源码与调用链勘查；当前 D-C 的 Escape、Attack Tick、Montage End、导航完成和配置验证均集中在 `AEnemy`，适合通过钩子迁移而非覆写完整 `OnCombating()`。
-- 已查询 server-memory：`Montage_Stop`/迟到 Notify、Abstract Blueprint reparent/CDO、`FAIRequestID` 生命周期没有既有记录；编译前会执行针对性静态检查。
-- UnrealClaude 与 VibeUE 当前均不可连接；C++ 可先完成，所有资产改动等待用户编译并重新建立 live Editor 预检。
-- C++ 已完成：`ARangedEnemy` 承接纯远程 Escape、远程 CDO 默认值和未 Release 的 LOS 取消；`AEnemy` 只保留通用移动、攻击、投射物与 Debug Probe。`CombatManeuverSpeed` 已替代旧的第四档 Escape 速度，基类旧 Escape 状态/请求 ID 已删除。
-- 已将 Paladin 的通用近战 Attack Max / Preferred Min 基线收敛到 `AEnemy`，并把 Erika 重设父类后遗失的原生 Widget Component 展示默认收敛到 `AEnemy` 构造函数。HealthBar 现在通过 `DrawAtDesiredSize` 使用 `WBP_EnemyHealthBar` 根 `SizeBox` 的 `170 x 14` 期望尺寸，用户已重新编译并完成 PIE 验收。
-- 已完成轻量静态检查：没有残留基类 `RangedEscape` 枚举或字段；速度调用点符合 Patrol/Search、CombatManeuver、Chase/Press/Escape 职责；`git diff --check` 通过。
-- 严格 review 已完成。正常 review 与对抗性 review 均未发现 D-D C++ 行为阻塞：未 Release LOS 取消先封锁一次性 Release guard，再通过 Montage End 进入既有幂等 cooldown；Escape request、fallback、死亡、受击、Dormant、EndPlay 与 Paladin 隔离均有明确归属。
-- 文档已同步 D-D 的 `ARangedEnemy` 边界、三档速度、Escape 与 LOS 取消契约，并将阶段移入 `ROADMAP.md` Done Milestones。用户已批准将实际资源更正为 `BP_Paladin`，同时提交旧路径 `BP_Pladin` redirector；不执行 Fix Up Redirectors，也不修改地图/Encounter External Actor WIP。
+- 已确认现有 `Input_Look()` 在锁定时直接返回，当前不存在滚轮 Input Action；新增独立 Enhanced Input Action 是最小输入边界。
+- 已确认 `AMyCharacter::SetLockOnTarget()` 会调用 `CacheLockOnRotationState()`；锁定内目标切换必须走新的窄入口，不能复用该首次锁定路径。
+- 当前用户 WIP `DA_EnemyAttack_ErikaArcher.uasset` 与 `Content/__ExternalActors__/_GAME/BP/Maps/TestMap/C/GG/A3OYSKXOUMFGPZ2YEKXTZL.uasset` 持续排除。
+- 严格 review：正常与对抗性检查均确认屏幕侧选择、标记交接、旋转缓存、输入锁存、无候选保持、跑远解锁和输入资产接线没有阻塞。P2 已修复：自动重定向 gate 现同时排除 `EAS_Dead` 和 `EAS_Stunning`，硬直中当前目标死亡会回退到既有解锁路径，而非转交新目标。当前 Demo 没有可实际构造“玩家硬直中杀死锁定目标”的 fixture，用户已接受该窄 gate 的静态复核替代额外测试工具。
+- 文档已同步稳定锁定输入、屏幕侧选择、死亡自动重定向与硬直/跑远解锁边界；`TODO-04C` 已移入 `ROADMAP.md` Done Milestones。`README.md` 不改，等待独立提交批准。

@@ -49,6 +49,8 @@ protected:
 	void Input_BlockStart();
 	void Input_BlockEnd();
 	void Input_LockOn();
+	void Input_LockTargetSwitch(const FInputActionValue& Value);
+	void Input_LockTargetSwitchEnd();
 	void Input_Parry();
 	void Input_Dodge();
 	void Input_Pause();
@@ -86,6 +88,18 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input", meta = (ToolTip = "锁定输入动作（中键）。"))
 	UInputAction* LockOnAction;
 
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input", meta = (ToolTip = "锁定目标切换输入动作（鼠标滚轮）。"))
+	UInputAction* LockTargetSwitchAction;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Input|LockOn", meta = (ClampMin = "0.0", ToolTip = "滚轮轴值达到该绝对值后触发一次锁定目标切换。"))
+	float LockTargetSwitchInputThreshold = 0.5f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Input|LockOn", meta = (ClampMin = "0.0", ToolTip = "滚轮轴值回落至该绝对值内后，允许下一次锁定目标切换。"))
+	float LockTargetSwitchRearmThreshold = 0.1f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Input|LockOn", meta = (ClampMin = "0.0", ToolTip = "成功切换锁定目标后的最短间隔（秒）。"))
+	float LockTargetSwitchCooldown = 0.15f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input", meta = (ToolTip = "弹反输入动作。"))
 	UInputAction* ParryAction;
 
@@ -107,7 +121,9 @@ private:
 	bool bDebugWalkHeld = false;
 	bool bDebugBlockHeld = false;
 	bool bSuppressNextAttackReleaseAfterFocusLoss = false;
+	bool bLockTargetSwitchInputArmed = true;
 	FDelegateHandle ApplicationActivationChangedHandle;
+	float NextLockTargetSwitchTime = 0.f;
 	float DebugAttackExpireTime = 0.f;
 	float DebugJumpExpireTime = 0.f;
 	float DebugInteractExpireTime = 0.f;
