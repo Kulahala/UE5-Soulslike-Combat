@@ -38,7 +38,6 @@
 namespace
 {
 	const FName PlayerAttackWarpTargetName(TEXT("AttackTarget"));
-	const FName PlayerMainHandSocketName(TEXT("RightHandSocket"));
 }
 
 // ==================== 生命周期 ====================
@@ -1129,6 +1128,12 @@ FBlockResult AMyCharacter::TryBlockHit(const FCombatHitRequest& Request)
 {
 	FBlockResult Result;
 	Result.DamageAfterBlock = Request.IncomingDamage;
+	if (IsBowEquipped())
+	{
+		// 双手 Bow 不能通过迟到的格挡/弹反状态复用副手防御。
+		return Result;
+	}
+
 	const FVector ImpactPoint = Request.HitResult.ImpactPoint;
 	AActor* Attacker = Request.Attacker;
 	AActor* DamageCauser = Request.DamageCauser;
@@ -1233,6 +1238,7 @@ FBlockResult AMyCharacter::TryBlockHit(const FCombatHitRequest& Request)
 bool AMyCharacter::CanStartParry() const
 {
 	return EquippedShield
+		&& !IsBowEquipped()
 		&& ActionState == EActionState::EAS_UnOccupied
 		&& !bParryOnCooldown
 		&& Attributes
@@ -1246,7 +1252,7 @@ void AMyCharacter::Input_Parry()
 
 void AMyCharacter::SetParryActive(bool bActive)
 {
-	bParryActive = bActive;
+	bParryActive = !IsBowEquipped() && bActive;
 }
 
 void AMyCharacter::SetDodgeInvulnerable(bool bInvulnerable)
@@ -1602,8 +1608,20 @@ bool AMyCharacter::TryClaimWorldItemPickup(FName PersistentId, FName ItemDefinit
 	if (bAutoEquipped)
 	{
 		check(CandidateItem);
-		DestroyMaterializedLoadoutSlot(EquipmentSlot);
-		CommitMaterializedLoadoutActor(EquipmentSlot, CandidateItem, false);
+		if (EquipmentSlot == EItemEquipmentSlot::OffHand && DoesEquippedMainHandConsumeOffHand())
+		{
+			CandidateItem->Destroy();
+			RefreshMaterializedOffHandForCurrentMainHand();
+		}
+		else
+		{
+			DestroyMaterializedLoadoutSlot(EquipmentSlot);
+			CommitMaterializedLoadoutActor(EquipmentSlot, CandidateItem, false);
+			if (EquipmentSlot == EItemEquipmentSlot::MainHand)
+			{
+				RefreshMaterializedOffHandForCurrentMainHand();
+			}
+		}
 	}
 	else if (CandidateItem)
 	{
@@ -1657,6 +1675,10 @@ bool AMyCharacter::TryApplyBonfireLoadoutSelection(EItemEquipmentSlot EquipmentS
 		}
 
 		DestroyMaterializedLoadoutSlot(EquipmentSlot);
+		if (EquipmentSlot == EItemEquipmentSlot::MainHand)
+		{
+			RefreshMaterializedOffHandForCurrentMainHand();
+		}
 		return true;
 	}
 
@@ -1672,8 +1694,19 @@ bool AMyCharacter::TryApplyBonfireLoadoutSelection(EItemEquipmentSlot EquipmentS
 		return false;
 	}
 
+	if (EquipmentSlot == EItemEquipmentSlot::OffHand && DoesEquippedMainHandConsumeOffHand())
+	{
+		CandidateItem->Destroy();
+		RefreshMaterializedOffHandForCurrentMainHand();
+		return true;
+	}
+
 	DestroyMaterializedLoadoutSlot(EquipmentSlot);
 	CommitMaterializedLoadoutActor(EquipmentSlot, CandidateItem, true);
+	if (EquipmentSlot == EItemEquipmentSlot::MainHand)
+	{
+		RefreshMaterializedOffHandForCurrentMainHand();
+	}
 	return true;
 }
 
@@ -1686,19 +1719,48 @@ void AMyCharacter::MaterializeEquippedLoadout()
 		return;
 	}
 
-	for (const EItemEquipmentSlot EquipmentSlot : { EItemEquipmentSlot::MainHand, EItemEquipmentSlot::OffHand })
+	const FName MainHandInstanceId = ItemOwnershipComponent->GetEquippedInstanceId(EItemEquipmentSlot::MainHand);
+	if (MainHandInstanceId != NAME_None)
 	{
-		const FName InstanceId = ItemOwnershipComponent->GetEquippedInstanceId(EquipmentSlot);
-		if (InstanceId == NAME_None)
-		{
-			continue;
-		}
-
 		Aitem* MaterializedItem = nullptr;
-		if (PrepareMaterializedLoadoutActor(EquipmentSlot, InstanceId, MaterializedItem))
+		if (PrepareMaterializedLoadoutActor(EItemEquipmentSlot::MainHand, MainHandInstanceId, MaterializedItem))
 		{
-			CommitMaterializedLoadoutActor(EquipmentSlot, MaterializedItem, false);
+			CommitMaterializedLoadoutActor(EItemEquipmentSlot::MainHand, MaterializedItem, false);
 		}
+	}
+
+	RefreshMaterializedOffHandForCurrentMainHand();
+}
+
+bool AMyCharacter::DoesEquippedMainHandConsumeOffHand() const
+{
+	return IsBowEquipped();
+}
+
+void AMyCharacter::RefreshMaterializedOffHandForCurrentMainHand()
+{
+	if (DoesEquippedMainHandConsumeOffHand())
+	{
+		DestroyMaterializedLoadoutSlot(EItemEquipmentSlot::OffHand);
+		return;
+	}
+
+	if (IsValid(EquippedShield) || !ItemOwnershipComponent)
+	{
+		return;
+	}
+
+	const FName OffHandInstanceId = ItemOwnershipComponent->GetEquippedInstanceId(EItemEquipmentSlot::OffHand);
+	if (OffHandInstanceId == NAME_None)
+	{
+		return;
+	}
+
+	Aitem* MaterializedItem = nullptr;
+	if (PrepareMaterializedLoadoutActor(EItemEquipmentSlot::OffHand, OffHandInstanceId, MaterializedItem))
+	{
+		// 副手由 MainHand 切换自动恢复，不额外播放第二个装备音效。
+		CommitMaterializedLoadoutActor(EItemEquipmentSlot::OffHand, MaterializedItem, false);
 	}
 }
 
@@ -1800,7 +1862,7 @@ bool AMyCharacter::PrepareMaterializedLoadoutActorFromDefinition(EItemEquipmentS
 	{
 		if (AWeapon* Weapon = Cast<AWeapon>(SpawnedItem))
 		{
-			bAttached = Weapon->Equip(GetMesh(), PlayerMainHandSocketName, this, this, false);
+			bAttached = Weapon->Equip(GetMesh(), Weapon->GetPlayerEquipSocketName(), this, this, false);
 		}
 	}
 	else if (EquipmentSlot == EItemEquipmentSlot::OffHand)
@@ -1836,7 +1898,7 @@ void AMyCharacter::CommitMaterializedLoadoutActor(EItemEquipmentSlot EquipmentSl
 		AWeapon* Weapon = static_cast<AWeapon*>(Item);
 
 		EquippedWeapon = Weapon;
-		WeaponState = EWeaponState::EWS_OneHandEquipped;
+		WeaponState = Cast<ABow>(Weapon) ? EWeaponState::EWS_TwoHandEquipped : EWeaponState::EWS_OneHandEquipped;
 		Item->SetActorHiddenInGame(false);
 		if (bPlayEquipSound)
 		{
@@ -1873,10 +1935,7 @@ void AMyCharacter::DestroyMaterializedLoadoutSlot(EItemEquipmentSlot EquipmentSl
 
 	if (EquipmentSlot == EItemEquipmentSlot::OffHand)
 	{
-		if (bIsBlocking)
-		{
-			InterruptBlock(true);
-		}
+		InterruptBlock(true);
 		ClearParryState();
 
 		if (IsValid(EquippedShield))
@@ -2267,7 +2326,7 @@ bool AMyCharacter::StartParryAction()
 	// 先确认蒙太奇可播放，再扣体力和进入状态（防止卡在 EAS_Parrying）
 	UAnimMontage* ParryMontage = GetParryMontage();
 	UAnimInstance* Anim = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
-	if (!ParryMontage || !Anim || !Attributes || !EquippedShield)
+	if (!ParryMontage || !Anim || !Attributes || !EquippedShield || IsBowEquipped())
 	{
 		return false;
 	}

@@ -6,6 +6,7 @@
 
 ABow::ABow()
 {
+	SetPlayerEquipSocketName(FName(TEXT("LeftHandSocket")));
 	ProjectileSpawnPoint = CreateDefaultSubobject<USceneComponent>(TEXT("ProjectileSpawnPoint"));
 	ProjectileSpawnPoint->SetupAttachment(GetMesh());
 	ProjectileClass = ACombatProjectile::StaticClass();

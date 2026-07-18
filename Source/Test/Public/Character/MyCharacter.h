@@ -380,6 +380,8 @@ private:
 	                                                   const UItemDefinitionDataAsset* Definition, Aitem*& OutItem);
 	void CommitMaterializedLoadoutActor(EItemEquipmentSlot EquipmentSlot, Aitem* Item, bool bPlayEquipSound);
 	void DestroyMaterializedLoadoutSlot(EItemEquipmentSlot EquipmentSlot);
+	bool DoesEquippedMainHandConsumeOffHand() const;
+	void RefreshMaterializedOffHandForCurrentMainHand();
 
 	/* 药瓶 */
 	bool bPotionOnCooldown = false;

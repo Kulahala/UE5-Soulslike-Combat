@@ -20,6 +20,7 @@ public:
 	bool Equip(USceneComponent* Parent, const FName& SocketName, AActor* NewOwner, APawn* NewInstigator,
 	           bool bPlayEquipSound = true);
 	void PlayEquipSound() const;
+	FORCEINLINE FName GetPlayerEquipSocketName() const { return PlayerEquipSocketName; }
 
 	// IPickupInterface
 	virtual void OnPickup_Implementation(AActor* Picker) override;
@@ -31,6 +32,8 @@ public:
 	void ClearIgnoreActors() { IgnoreActors.Empty(); }  // 清空黑名单（受控接口）
 
 protected:
+	void SetPlayerEquipSocketName(const FName InSocketName) { PlayerEquipSocketName = InSocketName; }
+
 	/* 拾取 */
 	// 装备武器时播放的音效
 	UPROPERTY(EditAnywhere, Category = "Weapon Properties", meta = (ToolTip = "装备武器时播放的音效。"))
@@ -85,6 +88,10 @@ private:
 	/* 装备旋转偏移：修正不同武器模型的本地朝向差异，装备后叠加到Socket旋转上 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Equip", meta = (AllowPrivateAccess = "true", ToolTip = "装备旋转偏移，修正不同武器模型的本地朝向差异。"))
 	FRotator EquipRotationOffset = FRotator::ZeroRotator;
+
+	// 仅供玩家 MainHand 实体化读取；敌人继续使用 AEnemy 的 WeaponAttachSocketName。
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Equip", meta = (AllowPrivateAccess = "true", ToolTip = "玩家装备该武器时使用的骨骼 Socket。默认右手；双手弓可覆写为左手。"))
+	FName PlayerEquipSocketName = FName(TEXT("RightHandSocket"));
 
 public:
 	FORCEINLINE void SetEnableHitStop(bool bEnable) { bEnableHitStop = bEnable; }

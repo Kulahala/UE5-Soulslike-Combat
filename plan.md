@@ -18,39 +18,57 @@
 
 ## 计划 (Plan)
 
-### TODO-04B-B1: Aim Reticle v1
+### TODO-04B-B2: Bow Two-Hand Occupancy And Attachment Contract v1
 
-**状态：✅已执行，已通过。** 在现有 `UPlayerHUDWidget::NativePaint()` 添加无资产、视口中心的空心十字准星；它只显示真实的弓瞄准状态，不参与瞄准、弹道、锁定、伤害、输入或存档。
+**状态：✅已执行，用户已完成编译 / PIE 验收，严格 review 已完成且无 B2 blocker；待提交。** 在正式玩家弓 Mesh、箭视觉、动画、拾取物和 HUD 作者化前，建立 `ABow` 的左手附着与双手占用合同。该阶段只收束装备表现/玩法的运行时边界，不能改变玩家的持久化装备选择。
 
-#### 核心契约
+#### 目标与不可变合同
 
-- `AMyCharacter::IsBowAiming()` 是唯一游戏状态来源：只有有效 `ABow` 已装备且 `ActionState == EAS_Aiming` 才显示。HUD 不反向读取或修改角色状态。
-- `UPlayerHUDWidget` 新增非 Blueprint 的 `SetAimReticleVisible(bool)`，仅在值改变时调用 Paint invalidation；不绑定属性组件、不新建 Tick、Delegate、SaveGame、Widget Blueprint 或第二 HUD。
-- `AMyCharacter` 只在 `StartBowAimAction()` 成功进入瞄准、`CancelBowAim()` 清理瞄准、以及 `InitializePlayerHUD()` 创建 HUD 后同步一次有效可见性。`ReleaseBowArrow()` 不改状态，因此成功、空箭和冷却失败后准星按现有瞄准状态继续显示。
-- 瞄准移动以角色 `WalkSpeed` 为基础，`ABow::AimMoveSpeedMultiplier` 改为相对该步行速度的作者倍率，默认 `1.0`。这使当前默认弓在不锁定时为 `200 cm/s`，与按住步行键一致；锁定时仍保留已有前/侧/后方向倍率。
-- 空心十字使用中心总空隙 `6`、外半径 `10` Slate 单位；先画 `3` 单位深色半透明描边，再画 `1.25` 单位近白内线。它位于既有 UMG、受击红晕和 Debug 文本之后的最高层。
-- 受击、Guard Break、死亡、火堆服务、主手换装、允许的高优先级动作取消与 `EndPlay()` 保持现有 `CancelBowAim()` / HUD 拆除边界；本阶段不复制或扩展它们。
+- `ABow` 仍是 `MainHand` 物品；玩家在火堆选中的 OffHand 盾牌仍保留在 `UItemOwnershipComponent` / `USoulslikeGameInstance` 的持久化装备槽中。装备 Bow 不写入卸盾、不改变 SaveGame 版本，也不创建第二份装备记录。
+- 当前有效 MainHand 为 `ABow` 时，Bow 消耗双手：它附着在 `LeftHandSocket`，运行时不保留可见或可参与玩法的 `EquippedShield`。右手用于后续 B-B 的搭箭、拉弦和 Release 表现，但 B2 不创建箭视觉或右手 Socket 资产。
+- 切回非 Bow 的 MainHand 时，已持久化选择的 OffHand 盾牌自动恢复；切换 Bow 时，原盾牌只从当前 Pawn 的运行时实体化中抑制，不丢失选择。
+- `EWeaponState::EWS_TwoHandEquipped` 可作为根 AnimBP 的被动装备姿态输入；实际的盾牌抑制、格挡和弹反合法性仍只从当前有效 `ABow` 判断，绝不能由动画枚举反推玩法。
+- 不新增 `EActionState`、通用双手武器框架、背包、输入、SaveGame 字段、HUD、动画资产、世界拾取物、箭/投射物逻辑或网络/GAS。
 
-#### 实施与验证
+#### 现状与设计决定
 
-1. 修改 `AMyCharacter`、`UPlayerHUDWidget` 和 `ABow` 的 C++；不改任何 `.uasset`、输入、DataAsset、地图、弓 Mesh、投射物、箭数 UI 或动画。
-2. 先执行轻量静态检查和定向 server-memory 查询；随后由用户手动编译 `TestEditor`，不运行 UBT、打包或自动 PIE。
-3. PIE：装备现有 Debug Bow 后按住右键，确认中心准星显示；未装备、进入失败和右键松开时隐藏。
-4. PIE：正常放箭、空 Loaded Arrow 和射击冷却期间准星保持；受击、Guard Break、死亡、火堆、换装、高优先级取消、HUD 重建和停止 PIE 后立即隐藏。
-5. PIE：开启玩家 Debug、血条缓冲、药瓶冷却和受击红晕，并切换常规 / 宽屏窗口，确认原 HUD 不回归且准星始终居中。
-6. 聚焦复验：不按 Alt 的瞄准前进速度与按 Alt 步行前进速度一致；锁定时瞄准继续使用现有前/侧/后速度倍率，瞄准不恢复冲刺或产生冲刺耗体。
-7. 用户确认 PIE 后执行正常 review 与对抗性 review，重点检查单一状态来源、Paint 层级、无 Tick 轮询、HUD 重建同步、步行速度来源和射击语义隔离。
+- 当前玩家 MainHand 一律通过共享 `RightHandSocket` 附着；全局移动该常量会错误移动现有剑。B2 在 `AWeapon` 增加仅供玩家装备路径读取的窄 `PlayerEquipSocketName` 合同，默认 `RightHandSocket`；`ABow` 的 CDO 默认 `LeftHandSocket`。敌人的 `WeaponAttachSocketName` 和 `AEnemy` 附着路径不改。
+- 当前恢复和火堆换装会独立实体化 MainHand 与 OffHand。B2 将“当前 MainHand 是否消费 OffHand”的判定集中在 `AMyCharacter` 私有帮助函数：先成功实体化 MainHand，再决定是否实体化 OffHand；任何抑制只处理当前 Pawn Actor，不触碰已保存的 OffHand `InstanceId`。
+- 当前普通格挡已排除 Bow，但弹反还只检查 `EquippedShield`。B2 统一清理/拒绝 Bow 下的 Block 和 Parry，并在防御解析处保留状态保护，防止已开始的旧格挡、迟到 Notify 或直接调用走出盾牌减伤/弹反旁路。
 
-#### 文档与提交边界
+#### C++ 实施范围
 
-- 通过验证和两轮 review 后，更新 `ARCHITECTURE.md` 的 HUD 表现边界，将 B1 移入 `ROADMAP.md` Done Milestones。`README.md` 默认不改。
-- 提交仅包含 `AMyCharacter`、`UPlayerHUDWidget`、`ABow`、`plan.md`、`ROADMAP.md` 与 `ARCHITECTURE.md`。持续排除 `WBP_PlayerHUD.uasset`、弓/箭资产、DataAsset、地图、暂停菜单、覆盖确认和当前用户 WIP。
+1. `AWeapon`：添加默认右手的玩家装备 Socket 配置和窄 Getter；保持 `Equip()` 的 Owner/Instigator、碰撞、`EquipRotationOffset` 和敌人调用签名不变。
+2. `ABow`：在构造阶段把其玩家装备 Socket 默认设为 `LeftHandSocket`。Bow Blueprint 可继承该默认值；本阶段不需要选择 Mesh、调相对 Transform 或创建任何 Component。
+3. `AMyCharacter`：
+   - 在 `PrepareMaterializedLoadoutActorFromDefinition()` 的 MainHand 分支使用该 Weapon 的玩家 Socket，并保持候选附着失败发生在持久化写入之前。
+   - 引入私有的 Bow/OffHand 占用判定与运行时副手重建帮助函数。`MaterializeEquippedLoadout()` 先恢复 MainHand，再依据该判定恢复或抑制 OffHand。
+   - 火堆 MainHand 换装在持久化成功后统一协调副手：Bow 成功提交后销毁当前运行时盾牌；非 Bow 成功提交后按已保存 OffHand 选择重新实体化盾牌。副手选择在 Bow 激活期间仍走候选验证和持久化，但成功后不提交可见盾牌 Actor；离开 Bow 后恢复新选择。
+   - Bow 进入双手占用时清理已有格挡/弹反和相应 Timer/held 意图；`CanStartBlock()`、`CanStartParry()`、`StartParryAction()` 与防御解析继续以当前 Bow 状态为安全门，不能因 `EquippedShield` 的旧指针、蒙太奇或 Notify 获得格挡/弹反。
+   - MainHand 非 Bow 的既有 `EWS_OneHandEquipped` 语义保持；Bow 成功提交时写入 `EWS_TwoHandEquipped`，销毁 MainHand 时保留现有 `EWS_Unequipped` 清理。B2 不改 DarkKnight AnimBP 图；B-B 负责使用该输入作者化正式 Bow Locomotion/Aim。
+4. 所有恢复、死亡重生、Continue、Rest、火堆服务换装和 `EndPlay()` 继续从持久化槽位重建运行时 Actor；不得留下失效 `EquippedShield`、错误 Owner/Instigator、已绑定 Parry Timer 或临时隐藏 Actor。
+
+#### 验证
+
+1. 实施前按本机 UE 5.7 头文件做轻量静态检查，并查询 server-memory：装备候选先验证后写盘、`AttachToComponent` Socket 失败、`EWeaponState` 序列化、Montage/Timer 清理和持久化槽与运行时 Actor 分离。
+2. 用户手动编译 `TestEditor`；不运行 UBT、打包或自动 PIE。
+3. 在已有 Bow + Shield 装备选择下进入 PIE：Bow 使用 `LeftHandSocket`，OffHand 盾牌不显示、不保留玩法引用；右键仍进入瞄准，左键现有放箭、箭数、准星和冷却语义不变。
+4. Bow 激活期间按住格挡、点按弹反、接收可格挡近战/投射物、尝试旧状态延续：均不得举盾、弹反或获得盾牌减伤；切回 Sword 后普通格挡、弹反、格挡耐力与 Guard Break 立即恢复。
+5. 火堆将 Sword+Shield 换为 Bow+Shield：只持久化 MainHand 选择变化，盾牌选择仍保留但运行时抑制；Bow+Shield 期间改选另一面盾牌后不显示/不播放装备表现，切回 Sword 后只恢复新盾牌。
+6. 依次验证 Rest 重载、死亡重载、Continue、重新 PIE、清空 MainHand、清空 OffHand 与候选 Socket/类配置失败：持久化选择和运行时表现一致，失败不会写入无效选择或残留 Actor/Timer。
+7. 回归剑盾攻击、格挡、弹反、Guard Break、弓瞄准/放箭/空箭/射击冷却、锁定、火堆服务、Paladin 与 Erika 投射物路径。用户确认 PIE 后执行正常 review 与对抗性 review。
+
+#### 资产与文档边界
+
+- B2 只改 C++、阶段文档和唯一必要资产 `Content/_GAME/BP/DataAssets/Items/Definitions/DA_Item_DarkKnightBow.uasset`。该 Definition 的稳定合同为 `DefinitionId = Item_DarkKnightBow`、`EquipmentSlot = MainHand`、`RuntimeItemActorClass = /Script/Test.Bow`；它必须进入玩家 `DefinitionCatalog`，否则干净检出无法授予、装备或实体化 Bow。除该资产外，不修改 `BP_DarkKnight`、Bow Blueprint、`ArcherAnimsetPro`、`ItemConsumableAnims`、其他 DataAsset、Montage、BlendSpace、Mesh、TestMap 或任何 External Actor。若新字段在既有 Bow Blueprint 出现显式旧值，仅在 Live Editor 预检成功后由用户 Reset to Default，并单独读回确认。
+- `ArcherAnimsetPro` 的实际 DarkKnight 重定向兼容性仍由 B-B 作者化前检查 `Bow_Aim_Pull`、Aim Hold 和 Release 三条代表性动作决定；B2 不把文件名或预览姿势当作 Skeleton 兼容性证据。
+- B2 通过编译、PIE 与两轮 review 后，更新 `ARCHITECTURE.md` 的玩家装备实体化、双手 Bow 和 `EWeaponState` 合同；将 B2 移入 `ROADMAP.md` Done Milestones。`README.md` 默认不改。
+- 预计提交范围：`AWeapon`、`ABow`、`AMyCharacter`、`DA_Item_DarkKnightBow.uasset`、`plan.md`、`ARCHITECTURE.md`、`ROADMAP.md`。持续排除用户 WIP：`Content/ArcherAnimsetPro/`、`Content/ItemConsumableAnims/`、`DA_EnemyAttack_ErikaArcher.uasset`、TestMap External Actor、暂停菜单、覆盖确认及所有无关资产改动。
 
 #### 当前执行记录
 
-- 已核对：当前瞄准只由 `StartBowAimAction()` 进入、`CancelBowAim()` 退出；正式取消、受击、破防、死亡、火堆服务与主手换装均已收束到该边界或 HUD 拆除。
-- 已完成：`AMyCharacter` 在瞄准进入、统一取消和 HUD 创建后，以 `IsBowAiming()` 推送准星可见性；`ReleaseBowArrow()` 未改，因而不改变现有持续瞄准语义。
-- 已完成：`UPlayerHUDWidget::NativePaint()` 使用 `AllottedGeometry` 中心绘制四条空心十字线段；Debug 分支不再提前返回，准星绘制层位于受击红晕与调试文本之后。
-- 已检查：`git diff --check` 通过；定向 server-memory 查询无既有错误模式；已按本机 UE 5.7 `FSlateDrawElement::MakeLines(TArray<FVector2f>)` 实际签名传入所有权明确的线段数组。
-- 用户已确认准星和瞄准步行速度的 `TestEditor` 编译 / PIE 验收通过：瞄准状态下 Player Debug 为 `Speed: 200`，与默认 `WalkSpeed` 一致。
-- 严格 review 已完成：常规检查确认瞄准状态来源、HUD 重建同步、Paint 层级、放箭后持续显示和锁定方向倍率保持隔离；对抗性检查确认受击 / Guard Break / 死亡 / 换装 / EndPlay 的统一取消没有旁路，瞄准不进入冲刺体力路径，且当前有效 Bow 默认值已由 PIE 证明为 `1.0`。没有剩余 B1 blocker。
+- 已完成：`AWeapon` 新增默认 `RightHandSocket` 的玩家专用附着 Socket；`ABow` CDO 覆写为 `LeftHandSocket`。玩家候选 MainHand 在持久化写入前验证该 Socket；敌人仍走其既有独立附着字段。
+- 已完成：`AMyCharacter` 先恢复 MainHand，再集中协调运行时 OffHand。活跃 Bow 会销毁/清空运行时盾牌但不写持久化 OffHand；切回非 Bow 或清空 Bow 后静默恢复已选择盾牌。火堆 OffHand 换装和自动首装在 Bow 期间会完成候选验证与持久化后丢弃表现候选。
+- 已完成：Bow 写入 `EWS_TwoHandEquipped`；Bow 下的 Parry 启动、Notify 激活与命中解析都有独立安全门，副手销毁会清理格挡 held 输入及 Parry Timer。
+- 已检查：CodeGraph 已复核候选附着、火堆写盘、恢复、格挡和弹反调用面；定向 server-memory 查询没有返回既有错误模式；`git diff --check` 通过。用户已完成 `TestEditor` 编译和 PIE 验收，正常与对抗性 review 均未发现 C++ 行为 blocker。
+- 提交边界纠正（已解决）：用户确认 `DA_Item_DarkKnightBow.uasset` 纳入 B2。其 `DefinitionId = Item_DarkKnightBow`、`EquipmentSlot = MainHand`、`RuntimeItemActorClass = /Script/Test.Bow` 是有效 Bow Definition、Catalog 注册、`ItemDebugGrant Item_DarkKnightBow`、火堆 MainHand 选择和运行时 `ABow` 实体化的必要合同；它是本阶段唯一纳入的资产。严格 review 在该范围纠正后无剩余 B2 blocker。
