@@ -20,6 +20,7 @@ struct FPendingHitContext
 	AActor* HitInstigator = nullptr;
 	float KnockbackScale = 1.f;
 	bool bWasBlocked = false;
+	bool bSuppressNormalHitReact = false;
 	bool bApplyStun = true;
 };
 

@@ -68,7 +68,9 @@ void ABaseCharacter::GetHit_Implementation(const FVector& ImpactPoint, AActor* H
 	{
 		ConsumePendingHitKnockback();  // 仅存活时后退（Die() 会立刻停移动+关碰撞）
 
-		if (!PendingHitContext.bWasBlocked)
+		const bool bSuppressNormalResponse = PendingHitContext.bWasBlocked
+			|| PendingHitContext.bSuppressNormalHitReact;
+		if (!bSuppressNormalResponse)
 		{
 			if (HasHyperArmor())
 			{
@@ -81,7 +83,7 @@ void ABaseCharacter::GetHit_Implementation(const FVector& ImpactPoint, AActor* H
 		}
 	}
 
-	if (!PendingHitContext.bWasBlocked)
+	if (!PendingHitContext.bWasBlocked && !PendingHitContext.bSuppressNormalHitReact)
 	{
 		PlayHitEffects(ImpactPoint);  // 仅普通受击（格挡由 TryBlockHit 播放 BlockSound/BlockParticle）
 	}

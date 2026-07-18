@@ -58,6 +58,15 @@ struct FPlayerBlockActionConfig
 };
 
 USTRUCT(BlueprintType)
+struct FPlayerGuardBreakActionConfig
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "GuardBreak", meta = (ToolTip = "玩家格挡体力耗尽或 Exhausted 受击时的专用破防蒙太奇。为空时会回退到 Exhausted 恢复路径。"))
+	TObjectPtr<UAnimMontage> Montage = nullptr;
+};
+
+USTRUCT(BlueprintType)
 struct FPlayerParryActionConfig
 {
 	GENERATED_BODY()
@@ -107,6 +116,9 @@ public:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Actions", meta = (ToolTip = "玩家举盾防御动作配置。"))
 	FPlayerBlockActionConfig Block;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Actions", meta = (ToolTip = "玩家破防硬直动作配置。"))
+	FPlayerGuardBreakActionConfig GuardBreak;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Actions", meta = (ToolTip = "玩家弹反动作配置。"))
 	FPlayerParryActionConfig Parry;

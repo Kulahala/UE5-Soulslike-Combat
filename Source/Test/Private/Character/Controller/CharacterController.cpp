@@ -233,6 +233,12 @@ void ACharacterController::Input_Move(const FInputActionValue& Value)
 
 	AMyCharacter* MyCharacter = GetMyCharacter();
 	if (!MyCharacter) return;
+	const EActionState State = MyCharacter->GetActionState();
+	if (State == EActionState::EAS_GuardBroken)
+	{
+		MyCharacter->StopMovementNoiseTimer();
+		return;
+	}
 
 	// 有移动输入时启动噪音定时器
 	if (MovementVector.Length() > 0.1f)
@@ -240,7 +246,6 @@ void ACharacterController::Input_Move(const FInputActionValue& Value)
 		MyCharacter->StartMovementNoiseTimer();
 	}
 
-	EActionState State = MyCharacter->GetActionState();
 	if (State != EActionState::EAS_UnOccupied
 		&& State != EActionState::EAS_Exhausted
 		&& State != EActionState::EAS_UsingPotion

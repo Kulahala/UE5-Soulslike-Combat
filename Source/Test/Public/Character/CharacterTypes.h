@@ -18,7 +18,9 @@ enum class EActionState : uint8
 	EAS_Dodging UMETA(DisplayName = "Dodging"),
 	EAS_UsingPotion UMETA(DisplayName = "UsingPotion"),
 	EAS_Dead UMETA(DisplayName = "Dead"),
-	EAS_Aiming UMETA(DisplayName = "Aiming")
+	EAS_Aiming UMETA(DisplayName = "Aiming"),
+	// 新状态必须追加，避免已有 Blueprint / AnimNotify 序列化的枚举数值发生漂移。
+	EAS_GuardBroken UMETA(DisplayName = "GuardBroken")
 };
 
 UENUM()

@@ -94,12 +94,12 @@ Core character/combat state-machine enums and small shared combat-flow enums are
 | Enum | States | Used By |
 |------|--------|---------|
 | `EWeaponState` | `EWS_Unequipped`, `EWS_OneHandEquipped`, `EWS_TwoHandEquipped` | `AMyCharacter`, `USlashAnimInstance` |
-| `EActionState` | `EAS_UnOccupied`, `EAS_Attacking`, `EAS_Stunning`, `EAS_Exhausted`, `EAS_Parrying`, `EAS_Dodging`, `EAS_UsingPotion`, `EAS_Dead` | `AMyCharacter` |
+| `EActionState` | `EAS_UnOccupied`, `EAS_Attacking`, `EAS_Stunning`, `EAS_Exhausted`, `EAS_Parrying`, `EAS_Dodging`, `EAS_UsingPotion`, `EAS_Dead`, `EAS_Aiming`, `EAS_GuardBroken` | `AMyCharacter` |
 | `EComboPlaybackMode` | `NewPlayback`, `Continuation` | `AMyCharacter` light combo playback helper |
-| `EPlayerActionType` | `None`, `Attack`, `Dodge`, `Block`, `Parry`, `Potion`, `HitReact`, `Death` | `AMyCharacter::TryStartAction` player action entry plus priority/cancel windows |
+| `EPlayerActionType` | `None`, `Attack`, `Dodge`, `Block`, `Parry`, `Potion`, `HitReact`, `Death`, `RangedAim`, `RangedRelease` | `AMyCharacter::TryStartAction` player action entry plus priority/cancel windows |
 | `EEnemyState` | `EES_UnOccupied`, `EES_Patrolling`, `EES_Searching`, `EES_Chasing`, `EES_Attacking`, `EES_Combating`, `EES_Stunned`, `EES_StanceBreak`, `EES_Dead` | `AEnemy` |
 
-**State transition pattern**: Mixed C++ + AnimNotify driven. Entry states are set directly in C++ (`Attack()`, `GetHit_Implementation()`, `Die()`). Recovery transitions use `FOnMontageEnded` delegates with `bInterrupted` guards as primary path. `UAnimNotify_CharacterHitReactEnd` is the exception — used for player hit react recovery so designers can tune stun duration in the animation editor. Enemy recovery has double coverage (delegate + AnimNotify with state guards).
+**State transition pattern**: Mixed C++ + AnimNotify driven. Entry states are set directly in C++ (`Attack()`, `GetHit_Implementation()`, `Die()`). Recovery transitions use `FOnMontageEnded` delegates with state guards as the primary path. `UAnimNotify_CharacterHitReactEnd` is the deliberate exception for ordinary player `EAS_Stunning`, so designers can tune HitReact duration in the animation editor. `EAS_GuardBroken` does not reuse that Notify: its dedicated Montage End Delegate must also handle interruption, clear the exhaustion gate, and restore at least one stamina. Enemy recovery has double coverage (delegate + AnimNotify with state guards). Because `EActionState` is serialized by existing Blueprint and AnimNotify assets, new values must be appended rather than inserted so historical enum values remain stable.
 
 <a name="player-state-machine-flow"></a>
 ## Player State Machine Flow
@@ -111,11 +111,13 @@ Core character/combat state-machine enums and small shared combat-flow enums are
 | `EAS_UnOccupied` | Normal state. Movement, attack, jump, sprint, block, parry, dodge, and potion entry are handled through guards. Blocking is a sub-state via `bIsBlocking`. |
 | `EAS_Attacking` | Attack montage is playing. Used by normal combo, sprint attack, and charged attack. |
 | `EAS_Stunning` | Player hit react / short stun. |
-| `EAS_Exhausted` | Stamina exhausted. Player can only walk until timed recovery. |
+| `EAS_Exhausted` | Stamina exhausted. Normal movement still uses `RunSpeed`, but sprint, jump, attack, dodge, block, parry, and bow aiming cannot start until the guarded `3 s` recovery completes. |
+| `EAS_GuardBroken` | Dedicated player guard-break stun. It shares HitReact input-lock semantics but has its own Montage End Delegate, exhaustion cleanup, and minimum-stamina recovery; repeated nonlethal hits cannot replace or extend it. |
 | `EAS_Parrying` | Parry montage is playing. `bParryActive` marks the active parry window. |
 | `EAS_Dodging` | Dodge montage is playing. Invulnerability is driven by `UAnimNotifyState_DodgeInvulnerable`. |
 | `EAS_UsingPotion` | Potion montage is playing. Movement remains allowed at walk speed. |
 | `EAS_Dead` | Death state. Collision and movement are disabled. |
+| `EAS_Aiming` | Bow aim hold. Right-click held intent may transition to a ranged release; a hit, Guard Break, death, or explicit cancel clears the aim state. |
 
 ```mermaid
 stateDiagram-v2
@@ -124,9 +126,11 @@ stateDiagram-v2
     UnOccupied --> Attacking : Attack / sprint attack / charged attack
     UnOccupied --> Stunning : Hit react
     UnOccupied --> Exhausted : Stamina reaches zero
+    UnOccupied --> GuardBroken : Blocking hit consumes remaining stamina
     UnOccupied --> Parrying : Parry input
     UnOccupied --> Dodging : Dodge input
     UnOccupied --> UsingPotion : Potion input
+    UnOccupied --> Aiming : Bow aim input
 
     note right of UnOccupied
         Blocking is a sub-state:
@@ -137,11 +141,14 @@ stateDiagram-v2
     Attacking --> Exhausted : Montage ended while exhaustion timer active
     Stunning --> UnOccupied : Hit react recovery
     Exhausted --> UnOccupied : RecoverFromExhaustion
+    Exhausted --> GuardBroken : Unblocked hit
+    GuardBroken --> UnOccupied : Montage end or interruption
     Parrying --> UnOccupied : Montage ended + cooldown
     Dodging --> UnOccupied : Montage ended
     Dodging --> Exhausted : Montage ended while exhaustion timer active
     UsingPotion --> UnOccupied : Montage ended
     UsingPotion --> Exhausted : Potion ended while exhaustion timer active
+    Aiming --> UnOccupied : Release or cancel
 
     Parrying --> Stunning : Hit during failed parry
     UsingPotion --> Stunning : Interrupted by hit
@@ -150,16 +157,18 @@ stateDiagram-v2
     Attacking --> Dead : Health <= 0
     Stunning --> Dead : Health <= 0
     Exhausted --> Dead : Health <= 0
+    GuardBroken --> Dead : Health <= 0
     Parrying --> Dead : Health <= 0
     Dodging --> Dead : Health <= 0
     UsingPotion --> Dead : Health <= 0
+    Aiming --> Dead : Health <= 0
 ```
 
 ### Stamina / Exhaustion Flow
 
 ```mermaid
 flowchart LR
-    A[Attack / dodge / parry / sprint] -->|UseStamina| B[AttributeComponent]
+    A[Attack / dodge / parry / jump / sprint / successful block] -->|UseStamina| B[AttributeComponent]
     B --> C{Stamina <= 0?}
     C -->|No| D[Continue current action]
     C -->|Yes| E[OnExhausted delegate]
@@ -171,10 +180,11 @@ flowchart LR
     J[Stamina below max] -->|after regen delay| K[Tick stamina regen]
 ```
 
-- The project intentionally allows stamina overdraft for a final committed action.
-- Montage end handlers must check the exhaustion timer before restoring `EAS_UnOccupied`.
-- Attack recovery uses `ShouldRecoverToExhausted_Attack()` because attack has the extra `bPendingExhaustedAfterAttack` flag.
-- Dodge / parry / potion use `RecoverActionStateAfterMontage(...)` and the generic exhaustion check.
+- The project intentionally allows a final committed action to overdraw stamina before the public value clamps to zero.
+- Positive-cost successful blocks and jumps reset `StaminaRegenDelay`; sprint resets it continuously while it is actually consuming stamina. Attacks and dodges additionally pause regeneration during their committed montage and reset the delay when they recover.
+- Montage end handlers must check the exhaustion timer before restoring `EAS_UnOccupied`. The current `EAS_Exhausted` recovery duration is `3 s`.
+- Attack recovery uses `ShouldRecoverToExhausted_Attack()` because attack has the extra `bPendingExhaustedAfterAttack` flag. Dodge / parry / potion use `RecoverActionStateAfterMontage(...)` and the generic exhaustion check.
+- Guard Break clears the ordinary exhaustion timer, then recovers only through its state-guarded Montage End Delegate. It resets the exhaustion flag and restores at least one stamina instead of stacking a second timed Exhausted penalty.
 
 ### Weapon State (`EWeaponState`)
 
@@ -424,6 +434,7 @@ FCombatTeamHelper (static helper: ShareTeamTag for same-team detection via Actor
 - **通用恢复路径**：`RecoverActionStateAfterMontage(ExpectedState, bResumeStaminaRegen)` 处理 parry/dodge/potion 的蒙太奇结束恢复，返回最终 `EActionState`。调用方如有动作专属尾部逻辑必须使用返回值；`OnDodgeMontageEnded()` 在恢复到 `EAS_Exhausted` 时提前 return，保持旧版"耗尽后不重启移动噪音"行为。
 - **攻击专属恢复**：`RecoverFromAttackMontageEnd()` 处理攻击自然结束和打断后的共同恢复：恢复旋转、取消蓄力输入、重置连招、解决攻击耗尽、清除 `bPendingExhaustedAfterAttack`、恢复体力恢复。`CleanupInterruptedAttack()` 保留为打断语义入口并转发到该 helper；攻击恢复保持独立，不与通用恢复路径混用。
 - **受击恢复入口**：`AMyCharacter::OnHitReactEnd()` 由 `UAnimNotify_CharacterHitReactEnd` 转发调用，内部复用 `RecoverActionStateAfterMontage(EAS_Stunning, false)`。Notify 不直接修改玩家 `ActionState`，避免恢复逻辑漂移。
+- **破防恢复入口**：`StartGuardBreak()` 进入独立 `EAS_GuardBroken`，清理连招、举盾 held、弹反、蓄力、弓瞄准、冲刺、移动噪音与旧 Exhaustion Timer。它播放 `UPlayerActionConfigDataAsset::GuardBreak.Montage` 并绑定专用 End Delegate；自然结束或非死亡中断只在状态仍为 `EAS_GuardBroken` 时调用 `RecoverFromGuardBreak()`，重置耗尽门卫、补至少 `1` 点体力并恢复 `UnOccupied`。普通 HitReact Notify 不参与该路径。
 - **扩展指引**：添加新的蒙太奇驱动动作时，优先复用这些 helper，再考虑新增 `EActionState` 或更广 HFSM。
 
 <a name="player-action-start-entry"></a>
@@ -540,10 +551,12 @@ FCombatTeamHelper (static helper: ShareTeamTag for same-team detection via Actor
 ## Stamina & Exhaustion System
 
 - `UAttributeComponent` manages stamina: `UseStamina()`, `AddStamina()`, `CheckStamina()`.
-- Stamina can temporarily go negative (e.g. 5 stamina → attack costs 15 → -10) to allow "last action" before exhaustion.
-- When stamina hits 0, `OnExhausted` broadcasts → `HandleExhausted()` sets `EAS_Exhausted` + starts 5s timer.
-- During Exhausted: player can only walk. `RecoverFromExhaustion()` resets state to `EAS_UnOccupied` with state guard.
-- **"最后一击"设计**：透支时允许播放动画，蒙太奇结束回调中检查 `IsExhaustionTimerActive()`，如果计时器活跃则恢复到 `EAS_Exhausted`。
+- A final committed stamina action may overdraw internally before `UseStamina()` clamps the public current value to zero and broadcasts `OnExhausted`.
+- Default recovery is `20/s` after the configured `2 s` delay. Blocking uses the ActionConfig multiplier (`0.7` by default), and exiting or interrupting Block restores the multiplier to `1.0`.
+- Every successful jump and positive-cost successful block resets the delay. Sprint resets it only while its existing valid-consumption gate is true; attack and dodge also pause recovery during their committed montage.
+- When stamina reaches zero outside the Guard Break request path, `OnExhausted` → `HandleExhausted()` sets `EAS_Exhausted` and starts the current `3 s` recovery timer. Exhausted permits normal `RunSpeed` movement but rejects sprint, jump, attack, dodge, block, parry, and bow-aim entry.
+- **"最后一击"设计**：透支时允许播放动作；蒙太奇结束回调检查耗尽计时器，再恢复到 `EAS_Exhausted`。`RecoverFromExhaustion()` is state-guarded and clears the exhaustion latch before restoring at least one stamina.
+- A valid depleted block, or an unblocked hit received while already Exhausted, instead enters `EAS_GuardBroken`: the resolver still applies its ordinary damage decision once, then the dedicated Guard Break Montage owns the separate recovery contract.
 
 <a name="shield-blocking-system"></a>
 ## Shield & Blocking System
@@ -552,7 +565,7 @@ FCombatTeamHelper (static helper: ShareTeamTag for same-team detection via Actor
 - `AShield` — 副手装备，参数载体：`BlockHalfAngleDegrees`(角度)、`BlockedDamageMultiplier`(减伤)、`BlockStaminaCost`(每次格挡基础耗体)、`BlockMoveSpeedMultiplier`(移速)。
 - 按住防御：`bBlockInputHeld` + `bIsBlocking` 双标志，不新增 `EActionState`，防御中 `ActionState` 保持 `EAS_UnOccupied`。
 - 防御恢复体力倍率：`UPlayerActionConfigDataAsset::Block.StaminaRegenMultiplier` 控制举盾期间自然恢复速度，默认 `0.7`；进入 Block 时写入 `UAttributeComponent`，退出/打断 Block 时恢复为 `1.0`。
-- `TryBlockHit(const FCombatHitRequest&)` 判定链：存活 → 方向(`DotProduct` vs `Cos(HalfAngle)`) → request 中的弹反许可/体力成本检查 → 扣体力 + 减伤。它只读取本次命中快照，不从攻击者的瞬时招式字段反推参数。
+- `TryBlockHit(const FCombatHitRequest&)` 判定链：存活 → 方向(`DotProduct` vs `Cos(HalfAngle)`) → request 中的弹反许可/体力成本检查 → 扣体力 + 刷新正耗体命中的恢复延迟 + 减伤。它只读取本次命中快照，不从攻击者的瞬时招式字段反推参数。若 `0 < CurrentStamina <= StaminaCost`，本次仍按盾牌减伤结算并消耗剩余体力，但在 Resolver 完成该次伤害后请求 `EAS_GuardBroken`；不会退化为未格挡伤害或叠加普通 `EAS_Exhausted` 计时器。
 - 格挡拦截点：`FCombatHitResolver` 在 `ApplyDamage()` 前、仅跨阵营触发。格挡成功时 `bPlayNormalHitReact = false` 跳过受击硬直；该路径被近战和投射物共同复用。
 - 防御转主动动作：`Dodge` / `Parry` 可从 `bIsBlocking` 子状态启动；启动前 `InterruptBlock(false)` 停止 Block Montage 但保留右键 held 意图，便于动作结束后恢复举盾。
 
@@ -626,7 +639,7 @@ FCombatTeamHelper (static helper: ShareTeamTag for same-team detection via Actor
 
 - **入口职责**：`UPlayerCharacterProfileDataAsset` 是主角 Blueprint 的单一配置入口，只引用子 DataAsset，不复制所有字段，不持有 runtime state。
 - **当前子配置**：`AttackConfig` 指向现有 `UAttackConfigDataAsset`；`ActionConfig` 指向 `UPlayerActionConfigDataAsset`；`ReactionConfig` 指向 `UHitReactionConfigDataAsset`。
-- **ActionConfig 范围**：`UPlayerActionConfigDataAsset` 保存主角专属动作配置：`Dodge.Montage/Priority/StaminaCost`、`Block.Montage/Priority/BlockRaiseSection/StaminaRegenMultiplier`、`Parry.Montage/Priority`、`Potion.Montage/Priority/HealPercent/Cooldown/FallbackHealSound`，并通过 `SharedPriority` 保存 `Attack` / `HitReact` / `Death` 的共享优先级。`Attack` montage/连招仍归 `PlayerProfile->AttackConfig`；主角 `HitReact` / `Death` montage 配置归 `PlayerProfile->ReactionConfig`；敌人当前归 `AEnemy::HitReactionConfig`。
+- **ActionConfig 范围**：`UPlayerActionConfigDataAsset` 保存主角专属动作配置：`Dodge.Montage/Priority/StaminaCost`、`Block.Montage/Priority/BlockRaiseSection/StaminaRegenMultiplier`、`GuardBreak.Montage`、`Parry.Montage/Priority`、`Potion.Montage/Priority/HealPercent/Cooldown/FallbackHealSound`，并通过 `SharedPriority` 保存 `Attack` / `HitReact` / `Death` 的共享优先级。`Attack` montage/连招仍归 `PlayerProfile->AttackConfig`；主角 `HitReact` / `Death` montage 配置归 `PlayerProfile->ReactionConfig`；敌人当前归 `AEnemy::HitReactionConfig`。
 - **行为所有权**：`AMyCharacter` 仍负责状态切换、Montage 播放、打断清理和恢复；DataAsset 只提供配置。
 - **运行时兜底调参**：`AMyCharacter::PIETargetMaxFPS` 默认 `120`，在 `BeginPlay()` 中调用 `GEngine->SetMaxFPS()` 作为 PIE / 运行时帧率上限兜底；设为 `0` 表示不覆盖当前 `t.MaxFPS`。
 - **配置失败语义**：未设置 `PlayerProfile`、`AttackConfig`、`ActionConfig` 或 `ReactionConfig` 时输出 warning；缺少 `ReactionConfig` 时主角受击/死亡不播放对应蒙太奇，也不读取角色本体 `HitReactionConfig`。`Potion.Montage` 为空不是错误配置，喝药会按 `Potion.HealPercent` 立即回血并按 `Potion.Cooldown` 进入冷却。

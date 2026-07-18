@@ -78,6 +78,11 @@ void UPlayerActionConfigDataAsset::LogConfigWarnings() const
 		UE_LOG(LogTemp, Warning, TEXT("%s: Block.Montage is not set."), *GetName());
 	}
 
+	if (!GuardBreak.Montage)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s: GuardBreak.Montage is not set; guard breaks will fall back to Exhausted recovery."), *GetName());
+	}
+
 	if (!Parry.Montage)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("%s: Parry.Montage is not set."), *GetName());

@@ -179,7 +179,7 @@ protected:
 
 	// 体力耗尽后恢复时间
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "State", meta = (ToolTip = "体力耗尽后自动恢复的时间（秒）。"))
-	float ExhaustedTime = 5.f;
+	float ExhaustedTime = 3.f;
 
 	/* 移动速度 */
 	UPROPERTY(EditDefaultsOnly, Category = "Movement", meta = (ToolTip = "步行速度。"))
@@ -196,6 +196,9 @@ private:
 	bool ShouldRecoverToExhausted_Generic() const;
 	bool ShouldRecoverToExhausted_Attack() const;
 	void EnsureExhaustionRecoveryTimer();
+	void StartGuardBreak();
+	void OnGuardBreakMontageEnded(UAnimMontage* Montage, bool bInterrupted);
+	void RecoverFromGuardBreak();
 	EActionState RecoverActionStateAfterMontage(EActionState ExpectedState, bool bResumeStaminaRegen);
 	void RecoverFromAttackMontageEnd();
 	void CleanupInterruptedAttack();
@@ -317,6 +320,7 @@ private:
 	float ChargeInputThreshold = 0.2f;
 
 	bool bPendingExhaustedAfterAttack = false;
+	bool bGuardBreakRequested = false;
 
 	// 弓的瞄准输入仅在主手实际是 ABow 时生效；不与剑的蓄力状态复用。
 	bool bBowDrawInputHeld = false;
@@ -495,6 +499,12 @@ private:
 	{
 		const UPlayerActionConfigDataAsset* ActionConfig = GetActionConfig();
 		return ActionConfig ? ActionConfig->Block.Montage.Get() : nullptr;
+	}
+
+	FORCEINLINE UAnimMontage* GetGuardBreakMontage() const
+	{
+		const UPlayerActionConfigDataAsset* ActionConfig = GetActionConfig();
+		return ActionConfig ? ActionConfig->GuardBreak.Montage.Get() : nullptr;
 	}
 
 	FORCEINLINE UAnimMontage* GetParryMontage() const

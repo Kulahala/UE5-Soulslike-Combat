@@ -188,7 +188,9 @@ void AMyCharacter::Tick(float DeltaTime)
 		RefreshCurrentInteractable();
 	}
 
-	if (ActionState == EActionState::EAS_Stunning || ActionState == EActionState::EAS_Dead) return;
+	if (ActionState == EActionState::EAS_Stunning
+		|| ActionState == EActionState::EAS_GuardBroken
+		|| ActionState == EActionState::EAS_Dead) return;
 
 	if (bIsBlocking && ShouldInterruptBlock())
 	{
@@ -760,6 +762,7 @@ void AMyCharacter::Jump()
 		if (Attributes)
 		{
 			Attributes->UseStamina(10.f);
+			Attributes->ResetStaminaRegenCooldown();
 		}
 		Super::Jump();
 	}
@@ -770,6 +773,7 @@ void AMyCharacter::GetHit_Implementation(const FVector& ImpactPoint, AActor* Hit
 	if (bDodgeInvulnerable) return;  // 翻滚无敌帧
 	if (bBonfireServiceProtected)
 	{
+		bGuardBreakRequested = false;
 		ResetPendingHitContext();
 		return;
 	}
@@ -780,6 +784,16 @@ void AMyCharacter::GetHit_Implementation(const FVector& ImpactPoint, AActor* Hit
 	}
 	// 受击是强制中断：不能因为物理右键仍按住而在硬直结束后自动重新瞄准。
 	CancelBowAim(true);
+
+	const bool bGuardBreakFromExhaustion = ActionState == EActionState::EAS_Exhausted;
+	const bool bAlreadyGuardBroken = ActionState == EActionState::EAS_GuardBroken;
+	if (bGuardBreakFromExhaustion || bAlreadyGuardBroken)
+	{
+		// Guard Break 保留本次伤害与后退，但不允许普通受击蒙太奇覆盖专用硬直。
+		PendingHitContext.bSuppressNormalHitReact = true;
+		PendingHitContext.bApplyStun = false;
+		bGuardBreakRequested |= bGuardBreakFromExhaustion;
+	}
 
 	Super::GetHit_Implementation(ImpactPoint, HitInstigator);
 
@@ -792,7 +806,11 @@ void AMyCharacter::GetHit_Implementation(const FVector& ImpactPoint, AActor* Hit
 		}
 	}
 
-	if (Attributes->IsAlive() && PendingHitContext.bApplyStun)
+	if (Attributes->IsAlive() && bGuardBreakRequested)
+	{
+		StartGuardBreak();
+	}
+	else if (Attributes->IsAlive() && PendingHitContext.bApplyStun)
 	{
 		ResetCombo();
 		CloseActionCancelWindow();
@@ -805,6 +823,7 @@ void AMyCharacter::GetHit_Implementation(const FVector& ImpactPoint, AActor* Hit
 		StopMovementNoiseTimer();
 	}
 
+	bGuardBreakRequested = false;
 	ResetPendingHitContext();  // 最末层清理
 }
 
@@ -827,6 +846,8 @@ void AMyCharacter::Die()
 	CancelChargeInputState();
 	CancelBowAim(true);
 	bPendingExhaustedAfterAttack = false;
+	bGuardBreakRequested = false;
+	GetWorldTimerManager().ClearTimer(ExhaustionTimerHandle);
 	ClearLockOn();
 	bRecenteringCamera = false; // 新增：死亡时中断归中
 	ActionState = EActionState::EAS_Dead;
@@ -860,6 +881,7 @@ void AMyCharacter::BeginDeathRespawnFlow()
 
 void AMyCharacter::HandleExhausted()
 {
+	if (bGuardBreakRequested) return;
 	if (ActionState == EActionState::EAS_UsingPotion) return;
 	if (ActionState == EActionState::EAS_Attacking)
 	{
@@ -886,6 +908,67 @@ void AMyCharacter::RecoverFromExhaustion()
 	// 体力可能因"最后一击"过扣为负，先重置门卫再加，避免 bStaminaJustDepleted 卡死
 	Attributes->ResetExhaustionFlag();
 	Attributes->AddStamina(1.f);
+}
+
+void AMyCharacter::StartGuardBreak()
+{
+	if (!Attributes || !Attributes->IsAlive())
+	{
+		return;
+	}
+
+	GetWorldTimerManager().ClearTimer(ExhaustionTimerHandle);
+	bPendingExhaustedAfterAttack = false;
+	ResetCombo();
+	CloseActionCancelWindow();
+	InterruptBlock(true);
+	if (bIsParrying)
+	{
+		InterruptParry();
+	}
+	CancelChargeInputState();
+	CancelBowAim(true);
+	bIsSprinting = false;
+	StopMovementNoiseTimer();
+	ActionState = EActionState::EAS_GuardBroken;
+
+	UAnimMontage* GuardBreakMontage = GetGuardBreakMontage();
+	UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
+	if (!GuardBreakMontage || !AnimInstance || AnimInstance->Montage_Play(GuardBreakMontage) <= 0.f)
+	{
+		UE_LOG(LogTemp, Warning,
+		       TEXT("%s: Guard Break montage is unavailable; falling back to Exhausted recovery."), *GetName());
+		ActionState = EActionState::EAS_Exhausted;
+		EnsureExhaustionRecoveryTimer();
+		return;
+	}
+
+	BindMontageEndDelegate(AnimInstance, GuardBreakMontage, &AMyCharacter::OnGuardBreakMontageEnded);
+}
+
+void AMyCharacter::OnGuardBreakMontageEnded(UAnimMontage* /*Montage*/, bool /*bInterrupted*/)
+{
+	RecoverFromGuardBreak();
+}
+
+void AMyCharacter::RecoverFromGuardBreak()
+{
+	if (ActionState != EActionState::EAS_GuardBroken)
+	{
+		return;
+	}
+
+	ActionState = EActionState::EAS_UnOccupied;
+	if (Attributes)
+	{
+		Attributes->ResetExhaustionFlag();
+		Attributes->AddStamina(1.f);
+	}
+
+	if (GetLastMovementInputVector().SizeSquared2D() > KINDA_SMALL_NUMBER)
+	{
+		StartMovementNoiseTimer();
+	}
 }
 
 bool AMyCharacter::IsExhaustionTimerActive() const
@@ -933,6 +1016,8 @@ bool AMyCharacter::CanStartBlock() const
 
 void AMyCharacter::StartBlockInput()
 {
+	if (ActionState == EActionState::EAS_GuardBroken) return;
+
 	bBlockInputHeld = true;
 	bIsSprinting = false;
 	if (IsBowEquipped())
@@ -1046,12 +1131,33 @@ FBlockResult AMyCharacter::TryBlockHit(const FCombatHitRequest& Request)
 	float CosHalf = FMath::Cos(FMath::DegreesToRadians(EquippedShield->GetBlockHalfAngleDegrees()));
 	if (Dot < CosHalf) return Result;
 
-		const float StaminaCost = EquippedShield->GetBlockStaminaCost() * Request.BlockStaminaDamageMultiplier;
-		if (Attributes->GetCurrentStamina() < StaminaCost) return Result;
+	const float StaminaCost = FMath::Max(0.f,
+		EquippedShield->GetBlockStaminaCost() * Request.BlockStaminaDamageMultiplier);
+	const float CurrentStamina = Attributes->GetCurrentStamina();
+	if (StaminaCost > 0.f && CurrentStamina <= 0.f)
+	{
+		return Result;
+	}
 
+	const bool bWillGuardBreak = StaminaCost > 0.f && CurrentStamina <= StaminaCost;
+	if (bWillGuardBreak)
+	{
+		// UseStamina() 同步广播 OnExhausted，必须先标记破防才能防止旧 Exhausted 计时器抢占状态。
+		bGuardBreakRequested = true;
+		Attributes->UseStamina(CurrentStamina);
+	}
+	else
+	{
 		Attributes->UseStamina(StaminaCost);
-		Result.bBlocked = true;
-		Result.DamageAfterBlock = Request.IncomingDamage * EquippedShield->GetBlockedDamageMultiplier();
+	}
+	if (StaminaCost > 0.f)
+	{
+		// 成功格挡的耐力消耗与其他动作一致：命中后重新等待自然恢复。
+		Attributes->ResetStaminaRegenCooldown();
+	}
+
+	Result.bBlocked = true;
+	Result.DamageAfterBlock = Request.IncomingDamage * EquippedShield->GetBlockedDamageMultiplier();
 	Result.bPlayNormalHitReact = false;
 	LastDamageFlashScale = EquippedShield->GetBlockedDamageMultiplier();  // 染红按减伤率缩放
 
@@ -2142,6 +2248,7 @@ EPlayerActionType AMyCharacter::GetCurrentPlayerActionType() const
 	case EActionState::EAS_Aiming:
 		return EPlayerActionType::RangedAim;
 	case EActionState::EAS_Stunning:
+	case EActionState::EAS_GuardBroken:
 		return EPlayerActionType::HitReact;
 	case EActionState::EAS_Dead:
 		return EPlayerActionType::Death;
@@ -2532,7 +2639,7 @@ bool AMyCharacter::ConsumeProjectilePrepareFailureForDebug()
 
 void AMyCharacter::Sprint()
 {
-	if (bIsBlocking) return;
+	if (bIsBlocking || ActionState == EActionState::EAS_GuardBroken) return;
 	bIsSprinting = true;
 
 	// 冲刺开始时立即发出噪音（不等定时器）
@@ -2549,6 +2656,7 @@ void AMyCharacter::StopSprinting()
 
 void AMyCharacter::Walk()
 {
+	if (ActionState == EActionState::EAS_GuardBroken) return;
 	bIsWalking = true;
 }
 
@@ -2723,7 +2831,9 @@ void AMyCharacter::ToggleLockOn()
 bool AMyCharacter::SwitchLockOnTarget(bool bSwitchToRight)
 {
 	if (!LockOnComponent || !IsLockingOn()
-		|| ActionState == EActionState::EAS_Dead || ActionState == EActionState::EAS_Stunning)
+		|| ActionState == EActionState::EAS_Dead
+		|| ActionState == EActionState::EAS_Stunning
+		|| ActionState == EActionState::EAS_GuardBroken)
 	{
 		return false;
 	}
@@ -2780,7 +2890,9 @@ void AMyCharacter::UpdateLockOn(float DeltaTime)
 	// 1. 有效性检查（无论是否应用旋转都必须执行，防止 targeted 标记残留）
 	if (!IsLockOnTargetValid())
 	{
-		if (ActionState != EActionState::EAS_Dead && ActionState != EActionState::EAS_Stunning
+		if (ActionState != EActionState::EAS_Dead
+			&& ActionState != EActionState::EAS_Stunning
+			&& ActionState != EActionState::EAS_GuardBroken
 			&& TryRetargetLockOnAfterTargetDeath())
 		{
 			return;
@@ -2791,7 +2903,9 @@ void AMyCharacter::UpdateLockOn(float DeltaTime)
 	}
 
 	// 2. 死亡/硬直中不应用转向
-	if (ActionState == EActionState::EAS_Dead || ActionState == EActionState::EAS_Stunning) return;
+	if (ActionState == EActionState::EAS_Dead
+		|| ActionState == EActionState::EAS_Stunning
+		|| ActionState == EActionState::EAS_GuardBroken) return;
 
 	UpdateLockOnControlRotation(DeltaTime);
 	UpdateLockOnActorFacing(DeltaTime);

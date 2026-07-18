@@ -18,29 +18,24 @@
 
 ## 计划 (Plan)
 
-### TODO-04C: Scroll-Wheel Lock Target Switching v1
+### TODO-05A: Player Guard Break v1
 
-**状态：✅已执行，已通过。** 以独立 `Axis1D` 滚轮输入切换锁定目标：下滚选择当前目标屏幕右侧最近候选，上滚选择左侧最近候选。无同侧候选时保持原目标；不引入环绕、解锁、额外 UI、SaveGame、地图 Actor 或新的动作状态。
+**状态：✅已执行，已通过。** 为玩家格挡体力耗尽和 Exhausted 未格挡受击增加 `EAS_GuardBroken`。本次仍由既有 `FCombatHitResolver` 一次结算伤害；破防只影响玩家端的受击表现与动作状态。
 
 #### 固定边界
 
-- `UPlayerLockOnComponent` 负责按存活、`LockOnRadius`、viewport 投影和当前目标屏幕 X 侧筛选候选；不加入 LOS Trace，不复用初始锁定的 `LockOnViewAngleDegrees`。
-- `AMyCharacter::SwitchLockOnTarget()` 只在现有有效锁定内直接调用组件的 `SetLockedTarget()`，不可调用首次锁定用的 `SetLockOnTarget()`，避免重复缓存旋转状态。
-- `ACharacterController` 只负责 `IA_LockTargetSwitch` 的输入阈值 `0.5`、re-arm `0.1`、成功切换冷却 `0.15 s`，以及暂停/火堆 UI 拦截。正轴（上滚）切左，负轴（下滚）切右。
-- 活动锁定时允许攻击、格挡、翻滚、喝药和瞄准切换；死亡、硬直、暂停与火堆 UI 拒绝。`Input_Look()`、中键 `IA_LockOn`、锁定相机和 FreeRun 合同保持不变。
-- 当前锁定目标死亡时，`AMyCharacter` 仅复用既有 `FindBestTarget()` 在当前相机前方和 `LockOnRadius` 内选择下一有效敌人，并直接转交组件目标标记；没有候选时沿用现有解锁。超出 `LockOnBreakRadius`、Actor 无效或玩家死亡不触发自动换目标。
-
-#### 实施顺序
-
-1. 更新 C++ 锁定组件、玩家入口与 Controller 输入绑定/锁存；完成轻量静态检查后由用户手动编译 `TestEditor`。
-2. 编译后完成 Live Editor MCP `initialize -> tools/list ->` 只读预检和恢复点，再创建 `IA_LockTargetSwitch`、在 `IMC_CharacterInput` 映射 `Mouse Wheel Axis`，并为 `BP_CharacterController` 赋值；工具不可用时提供精确手工接线步骤。
-3. 使用现有 TestMap 的 Paladin 和 Erika 手动 PIE 验收方向、无候选保持、输入节流、动作中切换、死亡自动重定向/UI gate 和现有锁定/敌人回归。
-4. 通过后进行正常及对抗性 review，并同步 `ARCHITECTURE.md`、`ROADMAP.md`、`plan.md` 后等待独立提交批准。
+- 正面有效格挡且 `0 < CurrentStamina <= StaminaCost` 时，本次仍按盾牌减伤结算、消耗剩余体力并请求破防；耗体为 `0` 的配置不触发破防。
+- 已处于 `EAS_Exhausted` 时的未格挡受击保留全额伤害，但拑制普通 HitReact/硬直，同样进入破防。破防期间后续非致死伤害不重播、不延长、不覆盖当前破防。
+- `AM_GuardBreak_DKM` 为专用、原地、无 Root Motion 的 `DefaultSlot` Montage；无效配置只 warning 并安全回退 `EAS_Exhausted`。不新增 HUD、SaveGame、输入资产、敌人类或通用状态机。
+- 破防自然结束或非死亡中断后直接回 `UnOccupied`，清理耗尽门卫并保底 `1` 点体力；不叠加既有 `3 s` Exhausted。
 
 #### 当前执行记录
 
-- 已确认现有 `Input_Look()` 在锁定时直接返回，当前不存在滚轮 Input Action；新增独立 Enhanced Input Action 是最小输入边界。
-- 已确认 `AMyCharacter::SetLockOnTarget()` 会调用 `CacheLockOnRotationState()`；锁定内目标切换必须走新的窄入口，不能复用该首次锁定路径。
-- 当前用户 WIP `DA_EnemyAttack_ErikaArcher.uasset` 与 `Content/__ExternalActors__/_GAME/BP/Maps/TestMap/C/GG/A3OYSKXOUMFGPZ2YEKXTZL.uasset` 持续排除。
-- 严格 review：正常与对抗性检查均确认屏幕侧选择、标记交接、旋转缓存、输入锁存、无候选保持、跑远解锁和输入资产接线没有阻塞。P2 已修复：自动重定向 gate 现同时排除 `EAS_Dead` 和 `EAS_Stunning`，硬直中当前目标死亡会回退到既有解锁路径，而非转交新目标。当前 Demo 没有可实际构造“玩家硬直中杀死锁定目标”的 fixture，用户已接受该窄 gate 的静态复核替代额外测试工具。
-- 文档已同步稳定锁定输入、屏幕侧选择、死亡自动重定向与硬直/跑远解锁边界；`TODO-04C` 已移入 `ROADMAP.md` Done Milestones。`README.md` 不改，等待独立提交批准。
+- 已完成代码/命中链路和 server-memory 预检；当前无匹配的历史错误模式。
+- 用户已完成 Guard Break 资产接线、`TestEditor` 编译和原始 PIE 验收。C++ 实现包含 `EAS_GuardBroken`、格挡减伤保留、Exhausted 受击与破防期间普通 HitReact 抑制、Montage 委托恢复、输入/锁定/AnimInstance gate。
+- UnrealClaude 编辑器 MCP 未连接，不对 `.uasset` 作二进制修改。C++ 编译通过后由用户导入新的 DarkKnight 兼容破防动画，创建 `AM_GuardBreak_DKM`，并赋值到 `DA_PlayerActionConfig.GuardBreak.Montage`。
+- 后续耐力一致性收口已完成：跳跃和正耗体的成功格挡都会刷新 `StaminaRegenDelay`，`ExhaustedTime` 从 `5 s` 调为 `3 s`。用户已完成针对性 PIE 复验。
+- 严格 review 已完成。正常与对抗性检查确认命中事务、`<=` 耗尽边界、`OnExhausted` 抑制范围、Montage 委托恢复、死亡/迟到回调和输入清理没有剩余阻塞；发现的枚举序列化兼容问题已通过将 `EAS_GuardBroken` 追加到 `EActionState` 末尾修复，用户已重新编译并回归验证。
+- 文档已完成收尾：`TODO-05A` 移入 `ROADMAP.md` Done Milestones，`ARCHITECTURE.md` 固化 Guard Break、体力恢复和枚举追加契约；`TODO-05A1` 仍作为独立的 Combat Presence 脱战冲刺耐力阶段排队。
+- `TODO-05A1: Combat-Aware Sprint Stamina v1` 已记录到 `ROADMAP.md`；本阶段不实现 Combat Presence，也不以锁定状态代替战斗判定。
+- 当前用户 WIP `DA_EnemyAttack_ErikaArcher.uasset` 与 TestMap External Actor 持续排除。
