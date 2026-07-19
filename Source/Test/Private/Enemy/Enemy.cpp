@@ -11,6 +11,7 @@
 #include "Combat/CombatTeamHelper.h"
 #include "Combat/CombatProjectile.h"
 #include "Combat/EnemyAttackConfigDataAsset.h"
+#include "Combat/HitReactionConfigDataAsset.h"
 #include "components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/WidgetComponent.h"
@@ -192,6 +193,7 @@ void AEnemy::BeginPlay()
 		UE_LOG(LogTemp, Warning, TEXT("%s: HitReactionConfig is not set. Hit reactions and death montages will not play."),
 		       *GetName());
 	}
+	ValidateStanceBreakConfig();
 }
 
 #if WITH_EDITOR
@@ -201,6 +203,7 @@ void AEnemy::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
 
 	ApplyAuthoredPerceptionConfig();
 	ValidateEnemyAttackConfig();
+	ValidateStanceBreakConfig();
 }
 #endif
 
@@ -284,6 +287,7 @@ void AEnemy::SetArchetypeCombatSpacingDefaults(float InTooCloseRadius, float InA
 void AEnemy::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	// 兜底：定时器全量清理，覆盖 Die() 未执行的路径（关卡切换、编辑器 Stop 等）
+	ClearStanceBreakMontagePresentation(true);
 	ClearAllTimers();
 	ClearArchetypeCombatState();
 	ClearActiveProjectileAttack();
@@ -326,9 +330,23 @@ void AEnemy::GetHit_Implementation(const FVector& ImpactPoint, AActor* HitInstig
 		return;
 	}
 
+	const bool bWasInStanceBreak = EnemyState == EEnemyState::EES_StanceBreak;
+	if (bWasInStanceBreak)
+	{
+		// 失衡窗口仍承受伤害和击退，但不能让普通受击蒙太奇/状态覆盖专用失衡蒙太奇。
+		PendingHitContext.bSuppressNormalHitReact = true;
+		PendingHitContext.bApplyStun = false;
+	}
+
 	//DrawDebugSphere(this->GetWorld(), ImpactPoint, 5, 10, FColor::Red, false, 5.0f, 0, 0.5f);
 	Super::GetHit_Implementation(ImpactPoint, HitInstigator);
 	ShowHealthBar();
+
+	if (bWasInStanceBreak && Attributes->IsAlive() && !PendingHitContext.bWasBlocked)
+	{
+		// BaseCharacter 因抑制普通受击而跳过了这次反馈；失衡中仍应保留一次命中特效/音效。
+		PlayHitEffects(ImpactPoint);
+	}
 
 	// 武器命中才触发硬直（DOT 不经过 GetHit，不会触发）
 	if (Attributes->IsAlive() && HitInstigator)
@@ -338,7 +356,7 @@ void AEnemy::GetHit_Implementation(const FVector& ImpactPoint, AActor* HitInstig
 		{
 			ChasingTarget = HitInstigator;
 		}
-		if (PendingHitContext.bApplyStun)
+		if (!bWasInStanceBreak && PendingHitContext.bApplyStun)
 		{
 			SetEnemyState(EEnemyState::EES_Stunned);
 		}
@@ -367,6 +385,7 @@ float AEnemy::TakeDamage(float DamageAmount, const struct FDamageEvent& DamageEv
 
 void AEnemy::Die()
 {
+	ClearStanceBreakMontagePresentation(true);
 	ClearAllTimers();
 	ClearArchetypeCombatState();
 #if !UE_BUILD_SHIPPING
@@ -374,8 +393,7 @@ void AEnemy::Die()
 	bRangedDebugProbeCompleted = true;
 	DebugProbeController.Reset();
 #endif
-	bPendingStanceBreak = false;
-	LastPoiseDamageInstigator = nullptr;
+	ClearPendingStanceBreak();
 
 	StopEnemyMovementIfPossible();
 
@@ -454,6 +472,7 @@ void AEnemy::SetEncounterDormant(AEncounterController* CurrentOwner)
 
 	// 先建立状态屏障，再停止 Montage，避免其结束回调重新驱动 AI。
 	bEncounterDormant = true;
+	ClearStanceBreakMontagePresentation(true);
 	ClearAllTimers();
 #if !UE_BUILD_SHIPPING
 	bRangedDebugProbeActive = false;
@@ -473,8 +492,7 @@ void AEnemy::SetEncounterDormant(AEncounterController* CurrentOwner)
 	bCachedAllyAttackingNearby = false;
 	CachedAllySuggestedWaitTime = 0.f;
 	CachedAllyCheckTarget = nullptr;
-	bPendingStanceBreak = false;
-	LastPoiseDamageInstigator = nullptr;
+	ClearPendingStanceBreak();
 	ResetPendingHitContext();
 	ResetPoise();
 	ChasingTarget = nullptr;
@@ -517,7 +535,18 @@ bool AEnemy::IsEngagingActor(const AActor* Actor) const
 
 void AEnemy::ApplyPoiseDamage(float Damage, AActor* DamageInstigator)
 {
-	if (bEncounterDormant || EnemyState == EEnemyState::EES_Dead || EnemyState == EEnemyState::EES_StanceBreak) return;
+	if (bEncounterDormant || EnemyState == EEnemyState::EES_Dead)
+	{
+		return;
+	}
+
+	if (EnemyState == EEnemyState::EES_StanceBreak)
+	{
+		// 失衡窗口不允许二次破防重播或延长；保持韧性回满，等待当前专用 Montage 结束。
+		ClearPendingStanceBreak();
+		ResetPoise();
+		return;
+	}
 
 	CurrentPoise = FMath::Max(0.f, CurrentPoise - Damage);
 	LastPoiseDamageInstigator = DamageInstigator;
@@ -534,72 +563,147 @@ void AEnemy::ApplyPoiseDamage(float Damage, AActor* DamageInstigator)
 	}
 }
 
-void AEnemy::ApplyStanceBreak(float Duration, float PlayRate)
+void AEnemy::ApplyStanceBreak()
 {
-	if (bEncounterDormant)
+	if (bEncounterDormant || EnemyState == EEnemyState::EES_Dead)
+	{
+		ClearPendingStanceBreak();
+		return;
+	}
+
+	if (EnemyState == EEnemyState::EES_StanceBreak)
+	{
+		// 迟到的弹反/韧性结算不能重播、延长或覆盖当前失衡窗口。
+		ClearPendingStanceBreak();
+		ResetPoise();
+		return;
+	}
+
+	// 先确认专用失衡蒙太奇真正可播放，再提交失衡状态，缺失资产不能伪造成功。
+	if (!PlayStanceBreakMontage())
+	{
+		ClearPendingStanceBreak();
+		ResetPoise();
+		return;
+	}
+
+	SetEnemyState(EEnemyState::EES_StanceBreak);
+	ClearPendingStanceBreak();
+	ResetPoise();
+
+	if (UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr)
+	{
+		FOnMontageEnded EndDelegate;
+		EndDelegate.BindUObject(this, &AEnemy::OnStanceBreakMontageEnded);
+		AnimInstance->Montage_SetEndDelegate(EndDelegate, ActiveStanceBreakMontage);
+	}
+}
+
+UAnimMontage* AEnemy::GetStanceBreakMontage() const
+{
+	return HitReactionConfig && HitReactionConfig->StanceBreak.Montage
+		? HitReactionConfig->StanceBreak.Montage.Get()
+		: nullptr;
+}
+
+bool AEnemy::PlayStanceBreakMontage()
+{
+	if (!HitReactionConfig)
+	{
+		UE_LOG(LogTemp, Warning,
+			TEXT("%s: HitReactionConfig is unavailable; refusing to enter EES_StanceBreak."), *GetName());
+		return false;
+	}
+
+	UAnimMontage* StanceBreakMontage = GetStanceBreakMontage();
+	if (!StanceBreakMontage)
+	{
+		UE_LOG(LogTemp, Warning,
+			TEXT("%s: StanceBreak.Montage is unavailable; refusing to enter EES_StanceBreak."), *GetName());
+		return false;
+	}
+
+	UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
+	if (!AnimInstance)
+	{
+		UE_LOG(LogTemp, Warning,
+			TEXT("%s: StanceBreak.Montage '%s' cannot play because its AnimInstance is unavailable."),
+			*GetName(), *GetNameSafe(StanceBreakMontage));
+		return false;
+	}
+
+	if (AnimInstance->Montage_Play(StanceBreakMontage) <= 0.f)
+	{
+		UE_LOG(LogTemp, Warning,
+			TEXT("%s: failed to play StanceBreak.Montage '%s'; refusing to enter EES_StanceBreak."),
+			*GetName(), *GetNameSafe(StanceBreakMontage));
+		return false;
+	}
+
+	ActiveStanceBreakMontage = StanceBreakMontage;
+	return true;
+}
+
+void AEnemy::OnStanceBreakMontageEnded(UAnimMontage* Montage, bool /*bInterrupted*/)
+{
+	if (Montage != ActiveStanceBreakMontage)
 	{
 		return;
 	}
 
-	// 连续破防覆盖：先清旧 timer 和恢复速率
-	GetWorldTimerManager().ClearTimer(StanceBreakRecoveryTimer);
-	if (UAnimInstance* Anim = GetMesh()->GetAnimInstance())
-	{
-		if (UAnimMontage* ActiveMontage = Anim->GetCurrentActiveMontage())
-		{
-			Anim->Montage_SetPlayRate(ActiveMontage, 1.f);
-		}
-	}
-
-	// 停止当前蒙太奇（NotifyEnd 自动清 IgnoreActors 黑名单）
-	if (UAnimInstance* AnimForStop = GetMesh()->GetAnimInstance())
-	{
-		AnimForStop->Montage_Stop(0.05f);
-	}
-
-	SetEnemyState(EEnemyState::EES_StanceBreak);
-
-	// 从 LastPoiseDamageInstigator 获取方向
-	if (LastPoiseDamageInstigator)
-	{
-		DirectionalHitReact(GetActorLocation(), LastPoiseDamageInstigator);
-	}
-
-	// 设置慢放
-	if (UAnimInstance* Anim = GetMesh()->GetAnimInstance())
-	{
-		if (UAnimMontage* ActiveMontage = Anim->GetCurrentActiveMontage())
-		{
-			Anim->Montage_SetPlayRate(ActiveMontage, PlayRate);
-		}
-	}
-
-	// 清除破防flag
-	bPendingStanceBreak = false;
-
-	// 立即重置韧性
-	ResetPoise();
-
-	// 启动恢复计时器
-	GetWorldTimerManager().SetTimer(
-		StanceBreakRecoveryTimer, this, &AEnemy::RecoverFromStanceBreak, Duration, false);
+	ClearStanceBreakMontagePresentation(false);
+	RecoverFromStanceBreak();
 }
 
 void AEnemy::RecoverFromStanceBreak()
 {
-	if (bEncounterDormant || EnemyState != EEnemyState::EES_StanceBreak) return;
-
-	// 恢复蒙太奇速率
-	if (UAnimInstance* Anim = GetMesh()->GetAnimInstance())
+	if (bEncounterDormant || !Attributes || !Attributes->IsAlive()
+		|| EnemyState != EEnemyState::EES_StanceBreak)
 	{
-		if (UAnimMontage* ActiveMontage = Anim->GetCurrentActiveMontage())
-		{
-			Anim->Montage_SetPlayRate(ActiveMontage, 1.f);
-		}
+		return;
 	}
 
-	// 委托 CheckCombatTarget 统一判定
+	// 委托 CheckCombatTarget 统一判定恢复后的 Combat / Chase / Patrol 入口。
 	CheckCombatTarget();
+}
+
+void AEnemy::ClearStanceBreakMontagePresentation(bool bStopMontage)
+{
+	UAnimMontage* MontageToClear = ActiveStanceBreakMontage;
+	ActiveStanceBreakMontage = nullptr;
+	if (!MontageToClear)
+	{
+		return;
+	}
+
+	UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
+	if (!AnimInstance)
+	{
+		return;
+	}
+
+	FOnMontageEnded EmptyEndDelegate;
+	AnimInstance->Montage_SetEndDelegate(EmptyEndDelegate, MontageToClear);
+	if (bStopMontage && AnimInstance->Montage_IsActive(MontageToClear))
+	{
+		AnimInstance->Montage_Stop(0.05f, MontageToClear);
+	}
+}
+
+void AEnemy::ClearPendingStanceBreak()
+{
+	bPendingStanceBreak = false;
+	LastPoiseDamageInstigator = nullptr;
+}
+
+void AEnemy::ValidateStanceBreakConfig() const
+{
+	if (HitReactionConfig && !HitReactionConfig->StanceBreak.Montage)
+	{
+		UE_LOG(LogTemp, Warning,
+			TEXT("%s: HitReactionConfig '%s' has no StanceBreak.Montage. Poise breaks and parries will not enter EES_StanceBreak."),
+			*GetName(), *GetNameSafe(HitReactionConfig));
+	}
 }
 
 void AEnemy::ResetPoise()
@@ -1765,6 +1869,10 @@ void AEnemy::SetEnemyState(EEnemyState NewState)
 	const EEnemyState OldState = EnemyState;
 
 	// --- 退出旧状态的逻辑 ---
+	if (OldState == EEnemyState::EES_StanceBreak && OldState != NewState)
+	{
+		ClearStanceBreakMontagePresentation(true);
+	}
 	if (EnemyState == EEnemyState::EES_Patrolling || EnemyState == EEnemyState::EES_Searching)
 	{
 		ClearPatrolTimers();
@@ -2887,7 +2995,6 @@ void AEnemy::ClearAllTimers()
 	GetWorldTimerManager().ClearTimer(HealthBarHideTimer);
 	GetWorldTimerManager().ClearTimer(AttackCooldownTimer);
 	GetWorldTimerManager().ClearTimer(PoiseResetTimer);
-	GetWorldTimerManager().ClearTimer(StanceBreakRecoveryTimer);
 	GetWorldTimerManager().ClearTimer(ProjectileReleaseTimer);
 	GetWorldTimerManager().ClearTimer(ProjectileAttackEndTimer);
 }

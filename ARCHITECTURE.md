@@ -104,7 +104,7 @@ Core character/combat state-machine enums and small shared combat-flow enums are
 | `EPlayerActionType` | `None`, `Attack`, `Dodge`, `Block`, `Parry`, `Potion`, `HitReact`, `Death`, `RangedAim`, `RangedRelease` | `AMyCharacter::TryStartAction` player action entry plus priority/cancel windows |
 | `EEnemyState` | `EES_UnOccupied`, `EES_Patrolling`, `EES_Searching`, `EES_Chasing`, `EES_Attacking`, `EES_Combating`, `EES_Stunned`, `EES_StanceBreak`, `EES_Dead` | `AEnemy` |
 
-**State transition pattern**: Mixed C++ + AnimNotify driven. Entry states are set directly in C++ (`Attack()`, `GetHit_Implementation()`, `Die()`). Recovery transitions use `FOnMontageEnded` delegates with state guards as the primary path. `UAnimNotify_CharacterHitReactEnd` is the deliberate exception for ordinary player `EAS_Stunning`, so designers can tune HitReact duration in the animation editor. `EAS_GuardBroken` does not reuse that Notify: its dedicated Montage End Delegate must also handle interruption, clear the exhaustion gate, and restore at least one stamina. Enemy recovery has double coverage (delegate + AnimNotify with state guards). Because `EActionState` is serialized by existing Blueprint and AnimNotify assets, new values must be appended rather than inserted so historical enum values remain stable.
+**State transition pattern**: Mixed C++ + AnimNotify driven. Entry states are set directly in C++ (`Attack()`, `GetHit_Implementation()`, `Die()`). Recovery transitions use `FOnMontageEnded` delegates with state guards as the primary path. `UAnimNotify_CharacterHitReactEnd` is the deliberate exception for ordinary player `EAS_Stunning`, so designers can tune HitReact duration in the animation editor. `EAS_GuardBroken` does not reuse that Notify: its dedicated Montage End Delegate must also handle interruption, clear the exhaustion gate, and restore at least one stamina. Enemy ordinary `EES_Stunned` retains its existing delegate + `UAnimNotify_EnemyHitReactEnd` state-guarded coverage; enemy `EES_StanceBreak` is separate and recovers only through its dedicated Montage End Delegate. Because `EActionState` is serialized by existing Blueprint and AnimNotify assets, new values must be appended rather than inserted so historical enum values remain stable.
 
 <a name="player-state-machine-flow"></a>
 ## Player State Machine Flow
@@ -225,7 +225,7 @@ stateDiagram-v2
 | `EES_Combating` | Target is inside combat range. Local combat substate controls facing, pressing, waiting, and spacing. |
 | `EES_Attacking` | Attack montage is playing. Movement is locked. |
 | `EES_Stunned` | Normal hit react / short stun. |
-| `EES_StanceBreak` | Long poise-break stun from parry or poise depletion. |
+| `EES_StanceBreak` | Dedicated full-body poise-break stun from parry or poise depletion. |
 | `EES_Dead` | Death state. Timers, movement, collision, and combat state are cleared. |
 
 ```mermaid
@@ -251,10 +251,13 @@ Chasing --> Combating : Enters combat radius
     Chasing --> Stunned : Hit while alive
     Combating --> Stunned : Hit while alive
     Attacking --> Stunned : Hit while alive
+    Patrolling --> StanceBreak : Poise depleted
+    Chasing --> StanceBreak : Poise depleted
+    Combating --> StanceBreak : Poise depleted
     Attacking --> StanceBreak : Parried / poise depleted
 
     Stunned --> Recheck : Hit react ends
-    StanceBreak --> Recheck : Stance break timer ends
+    StanceBreak --> Recheck : Dedicated StanceBreak Montage ends / interrupted
     Recheck --> Combating : Still inside combat radius
     Recheck --> Chasing : Inside chase radius
     Recheck --> Patrolling : No valid target
@@ -326,9 +329,9 @@ flowchart LR
 | `Attack()` | Combat substate / fallback attack decision | Executes DataAsset-driven attack selection, switches to attacking, and plays attack montage. Cooldown starts when `SetEnemyState()` exits `EES_Attacking`. |
 | `DrawDebugInfo()` | Tick | Assembles enemy debug text/shapes before AI state work, keeping debug output out of gameplay decision branches. |
 | `TakeDamage()` | Damage pipeline | Applies health damage and enters death if needed. |
-| `ApplyPoiseDamage()` | Weapon hit feedback | Reduces poise and sets `bPendingStanceBreak` when poise reaches zero. |
-| `ApplyStanceBreak()` | After `GetHit()` checks pending flag | Stops montage, sets `EES_StanceBreak`, plays slow hit react, starts recovery timer. |
-| `RecoverFromStanceBreak()` | Stance break timer | Restores montage play rate and delegates next state choice to `CheckCombatTarget()`. |
+| `ApplyPoiseDamage()` | Weapon hit feedback | Reduces poise and sets `bPendingStanceBreak` when poise reaches zero; while already StanceBreak it resets poise without replaying or extending the window. |
+| `ApplyStanceBreak()` | Resolver checks pending flag after `GetHit()` | Plays the configured enemy-only `StanceBreak.Montage` first, then commits `EES_StanceBreak`; missing configuration warns, clears pending poise and preserves ordinary hit/parry behavior. |
+| `OnStanceBreakMontageEnded()` / `RecoverFromStanceBreak()` | Dedicated StanceBreak Montage End Delegate | State/life/Dormant-guarded recovery through `CheckCombatTarget()`; no Timer or normal HitReact recovery path. |
 | `Die()` | Fatal damage | Clears timers, movement, collision, poise state, and combat substate. |
 
 <a name="class-hierarchy"></a>
@@ -350,7 +353,7 @@ AActor
 ACharacter
 └── ABaseCharacter + IHitInterface (shared: UAttributeComponent, weapon equipping, hit reaction, knockback, FPendingHitContext, GroundSpeed/Direction anim variables)
     ├── AMyCharacter + IBlockableInterface (spring arm + camera, lock-on targeting, player action system, dodge/parry/potion)
-    └── AEnemy (AI patrol/search/chase/combat state machine, directional hit react, poise/stance break)
+    └── AEnemy (AI patrol/search/chase/combat state machine, directional HitReact, dedicated enemy stance-break Montage lifecycle)
 
 APlayerController → ACharacterController (Enhanced Input actions for movement, combat, lock-on, pause, and potion)
 UActorComponent → UAttributeComponent (health, stamina, gold; OnHealthChanged, OnStaminaChanged, OnGoldChanged delegates)
@@ -381,7 +384,7 @@ UAnimNotify → UAnimNotify_AttachWeapon (attach/detach weapon mesh during monta
 UDataAsset → UTreasureData (static mesh, gold value, pickup sound, scale)
 UDataAsset → UPlayerCharacterProfileDataAsset (single player character config entry: AttackConfig + ActionConfig + ReactionConfig)
 UDataAsset → UPlayerActionConfigDataAsset (player-only action structs: Dodge, Block, Parry, Potion, plus SharedPriority for Attack/HitReact/Death priority)
-UDataAsset → UHitReactionConfigDataAsset (shared character HitReact / Death montage config with section names)
+UDataAsset → UHitReactionConfigDataAsset (shared HitReact / Death config; enemy-only `StanceBreak.Montage` is separate from player GuardBreak)
 UDataAsset → UComboDataAsset (combo chain: SectionName, DamageMultiplier, StaminaCost, PoiseDamageMultiplier per segment)
 UDataAsset → UAttackConfigDataAsset (LightAttackCombo + SpecialAttacks for sprint/jump-style specials + ChargedAttack)
 UDataAsset → UEnemyAttackConfigDataAsset (Enemy attacks: montage, section, post-attack cooldown (v1.5: excludes montage duration and starts after attack end/interruption), MinDistance/MaxDistance, weight, damage/block-stamina multipliers, optional Motion Warping target config)
@@ -596,7 +599,8 @@ FCombatTeamHelper (static helper: ShareTeamTag for same-team detection via Actor
   - **触发时机**：`FCombatHitResolver` 在 `GetHit()` 之后检查 flag，避免 `EES_StanceBreak` 被 `EES_Stunned` 覆盖
   - **弹反路径**：弹反成功时调用 `ApplyPoiseDamage(GetCurrentPoise())`（瞬间清空韧性），对攻击方敌人（`GetOwner()`）触发破防
   - **普通路径**：普通命中累积韧性伤害，对受击方敌人（`HitActor`）触发破防
-- **破防效果**：停止当前蒙太奇，设置 `EES_StanceBreak` 状态，播放方向性受击反应，慢放蒙太奇（使用敌人自己的参数，默认 0.3x），启动恢复计时器（默认 2.0s）。
+- **表现与恢复合同**：`UHitReactionConfigDataAsset::StanceBreak.Montage` 是敌人专用的单条全身失衡 Montage；玩家继续使用 `UPlayerActionConfigDataAsset::GuardBreak.Montage`。`AEnemy` 只有在专用 Montage、AnimInstance 和 `Montage_Play()` 全部有效时才提交 `EES_StanceBreak` 并绑定专用 End Delegate；Montage 实际时长就是失衡窗口，Timer、慢放率和普通方向 HitReact 不参与。
+- **缺配与重复命中**：缺失 Reaction DataAsset、专用 Montage、AnimInstance 或播放失败时输出 warning、清理 pending 并重置韧性，不进入无动画失衡，也不以普通 HitReact 伪造成功。失衡中的后续非致死命中仍结算伤害、击退和一次命中特效，但抑制普通 HitReact / `EES_Stunned`；再次削韧或弹反只重置韧性，不重播或延长当前 Montage。死亡、Encounter Dormant、状态离开和 `EndPlay` 先解绑/停止当前专用 Montage，迟到 Delegate 不能恢复 AI。
 
 <a name="parry-system"></a>
 ## Parry System (弹反系统)

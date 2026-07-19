@@ -48,6 +48,15 @@ struct FDeathConfig
 	TArray<FName> Sections;
 };
 
+USTRUCT(BlueprintType)
+struct FEnemyStanceBreakConfig
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "StanceBreak", meta = (ToolTip = "敌人专用失衡蒙太奇。普通 HitReact 不会作为失衡回退。"))
+	TObjectPtr<UAnimMontage> Montage = nullptr;
+};
+
 /**
  * Shared character hit reaction and death montage config.
  *
@@ -65,6 +74,9 @@ public:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Death", meta = (ToolTip = "共享死亡蒙太奇配置。"))
 	FDeathConfig Death;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "StanceBreak", meta = (ToolTip = "敌人专用失衡配置。玩家 Guard Break 使用 PlayerActionConfig 的独立字段。"))
+	FEnemyStanceBreakConfig StanceBreak;
 
 	virtual void PostLoad() override;
 

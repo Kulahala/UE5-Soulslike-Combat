@@ -151,11 +151,17 @@ Completed roadmap work is retained here as a compact, durable record. Do not ret
 - [x] **TODO-05A1: Combat-Aware Sprint Stamina v1**
   Delivered runtime-only Combat Presence for `AMyCharacter`. It refreshes while an existing active enemy-engagement query identifies the player as a current combat target, or after a confirmed hostile `AMyCharacter <-> AEnemy` resolver hit; a `4 s` timestamp tail prevents immediate stamina-rule flicker when the final source clears. `TickSprintStamina()` is the sole consumer: Shift preserves its existing speed, Free-Run, input and hearing-noise behavior everywhere, but only active Presence permits the pre-existing `12/s` debit and stamina-recovery-delay reset. Presence is not saved, clears on death, bonfire service protection and `EndPlay`, and its tail is deliberately excluded from the checkpoint gate. Normal and adversarial review found no remaining 05A1 blocker. Completed in this commit.
 
+- [x] **TODO-05A2: Enemy Stance-Break Montage v1**
+  Replaced the legacy Timer-driven slow-motion reuse of enemy directional `HitReact` with a dedicated enemy-only `StanceBreak.Montage` in `UHitReactionConfigDataAsset`. `AEnemy` now commits `EES_StanceBreak` only after the dedicated Montage plays successfully, and a state/life/Dormant-guarded Montage End Delegate recovers through `CheckCombatTarget()`. Missing Reaction DataAsset, Montage or AnimInstance warns, clears pending poise and resets poise without faking StanceBreak through ordinary HitReact. Subsequent nonlethal hits retain damage, knockback and impact feedback but cannot enter `EES_Stunned`, replay or extend the dedicated Montage; repeated poise depletion/parry, death, Dormant and teardown retain the same cleanup boundary. Paladin and Erika each received a dedicated authored Montage and Reaction DataAsset assignment. User manually compiled and PIE-validated the full behavior; normal and adversarial review found no remaining 05A2 blocker. Completed in this commit.
+
 ## TODO Queue
 
 These TODOs are accepted future work, not permission to start implementation immediately. A queued item must be small enough to produce one independently verifiable result. Queue position follows prerequisites, validation dependencies, and the player-facing loop rather than numeric ID or append order. When an item becomes the next stage, move only that item out of this queue and write its complete implementation plan in `plan.md` first. On completion, record stable facts in `ARCHITECTURE.md` and move the compact result into `Done Milestones`; do not turn this roadmap into a stage log.
 
 **Encounter authoring decision:** reusable Controller behavior and Spline authoring were already proven by `TODO-02A1/A2`. The former standalone `TODO-02B` is deliberately not marked Done and is absorbed as a mandatory adoption condition of `TODO-06A`: do not place a permanent `TestMap` encounter solely to repeat core validation. `TODO-02C` waits until that first permanent map-owned Controller exists.
+
+- [ ] **TODO-05B: Front Critical v1**
+  Prerequisite: `TODO-05A2` has authored and validated the dedicated enemy Stance-Break presentation and protected recovery window. Complete the existing enemy `EES_StanceBreak` loop with one front critical interaction. Align a valid stance-broken enemy via Motion Warping and apply configured critical damage from an AnimNotify. Do not add backstab, generic finisher infrastructure, or Boss criticals.
 
 ### Ranged Combat
 
@@ -167,11 +173,6 @@ These TODOs are accepted future work, not permission to start implementation imm
 
 - [ ] **TODO-04E: Third-Person Camera Experience Polish v1**
   Prerequisite: the authored Erika archer, lock-target switching, and the visible player bow have all passed their focused PIE validation, so camera behavior is judged under actual mixed melee/ranged pressure rather than an isolated root-motion clip. First distinguish unstable root motion, Motion Warping, capsule collision, and SpringArm follow behavior. Then improve only proven camera issues through centralized, state-aware SpringArm position smoothing and obstruction recovery. Preserve direct mouse response, lock-on framing, and bow aim; do not globally enable rotation lag or use camera lag to hide invalid character displacement. Validate free running, lock-on switching, bow aim, attack, dodge, hit reaction, wall obstruction/recovery, and 30/60 FPS feel. This is a dedicated polish stage, not incidental tuning inside enemy or bow authoring.
-
-### Combat Punish And Criticals
-
-- [ ] **TODO-05B: Front Critical v1**
-  Complete the existing enemy `EES_StanceBreak` loop with one front critical interaction. Align a valid stance-broken enemy via Motion Warping and apply configured critical damage from an AnimNotify. Do not add backstab, generic finisher infrastructure, or Boss criticals.
 
 ### Level And Boss Slice
 

@@ -24,6 +24,7 @@ class UHealthBarComponent;
 class UWidgetComponent;
 class UEnemyAttackConfigDataAsset;
 class UMotionWarpingComponent;
+class UAnimMontage;
 
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnEnemyDied, AEnemy*);
 
@@ -76,7 +77,7 @@ public:
 	virtual void OnHitReactMontageEnded(UAnimMontage* Montage, bool bInterrupted) override;
 
 	/* 弹反 */
-	void ApplyStanceBreak(float Duration, float PlayRate);
+	void ApplyStanceBreak();
 
 	/* 韧性系统 */
 	void ApplyPoiseDamage(float Damage, AActor* DamageInstigator);
@@ -85,8 +86,6 @@ public:
 
 	FORCEINLINE float GetMaxPoise() const { return MaxPoise; }
 	FORCEINLINE float GetCurrentPoise() const { return CurrentPoise; }
-	FORCEINLINE float GetStanceBreakDuration() const { return StanceBreakDuration; }
-	FORCEINLINE float GetStanceBreakPlayRate() const { return StanceBreakPlayRate; }
 
 	/* 锁定联动 */
 	void SetTargetedByPlayer(bool bTargeted);
@@ -535,7 +534,6 @@ private:
 	FTimerHandle AttackCooldownTimer; // 攻击冷却定时器
 	FTimerHandle HealthBarHideTimer; // 血条延迟隐藏定时器
 	FTimerHandle PoiseResetTimer; // 韧性重置定时器
-	FTimerHandle StanceBreakRecoveryTimer; // 破防硬直恢复定时器
 	FTimerHandle ProjectileReleaseTimer;
 	FTimerHandle ProjectileAttackEndTimer;
 	bool bAttackOnCooldown = false; // 攻击冷却中
@@ -559,19 +557,22 @@ private:
 	UPROPERTY(EditAnywhere, Category = "Combat|Poise", meta = (AllowPrivateAccess = "true", ToolTip = "未受击多久后重置韧性（秒）。"))
 	float PoiseResetDelay = 5.f;
 
-	UPROPERTY(EditAnywhere, Category = "Combat|Poise", meta = (AllowPrivateAccess = "true", ToolTip = "破防硬直时长（秒）。"))
-	float StanceBreakDuration = 2.f;
-
-	UPROPERTY(EditAnywhere, Category = "Combat|Poise", meta = (AllowPrivateAccess = "true", ToolTip = "破防慢放速率（0.3 = 30%速度）。"))
-	float StanceBreakPlayRate = 0.3f;
-
 	/* 受击/死亡配置 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Reaction", meta = (AllowPrivateAccess = "true", ToolTip = "敌人受击反应和死亡蒙太奇配置。"))
 	TObjectPtr<UHitReactionConfigDataAsset> HitReactionConfig = nullptr;
 
-	void RecoverFromStanceBreak(); // 破防硬直恢复回调
+	UAnimMontage* GetStanceBreakMontage() const;
+	bool PlayStanceBreakMontage();
+	void OnStanceBreakMontageEnded(UAnimMontage* Montage, bool bInterrupted);
+	void RecoverFromStanceBreak();
+	void ClearStanceBreakMontagePresentation(bool bStopMontage);
+	void ClearPendingStanceBreak();
+	void ValidateStanceBreakConfig() const;
+
+	UAnimMontage* ActiveStanceBreakMontage = nullptr;
+
 	void ClearPatrolTimers(); // 清理巡逻相关定时器
-	void ClearAllTimers(); // 清理所有定时器（巡逻 + 冷却 + 血条 + 弹反）
+	void ClearAllTimers(); // 清理所有定时器（巡逻 + 冷却 + 血条 + 韧性 + 投射物）
 	void RefreshEnemyControllerBinding();
 	void SetEnemyControllerBinding(AAIController* NewEnemyController);
 };

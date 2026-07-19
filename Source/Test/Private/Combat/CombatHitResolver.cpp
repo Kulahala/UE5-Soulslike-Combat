@@ -108,14 +108,13 @@ FCombatHitResult FCombatHitResolver::ResolveAndApply(const FCombatHitRequest& Re
 		if (AEnemy* AttackerEnemy = Cast<AEnemy>(Request.Attacker);
 			AttackerEnemy && AttackerEnemy->ShouldTriggerStanceBreak())
 		{
-			AttackerEnemy->ApplyStanceBreak(AttackerEnemy->GetStanceBreakDuration(),
-				AttackerEnemy->GetStanceBreakPlayRate());
+			AttackerEnemy->ApplyStanceBreak();
 		}
 	}
 	else if (AEnemy* HitEnemy = Cast<AEnemy>(Request.HitActor);
 		HitEnemy && HitEnemy->ShouldTriggerStanceBreak())
 	{
-		HitEnemy->ApplyStanceBreak(HitEnemy->GetStanceBreakDuration(), HitEnemy->GetStanceBreakPlayRate());
+		HitEnemy->ApplyStanceBreak();
 	}
 
 	MarkCombatPresenceForConfirmedPlayerEnemyHit(Request, Result);
