@@ -28,6 +28,7 @@ public:
 	void BindToAttributes(UAttributeComponent* Attributes);
 	void SetPendingDamageFlashScale(float Scale);
 	void SetAimReticleVisible(bool bVisible);
+	void SetArrowCount(int32 LoadedCount, int32 Capacity, bool bVisible);
 
 	UPROPERTY(meta = (BindWidget))
 	UProgressBar* PB_Health;
@@ -61,6 +62,9 @@ public:
 
 	UPROPERTY(meta = (BindWidgetOptional))
 	UTextBlock* Text_PotionCooldown;
+
+	UPROPERTY(meta = (BindWidgetOptional))
+	UTextBlock* Text_ArrowCount;
 
 protected:
 	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;

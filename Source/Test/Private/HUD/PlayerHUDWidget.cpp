@@ -164,6 +164,21 @@ void UPlayerHUDWidget::SetAimReticleVisible(bool bVisible)
 	Invalidate(EInvalidateWidgetReason::Paint);
 }
 
+void UPlayerHUDWidget::SetArrowCount(int32 LoadedCount, int32 Capacity, bool bVisible)
+{
+	if (!Text_ArrowCount)
+	{
+		return;
+	}
+
+	Text_ArrowCount->SetVisibility(bVisible ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+	if (bVisible)
+	{
+		Text_ArrowCount->SetText(FText::Format(INVTEXT("{0} / {1}"),
+			FMath::Max(0, LoadedCount), FMath::Max(0, Capacity)));
+	}
+}
+
 void UPlayerHUDWidget::RefreshPotionVisuals()
 {
 	const bool bHasPotion = CurrentPotionCount > 0;

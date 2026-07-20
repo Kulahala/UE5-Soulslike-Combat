@@ -167,7 +167,7 @@ bool Aitem::TryClaimPersistentWorldPickup(AMyCharacter* Picker)
 
 	FName InstanceId = NAME_None;
 	USoundBase* PickupSound = nullptr;
-	if (!Picker->TryClaimWorldItemPickup(PersistentId, ItemDefinitionId, InstanceId, PickupSound))
+	if (!Picker->TryClaimWorldItemPickup(PersistentId, ItemDefinitionId, PickupQuantity, InstanceId, PickupSound))
 	{
 		return false;
 	}
@@ -202,10 +202,10 @@ void Aitem::InitializePersistentWorldPickup()
 		return;
 	}
 
-	if (PersistentId == NAME_None || ItemDefinitionId == NAME_None)
+	if (PersistentId == NAME_None || ItemDefinitionId == NAME_None || PickupQuantity <= 0)
 	{
 		bPersistentWorldPickupAvailable = false;
-		UE_LOG(LogTemp, Warning, TEXT("World item pickup '%s' requires both PersistentId and ItemDefinitionId."), *GetName());
+		UE_LOG(LogTemp, Warning, TEXT("World item pickup '%s' requires PersistentId, ItemDefinitionId, and a positive PickupQuantity."), *GetName());
 		return;
 	}
 

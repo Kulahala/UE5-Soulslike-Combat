@@ -36,6 +36,10 @@ public:
 	bool GrantAmmoReserve(FName DefinitionId, int32 Quantity, int32 ReserveStackLimit,
 	                      const TArray<FTestItemInstanceSelection>& ValidReserveInstances,
 	                      FName& OutAffectedInstanceId);
+	bool GrantAmmoReserveAndClaimReward(FName DefinitionId, int32 Quantity, int32 ReserveStackLimit,
+	                                    FName RewardId,
+	                                    const TArray<FTestItemInstanceSelection>& ValidReserveInstances,
+	                                    FName& OutAffectedInstanceId);
 	bool ConsumeLoadedAmmo(const FTestAmmoContainerSelection& Selection, int32 Quantity);
 	bool AddOwnedItemInstanceAndClaimReward(const FTestItemInstanceRecord& ItemRecord, FName RewardId);
 	bool AddOwnedItemInstanceAndClaimRewardWithOptionalEmptySlot(const FTestItemInstanceRecord& ItemRecord,
@@ -77,6 +81,9 @@ private:
 	bool AddPersistentId(TSet<FName>& TargetSet, FName PersistentId, const TCHAR* Context);
 	bool AddOwnedItemInstanceAndClaimRewardInternal(const FTestItemInstanceRecord& ItemRecord, FName RewardId,
 	                                                FName RequestedEmptySlotId, bool& bOutAutoEquipped);
+	bool GrantAmmoReserveInternal(FName DefinitionId, int32 Quantity, int32 ReserveStackLimit, FName RewardId,
+	                              const TArray<FTestItemInstanceSelection>& ValidReserveInstances,
+	                              FName& OutAffectedInstanceId);
 	bool ApplyAmmoRefillRequests(TArray<FTestItemInstanceRecord>& ItemInstances,
 	                             TArray<FTestAmmoContainerRecord>& LoadedAmmoContainers,
 	                             const TArray<FTestAmmoRefillRequest>& RefillRequests,

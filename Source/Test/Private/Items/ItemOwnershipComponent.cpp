@@ -390,6 +390,13 @@ bool UItemOwnershipComponent::TryClaimWorldItem(FName PersistentId, FName Defini
 		return false;
 	}
 
+	if (Definition->UsesAmmoContainer())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Claim world item rejected ammo DefinitionId '%s'; use the fixed world ammo claim path."),
+			*DefinitionId.ToString());
+		return false;
+	}
+
 	const EItemEquipmentSlot EquipmentSlot = Definition->GetEquipmentSlot();
 	const FName RequestedSlotId = GetSlotId(EquipmentSlot);
 	if (bRequestAutoEquip && (!IsSupportedEquipmentSlot(EquipmentSlot) || RequestedSlotId == NAME_None
@@ -418,6 +425,47 @@ bool UItemOwnershipComponent::TryClaimWorldItem(FName PersistentId, FName Defini
 		UpdateLocalEquipmentSlot(RequestedSlotId, NewRecord.InstanceId);
 	}
 	OutInstanceId = NewRecord.InstanceId;
+	return true;
+}
+
+bool UItemOwnershipComponent::TryClaimWorldAmmoPickup(FName PersistentId, FName DefinitionId, int32 Quantity,
+	USoulslikeGameInstance* GameInstance, FName& OutAffectedInstanceId)
+{
+	OutAffectedInstanceId = NAME_None;
+	BuildDefinitionCatalog();
+
+	if (!GameInstance || PersistentId == NAME_None || Quantity <= 0)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Claim world ammo failed: GameInstance, PersistentId, or quantity is invalid."));
+		return false;
+	}
+
+	const UItemDefinitionDataAsset* Definition = GetDefinition(DefinitionId);
+	if (!Definition || !Definition->UsesAmmoContainer())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Claim world ammo rejected DefinitionId '%s': it is not an Ammo Container definition."),
+			*DefinitionId.ToString());
+		return false;
+	}
+
+	TArray<FTestItemInstanceSelection> ValidReserveInstances;
+	GetValidReserveInstances(DefinitionId, ValidReserveInstances);
+	if (!GameInstance->GrantAmmoReserveAndClaimReward(DefinitionId, Quantity, Definition->GetReserveAmmoStackLimit(),
+		PersistentId, ValidReserveInstances, OutAffectedInstanceId))
+	{
+		return false;
+	}
+
+	if (!RestoreFromSave(GameInstance->GetCurrentSaveGame()))
+	{
+		// 耐久事务已提交；不能把世界 Actor 留在场上制造可重复领取的假象。
+		UE_LOG(LogTemp, Error, TEXT("Fixed world ammo claim for '%s' committed, but the local ownership cache could not be restored."),
+			*DefinitionId.ToString());
+		return true;
+	}
+
+	BroadcastOwnedQuantity(DefinitionId);
+	BroadcastLoadedAmmoQuantity(DefinitionId);
 	return true;
 }
 

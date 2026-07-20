@@ -199,10 +199,39 @@ bool USoulslikeGameInstance::ConsumeOwnedItemQuantity(FName DefinitionId, int32 
 bool USoulslikeGameInstance::GrantAmmoReserve(FName DefinitionId, int32 Quantity, int32 ReserveStackLimit,
 	const TArray<FTestItemInstanceSelection>& ValidReserveInstances, FName& OutAffectedInstanceId)
 {
+	return GrantAmmoReserveInternal(DefinitionId, Quantity, ReserveStackLimit, NAME_None,
+		ValidReserveInstances, OutAffectedInstanceId);
+}
+
+bool USoulslikeGameInstance::GrantAmmoReserveAndClaimReward(FName DefinitionId, int32 Quantity,
+	int32 ReserveStackLimit, FName RewardId,
+	const TArray<FTestItemInstanceSelection>& ValidReserveInstances, FName& OutAffectedInstanceId)
+{
+	if (RewardId == NAME_None)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Fixed world ammo claim rejected an empty reward ID."));
+		OutAffectedInstanceId = NAME_None;
+		return false;
+	}
+
+	return GrantAmmoReserveInternal(DefinitionId, Quantity, ReserveStackLimit, RewardId,
+		ValidReserveInstances, OutAffectedInstanceId);
+}
+
+bool USoulslikeGameInstance::GrantAmmoReserveInternal(FName DefinitionId, int32 Quantity, int32 ReserveStackLimit,
+	FName RewardId, const TArray<FTestItemInstanceSelection>& ValidReserveInstances, FName& OutAffectedInstanceId)
+{
 	OutAffectedInstanceId = NAME_None;
 	if (!EnsureCurrentSaveLoaded() || !CurrentSaveGame || !CurrentSaveGame->IsPersistable())
 	{
 		UE_LOG(LogTemp, Warning, TEXT("Grant ammo reserve failed: no usable current save."));
+		return false;
+	}
+
+	if (RewardId != NAME_None && CurrentSaveGame->ClaimedRewardIds.Contains(RewardId))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Fixed world ammo claim rejected already claimed reward '%s'."),
+			*RewardId.ToString());
 		return false;
 	}
 
@@ -244,6 +273,7 @@ bool USoulslikeGameInstance::GrantAmmoReserve(FName DefinitionId, int32 Quantity
 	}
 
 	const TArray<FTestItemInstanceRecord> PreviousItems = CurrentSaveGame->ItemInstances;
+	const TSet<FName> PreviousClaimedRewards = CurrentSaveGame->ClaimedRewardIds;
 	int32 RemainingQuantity = Quantity;
 	for (const FTestItemInstanceSelection& Selection : ValidReserveInstances)
 	{
@@ -281,12 +311,19 @@ bool USoulslikeGameInstance::GrantAmmoReserve(FName DefinitionId, int32 Quantity
 		}
 	}
 
-	if (SaveNow())
+	if (RewardId != NAME_None)
+	{
+		CurrentSaveGame->ClaimedRewardIds.Add(RewardId);
+	}
+
+	const bool bCanSave = RewardId == NAME_None || !ConsumeItemClaimSaveFailureForDebug(RewardId);
+	if (bCanSave && SaveNow())
 	{
 		return true;
 	}
 
 	CurrentSaveGame->ItemInstances = PreviousItems;
+	CurrentSaveGame->ClaimedRewardIds = PreviousClaimedRewards;
 	OutAffectedInstanceId = NAME_None;
 	return false;
 }

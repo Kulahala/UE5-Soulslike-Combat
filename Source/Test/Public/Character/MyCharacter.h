@@ -103,7 +103,7 @@ public:
 	bool TryGrantOwnedItemQuantity(FName DefinitionId, int32 Quantity, FName& OutInstanceId);
 	bool TryRestockAmmoAtCheckpoint(FName GameplayMapName, FName CheckpointId);
 	bool VerifyAmmoRefillFixture(FName DefinitionId);
-	bool TryClaimWorldItemPickup(FName PersistentId, FName ItemDefinitionId, FName& OutInstanceId,
+	bool TryClaimWorldItemPickup(FName PersistentId, FName ItemDefinitionId, int32 PickupQuantity, FName& OutInstanceId,
 	                             USoundBase*& OutPickupSound);
 	bool TryEquipOwnedItem(FName InstanceId);
 	bool TryApplyBonfireLoadoutSelection(EItemEquipmentSlot EquipmentSlot, FName InstanceId);
@@ -249,6 +249,7 @@ private:
 	void InitializePlayerHUD();
 	void UpdatePotionCooldownHUD() const;
 	void UpdateAimReticleHUD() const;
+	void UpdateBowAmmoHUD() const;
 	void DrawDebugInfo() const;
 	void StopBlockMontage(float BlendOutTime);
 	bool ShouldInterruptBlock() const;
@@ -286,11 +287,18 @@ private:
 	void BeginDeathRespawnFlow();
 	ABow* GetEquippedBow() const;
 	bool IsBowEquipped() const;
-	bool IsBowAiming() const;
 	bool CanStartBowAim() const;
-	void CancelBowAim(bool bClearBlockHeld, bool bResetReleaseCooldown = true);
-	void ResetBowReleaseCooldown();
+	void CancelBowAim(bool bClearBlockHeld);
 	bool ConsumeProjectilePrepareFailureForDebug();
+	void PlayBowDrawPresentation();
+	bool TryStartBowReleasePresentation(ABow* Bow);
+	void AbortBowReleasePresentation();
+	void StopBowPresentationMontages();
+	void RefreshBowPresentation();
+	void OnBowReleaseMontageEnded(UAnimMontage* Montage, bool bInterrupted);
+
+	UFUNCTION()
+	void HandleLoadedAmmoQuantityChanged(FName DefinitionId, int32 NewQuantity);
 
 	/* 相机组件 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true", ToolTip = "玩家相机。"))
@@ -334,9 +342,9 @@ private:
 
 	// 弓的瞄准输入仅在主手实际是 ABow 时生效；不与剑的蓄力状态复用。
 	bool bBowDrawInputHeld = false;
-	bool bBowReleaseOnCooldown = false;
+	bool bBowReleasePresentationPending = false;
+	UAnimMontage* ActiveBowReleaseMontage = nullptr;
 	bool bFailNextProjectilePrepareForDebug = false;
-	FTimerHandle BowReleaseCooldownTimer;
 
 	// 当前重叠的可拾取物品
 	UPROPERTY(VisibleInstanceOnly, Category = "State", meta = (AllowPrivateAccess = "true", ToolTip = "当前重叠的可拾取物品。"))
@@ -485,6 +493,7 @@ public:
 	FORCEINLINE USpringArmComponent* GetSpringArm() const { return SpringArm; }
 	FORCEINLINE EActionState GetActionState() const { return ActionState; }
 	FORCEINLINE bool IsBlocking() const { return bIsBlocking; }
+	bool IsBowAiming() const;
 	FORCEINLINE AShield* GetEquippedShield() const { return EquippedShield; }
 	FORCEINLINE UItemOwnershipComponent* GetItemOwnershipComponent() const { return ItemOwnershipComponent; }
 

@@ -80,6 +80,9 @@ private:
 	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Persistent Pickup", meta = (AllowPrivateAccess = "true", ToolTip = "该世界拾取物授予的稳定 Item Definition ID。"))
 	FName ItemDefinitionId = NAME_None;
 
+	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Persistent Pickup", meta = (AllowPrivateAccess = "true", ClampMin = "1", ToolTip = "固定世界拾取授予的数量。普通装备必须为 1；只有 Ammo Container 定义允许大于 1。"))
+	int32 PickupQuantity = 1;
+
 	/* 组件 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true", ToolTip = "根场景组件。"))
 	USceneComponent* Root;

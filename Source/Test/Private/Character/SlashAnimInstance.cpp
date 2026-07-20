@@ -18,6 +18,7 @@ void USlashAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 		WeaponState = EWeaponState::EWS_Unequipped;
 		bIsBlocking = false;
 		bIsStunning = false;
+		bIsBowAiming = false;
 		return;
 	}
 
@@ -26,4 +27,5 @@ void USlashAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 	bIsBlocking = MyCharacter->IsBlocking();
 	bIsStunning = MyCharacter->GetActionState() == EActionState::EAS_Stunning
 		|| MyCharacter->GetActionState() == EActionState::EAS_GuardBroken;
+	bIsBowAiming = MyCharacter->IsBowAiming();
 }

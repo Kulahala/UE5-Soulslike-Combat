@@ -116,6 +116,11 @@ void AMyCharacter::BeginPlay()
 		Attributes->SetPotionCount(3);  // 初始3个药瓶
 	}
 
+	if (ItemOwnershipComponent)
+	{
+		ItemOwnershipComponent->OnLoadedAmmoQuantityChanged.AddDynamic(this, &AMyCharacter::HandleLoadedAmmoQuantityChanged);
+	}
+
 }
 
 void AMyCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -123,6 +128,10 @@ void AMyCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	bBonfireServiceProtected = false;
 	bFailNextProjectilePrepareForDebug = false;
 	ClearCombatPresence();
+	if (ItemOwnershipComponent)
+	{
+		ItemOwnershipComponent->OnLoadedAmmoQuantityChanged.RemoveDynamic(this, &AMyCharacter::HandleLoadedAmmoQuantityChanged);
+	}
 	CancelBowAim(true);
 	DestroyMaterializedLoadout();
 
@@ -1087,8 +1096,8 @@ void AMyCharacter::ReleaseBlockInput()
 	bBlockInputHeld = false;
 	if (IsBowAiming())
 	{
-		// 正常收起瞄准不会绕过已成功放箭后的射击冷却。
-		CancelBowAim(false, false);
+		// 正常收起瞄准后，实际未结束的 Release Montage 仍会阻止再次放箭。
+		CancelBowAim(false);
 		return;
 	}
 	bIsBlocking = false;
@@ -1509,6 +1518,8 @@ bool AMyCharacter::RestoreItemOwnershipFromSave(const UTestSaveGame* SaveGame)
 	}
 
 	MaterializeEquippedLoadout();
+	UpdateBowAmmoHUD();
+	RefreshBowPresentation();
 	return true;
 }
 
@@ -1562,7 +1573,7 @@ bool AMyCharacter::VerifyAmmoRefillFixture(FName DefinitionId)
 	return ItemOwnershipComponent->VerifyAmmoRefillFixture(DefinitionId, GameInstance);
 }
 
-bool AMyCharacter::TryClaimWorldItemPickup(FName PersistentId, FName ItemDefinitionId, FName& OutInstanceId,
+bool AMyCharacter::TryClaimWorldItemPickup(FName PersistentId, FName ItemDefinitionId, int32 PickupQuantity, FName& OutInstanceId,
 	USoundBase*& OutPickupSound)
 {
 	OutInstanceId = NAME_None;
@@ -1577,6 +1588,34 @@ bool AMyCharacter::TryClaimWorldItemPickup(FName PersistentId, FName ItemDefinit
 	if (!Definition)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("Claim world item failed: DefinitionId '%s' is not in this player's catalog."),
+			*ItemDefinitionId.ToString());
+		return false;
+	}
+
+	if (PickupQuantity <= 0)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Claim world item failed: PickupQuantity must be positive."));
+		return false;
+	}
+
+	if (Definition->UsesAmmoContainer())
+	{
+		USoulslikeGameInstance* GameInstance = GetGameInstance<USoulslikeGameInstance>();
+		if (!ItemOwnershipComponent->TryClaimWorldAmmoPickup(PersistentId, ItemDefinitionId, PickupQuantity,
+			GameInstance, OutInstanceId))
+		{
+			return false;
+		}
+
+		OutPickupSound = Definition->GetPickupSound();
+		UpdateBowAmmoHUD();
+		RefreshBowPresentation();
+		return true;
+	}
+
+	if (PickupQuantity != 1)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Claim world item rejected DefinitionId '%s': non-ammo fixed pickups must use quantity 1."),
 			*ItemDefinitionId.ToString());
 		return false;
 	}
@@ -1630,6 +1669,8 @@ bool AMyCharacter::TryClaimWorldItemPickup(FName PersistentId, FName ItemDefinit
 	}
 
 	OutPickupSound = Definition->GetPickupSound();
+	UpdateBowAmmoHUD();
+	RefreshBowPresentation();
 	return true;
 }
 
@@ -1904,6 +1945,8 @@ void AMyCharacter::CommitMaterializedLoadoutActor(EItemEquipmentSlot EquipmentSl
 		{
 			Weapon->PlayEquipSound();
 		}
+		UpdateBowAmmoHUD();
+		RefreshBowPresentation();
 		return;
 	}
 
@@ -1930,6 +1973,8 @@ void AMyCharacter::DestroyMaterializedLoadoutSlot(EItemEquipmentSlot EquipmentSl
 
 		EquippedWeapon = nullptr;
 		WeaponState = EWeaponState::EWS_Unequipped;
+		UpdateBowAmmoHUD();
+		RefreshBowPresentation();
 		return;
 	}
 
@@ -2197,6 +2242,9 @@ bool AMyCharacter::StartBowAimAction()
 	bIsSprinting = false;
 	bBowDrawInputHeld = false;
 	ActionState = EActionState::EAS_Aiming;
+	PlayBowDrawPresentation();
+	RefreshBowPresentation();
+	UpdateBowAmmoHUD();
 	UpdateAimReticleHUD();
 	return true;
 }
@@ -2204,7 +2252,7 @@ bool AMyCharacter::StartBowAimAction()
 bool AMyCharacter::ReleaseBowArrow()
 {
 	ABow* Bow = GetEquippedBow();
-	if (!Bow || !ItemOwnershipComponent || bBowReleaseOnCooldown)
+	if (!Bow || !ItemOwnershipComponent || bBowReleasePresentationPending)
 	{
 		return false;
 	}
@@ -2286,26 +2334,24 @@ bool AMyCharacter::ReleaseBowArrow()
 		return false;
 	}
 
-	USoulslikeGameInstance* GameInstance = GetGameInstance<USoulslikeGameInstance>();
-	if (!ItemOwnershipComponent->TryConsumeLoadedAmmo(AmmoDefinitionId, 1, GameInstance))
+	if (!TryStartBowReleasePresentation(Bow))
 	{
 		Projectile->Destroy();
 		return false;
 	}
 
+	USoulslikeGameInstance* GameInstance = GetGameInstance<USoulslikeGameInstance>();
+	if (!ItemOwnershipComponent->TryConsumeLoadedAmmo(AmmoDefinitionId, 1, GameInstance))
+	{
+		Projectile->Destroy();
+		AbortBowReleasePresentation();
+		return false;
+	}
+
 	Projectile->CommitPreparedLaunch();
 
+	UpdateBowAmmoHUD();
 	Bow->PlayShotSound();
-	bBowReleaseOnCooldown = true;
-	const float Cooldown = Bow->GetShotCooldown();
-	if (Cooldown > 0.f)
-	{
-		GetWorldTimerManager().SetTimer(BowReleaseCooldownTimer, this, &AMyCharacter::ResetBowReleaseCooldown, Cooldown, false);
-	}
-	else
-	{
-		ResetBowReleaseCooldown();
-	}
 
 	UE_LOG(LogTemp, Display, TEXT("%s: Bow released one '%s'."), *GetName(), *AmmoDefinitionId.ToString());
 	return true;
@@ -2712,14 +2758,9 @@ bool AMyCharacter::CanStartBowAim() const
 		&& !GetCharacterMovement()->IsFalling();
 }
 
-void AMyCharacter::CancelBowAim(bool bClearBlockHeld, bool bResetReleaseCooldown)
+void AMyCharacter::CancelBowAim(bool bClearBlockHeld)
 {
 	bBowDrawInputHeld = false;
-	if (bResetReleaseCooldown)
-	{
-		bBowReleaseOnCooldown = false;
-		GetWorldTimerManager().ClearTimer(BowReleaseCooldownTimer);
-	}
 	if (bClearBlockHeld)
 	{
 		bBlockInputHeld = false;
@@ -2730,12 +2771,130 @@ void AMyCharacter::CancelBowAim(bool bClearBlockHeld, bool bResetReleaseCooldown
 		ActionState = EActionState::EAS_UnOccupied;
 	}
 
+	bBowReleasePresentationPending = false;
+	StopBowPresentationMontages();
+	RefreshBowPresentation();
+
 	UpdateAimReticleHUD();
 }
 
-void AMyCharacter::ResetBowReleaseCooldown()
+void AMyCharacter::PlayBowDrawPresentation()
 {
-	bBowReleaseOnCooldown = false;
+	ABow* Bow = GetEquippedBow();
+	UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
+	UAnimMontage* DrawMontage = Bow ? Bow->GetDrawMontage() : nullptr;
+	if (!Bow || !AnimInstance || !DrawMontage || AnimInstance->Montage_Play(DrawMontage) <= 0.f)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s: Bow Draw presentation is unavailable; aiming continues without a Draw montage."),
+			*GetName());
+	}
+}
+
+bool AMyCharacter::TryStartBowReleasePresentation(ABow* Bow)
+{
+	UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
+	if (!Bow || !AnimInstance)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s: Bow release blocked: equipped Bow or AnimInstance is unavailable."), *GetName());
+		return false;
+	}
+
+	UAnimMontage* ReleaseMontage = Bow->GetReleaseMontage();
+	if (!ReleaseMontage)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s: Bow release blocked: ReleaseMontage is required for player firing."), *GetName());
+		return false;
+	}
+
+	if (AnimInstance->Montage_IsPlaying(ReleaseMontage))
+	{
+		return false;
+	}
+
+	if (AnimInstance->Montage_Play(ReleaseMontage) <= 0.f)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s: Bow release blocked: ReleaseMontage could not play."), *GetName());
+		return false;
+	}
+
+	bBowReleasePresentationPending = true;
+	ActiveBowReleaseMontage = ReleaseMontage;
+	BindMontageEndDelegate(AnimInstance, ReleaseMontage, &AMyCharacter::OnBowReleaseMontageEnded);
+	RefreshBowPresentation();
+	return true;
+}
+
+void AMyCharacter::AbortBowReleasePresentation()
+{
+	UAnimMontage* MontageToStop = ActiveBowReleaseMontage;
+	ActiveBowReleaseMontage = nullptr;
+	bBowReleasePresentationPending = false;
+
+	if (UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
+		AnimInstance && MontageToStop && AnimInstance->Montage_IsPlaying(MontageToStop))
+	{
+		AnimInstance->Montage_Stop(0.12f, MontageToStop);
+	}
+
+	RefreshBowPresentation();
+}
+
+void AMyCharacter::StopBowPresentationMontages()
+{
+	ActiveBowReleaseMontage = nullptr;
+
+	ABow* Bow = GetEquippedBow();
+	UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
+	if (!Bow || !AnimInstance)
+	{
+		return;
+	}
+
+	if (UAnimMontage* DrawMontage = Bow->GetDrawMontage(); DrawMontage && AnimInstance->Montage_IsPlaying(DrawMontage))
+	{
+		AnimInstance->Montage_Stop(0.12f, DrawMontage);
+	}
+
+	if (UAnimMontage* ReleaseMontage = Bow->GetReleaseMontage(); ReleaseMontage && AnimInstance->Montage_IsPlaying(ReleaseMontage))
+	{
+		AnimInstance->Montage_Stop(0.12f, ReleaseMontage);
+	}
+}
+
+void AMyCharacter::RefreshBowPresentation()
+{
+	ABow* Bow = GetEquippedBow();
+	const bool bShouldShowLoadedArrow = Bow && ItemOwnershipComponent && IsBowAiming()
+		&& !bBowReleasePresentationPending
+		&& ItemOwnershipComponent->GetLoadedAmmoQuantity(Bow->GetAmmoDefinitionId()) > 0;
+	if (Bow)
+	{
+		Bow->SetLoadedArrowVisualVisible(bShouldShowLoadedArrow);
+	}
+}
+
+void AMyCharacter::OnBowReleaseMontageEnded(UAnimMontage* Montage, bool /*bInterrupted*/)
+{
+	if (!ActiveBowReleaseMontage || Montage != ActiveBowReleaseMontage)
+	{
+		return;
+	}
+
+	ActiveBowReleaseMontage = nullptr;
+	bBowReleasePresentationPending = false;
+	RefreshBowPresentation();
+}
+
+void AMyCharacter::HandleLoadedAmmoQuantityChanged(FName DefinitionId, int32 /*NewQuantity*/)
+{
+	const ABow* Bow = GetEquippedBow();
+	if (!Bow || Bow->GetAmmoDefinitionId() != DefinitionId)
+	{
+		return;
+	}
+
+	UpdateBowAmmoHUD();
+	RefreshBowPresentation();
 }
 
 bool AMyCharacter::ConsumeProjectilePrepareFailureForDebug()
@@ -3373,6 +3532,7 @@ void AMyCharacter::InitializePlayerHUD()
 		PlayerHUDWidget->BindToAttributes(Attributes);
 		UpdatePotionCooldownHUD();
 		UpdateAimReticleHUD();
+		UpdateBowAmmoHUD();
 	}
 }
 
@@ -3395,6 +3555,27 @@ void AMyCharacter::UpdateAimReticleHUD() const
 	{
 		PlayerHUDWidget->SetAimReticleVisible(IsBowAiming());
 	}
+}
+
+void AMyCharacter::UpdateBowAmmoHUD() const
+{
+	if (!PlayerHUDWidget)
+	{
+		return;
+	}
+
+	const ABow* Bow = GetEquippedBow();
+	if (!Bow || !ItemOwnershipComponent)
+	{
+		PlayerHUDWidget->SetArrowCount(0, 0, false);
+		return;
+	}
+
+	const FName AmmoDefinitionId = Bow->GetAmmoDefinitionId();
+	PlayerHUDWidget->SetArrowCount(
+		ItemOwnershipComponent->GetLoadedAmmoQuantity(AmmoDefinitionId),
+		ItemOwnershipComponent->GetLoadedAmmoCapacity(AmmoDefinitionId),
+		true);
 }
 
 void AMyCharacter::DrawDebugInfo() const
