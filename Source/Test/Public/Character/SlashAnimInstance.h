@@ -36,4 +36,10 @@ private:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "State", meta = (AllowPrivateAccess = "true", ToolTip = "是否正在以已装备 Bow 瞄准。仅供根玩家 AnimBP 选择 Aim Locomotion。"))
 	bool bIsBowAiming = false;
 
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "State", meta = (AllowPrivateAccess = "true", ToolTip = "Bow 瞄准时准星相对角色水平朝向的角度。"))
+	float BowAimYaw = 0.f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "State", meta = (AllowPrivateAccess = "true", ToolTip = "Bow 瞄准时准星相对角色垂直朝向的角度。"))
+	float BowAimPitch = 0.f;
+
 };

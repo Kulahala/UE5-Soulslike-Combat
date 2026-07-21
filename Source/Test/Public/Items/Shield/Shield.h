@@ -54,7 +54,7 @@ private:
 
 	// 副手装备插槽名
 	UPROPERTY(EditAnywhere, Category = "Equip", meta = (AllowPrivateAccess = "true", ToolTip = "盾牌挂载的副手骨骼插槽名。"))
-	FName OffhandSocketName = FName("LeftHandSocket");
+	FName OffhandSocketName = FName("LeftHandShieldSocket");
 
 	// 盾牌装备音效
 	UPROPERTY(EditAnywhere, Category = "Equip", meta = (AllowPrivateAccess = "true", ToolTip = "盾牌装备时播放的音效。"))

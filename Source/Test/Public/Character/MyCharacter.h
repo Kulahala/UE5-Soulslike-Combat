@@ -191,7 +191,7 @@ protected:
 	float RunSpeed = 300.f;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Movement", meta = (ToolTip = "冲刺速度。"))
-	float SprintSpeed = 360.f;
+	float SprintSpeed = 380.f;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Combat|Stamina", meta = (ClampMin = "0.0", ToolTip = "敌人主动交战或有效敌我命中结束后，冲刺继续消耗体力的保持时间（秒）。"))
 	float CombatPresenceExitDelay = 4.f;
@@ -260,7 +260,11 @@ private:
 	bool IsCombatPresenceActive() const;
 	float CalcBaseSpeed(float DotProduct) const;
 	void UpdateLockOnCamera(float DeltaTime);
-	void GetLockOnCameraTargets(FVector& OutSocketTarget, float& OutArmLengthTarget, float& OutInterpSpeed) const;
+	void GetCameraTargets(FVector& OutSocketTarget, float& OutArmLengthTarget, float& OutInterpSpeed) const;
+	bool ShouldSuspendLockOnCameraForAim() const;
+	void CacheAimRotationState();
+	void ApplyAimRotationMode();
+	void RestoreAimRotationMode();
 	void CacheLockOnRotationState();
 	void EnterLockOnRotationMode();
 	void RestoreCachedRotationState();
@@ -306,6 +310,15 @@ private:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true", ToolTip = "玩家弹簧臂。"))
 	USpringArmComponent* SpringArm;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Camera|Bow Aim", meta = (ToolTip = "Bow 瞄准期间使用的绝对右肩 SpringArm SocketOffset。"))
+	FVector AimCameraSocketOffset = FVector(0.f, 100.f, 75.f);
+
+	UPROPERTY(EditDefaultsOnly, Category = "Camera|Bow Aim", meta = (ToolTip = "Bow 瞄准期间相对常规弹簧臂长度的偏移；负值会拉近镜头。"))
+	float AimCameraArmLengthDelta = -65.f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Camera|Bow Aim", meta = (ToolTip = "Bow 瞄准右肩镜头的插值速度；FInterpTo/VInterpTo 自然表现为先快后慢。", ClampMin = "0.0"))
+	float AimCameraInterpSpeed = 12.f;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true", ToolTip = "玩家锁定组件，负责锁定状态、目标筛选和参数持有。"))
 	UPlayerLockOnComponent* LockOnComponent;
@@ -467,6 +480,11 @@ private:
 	bool bCachedSpringArmUsePawnControlRotation = false;
 	FVector CachedSocketOffset = FVector::ZeroVector;
 	float CachedTargetArmLength = 300.f;
+
+	// Bow Aim 需要保留锁定前的底层移动朝向，不能复用会在瞄准中被覆盖的 Lock-On 缓存。
+	bool bAimRotationStateCached = false;
+	bool bCachedAimOrientRotationToMovement = true;
+	bool bCachedAimUseControllerRotationYaw = false;
 
 	/* 相机归中 */
 	bool bRecenteringCamera = false;

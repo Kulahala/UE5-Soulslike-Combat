@@ -279,7 +279,7 @@ void ACharacterController::Input_Look(const FInputActionValue& Value)
 {
 	if (AMyCharacter* MyCharacter = GetMyCharacter())
 	{
-		if (MyCharacter->IsLockingOn()) return;
+		if (MyCharacter->IsLockingOn() && !MyCharacter->IsBowAiming()) return;
 	}
 
 	if (APawn* ControlledPawn = GetPawn())
@@ -517,19 +517,21 @@ void ACharacterController::TogglePause()
 			}
 			else
 			{
-				// 检查旋转完成度
-				FRotator CurrentRot = GetControlRotation();
-				FVector ToTarget = LockedTarget->GetActorLocation() - MyCharacter->GetActorLocation();
-				FRotator TargetRot = FRotationMatrix::MakeFromX(ToTarget).Rotator();
-				TargetRot.Pitch = 0.f;
-
-				float YawDelta = FMath::Abs(FMath::FindDeltaAngleDegrees(CurrentRot.Yaw, TargetRot.Yaw));
-
-				if (YawDelta >= 1.f)  // 旋转中，清除锁定
+				// Bow Aim 允许刻意将准星转离保留的锁定目标，不能沿用普通锁定的归中未完成判定。
+				if (!MyCharacter->IsBowAiming())
 				{
-					MyCharacter->ClearLockOn();
+					FRotator CurrentRot = GetControlRotation();
+					FVector ToTarget = LockedTarget->GetActorLocation() - MyCharacter->GetActorLocation();
+					FRotator TargetRot = FRotationMatrix::MakeFromX(ToTarget).Rotator();
+					TargetRot.Pitch = 0.f;
+
+					const float YawDelta = FMath::Abs(FMath::FindDeltaAngleDegrees(CurrentRot.Yaw, TargetRot.Yaw));
+
+					if (YawDelta >= 1.f)  // 旋转中，清除锁定
+					{
+						MyCharacter->ClearLockOn();
+					}
 				}
-				// 否则保持锁定
 			}
 		}
 

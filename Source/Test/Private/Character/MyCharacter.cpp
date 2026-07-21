@@ -2239,9 +2239,13 @@ bool AMyCharacter::StartBowAimAction()
 		return false;
 	}
 
+	// 自由瞄准必须立刻接管 ControlRotation，不能被一次失败锁定遗留的归中插值拉回。
+	StopCameraRecenter();
 	bIsSprinting = false;
 	bBowDrawInputHeld = false;
+	CacheAimRotationState();
 	ActionState = EActionState::EAS_Aiming;
+	ApplyAimRotationMode();
 	PlayBowDrawPresentation();
 	RefreshBowPresentation();
 	UpdateBowAmmoHUD();
@@ -2771,6 +2775,8 @@ void AMyCharacter::CancelBowAim(bool bClearBlockHeld)
 		ActionState = EActionState::EAS_UnOccupied;
 	}
 
+	RestoreAimRotationMode();
+
 	bBowReleasePresentationPending = false;
 	StopBowPresentationMontages();
 	RefreshBowPresentation();
@@ -3185,8 +3191,11 @@ void AMyCharacter::UpdateLockOn(float DeltaTime)
 		|| ActionState == EActionState::EAS_Stunning
 		|| ActionState == EActionState::EAS_GuardBroken) return;
 
-	UpdateLockOnControlRotation(DeltaTime);
-	UpdateLockOnActorFacing(DeltaTime);
+	if (!ShouldSuspendLockOnCameraForAim())
+	{
+		UpdateLockOnControlRotation(DeltaTime);
+		UpdateLockOnActorFacing(DeltaTime);
+	}
 
 	// [调试]
 	if (FDebugDrawHelper::IsPlayerEnabled())
@@ -3252,6 +3261,11 @@ void AMyCharacter::ApplyLockOnRotationMode()
 {
 	// 攻击中不覆盖旋转：普通锁定攻击保持双 true，free-run 攻击保持 Attack() 入口设的双 false
 	if (ActionState == EActionState::EAS_Attacking || ActionState == EActionState::EAS_Dodging) return;
+	if (IsBowAiming())
+	{
+		ApplyAimRotationMode();
+		return;
+	}
 
 	if (IsLockingOn())
 	{
@@ -3261,6 +3275,12 @@ void AMyCharacter::ApplyLockOnRotationMode()
 
 void AMyCharacter::RestoreRotationMode()
 {
+	if (IsBowAiming())
+	{
+		ApplyAimRotationMode();
+		return;
+	}
+
 	if (IsLockingOn())
 	{
 		ApplyCurrentLockOnRotationMode();
@@ -3273,15 +3293,10 @@ void AMyCharacter::RestoreRotationMode()
 
 void AMyCharacter::UpdateLockOnCamera(float DeltaTime)
 {
-	if (!LockOnComponent)
-	{
-		return;
-	}
-
 	FVector SocketTarget = FVector::ZeroVector;
 	float ArmLengthTarget = CachedTargetArmLength;
-	float InterpSpeed = LockOnComponent->GetSocketOffsetInterpSpeed();
-	GetLockOnCameraTargets(SocketTarget, ArmLengthTarget, InterpSpeed);
+	float InterpSpeed = 0.f;
+	GetCameraTargets(SocketTarget, ArmLengthTarget, InterpSpeed);
 
 	SpringArm->SocketOffset = FMath::VInterpTo(
 		SpringArm->SocketOffset, SocketTarget, DeltaTime, InterpSpeed);
@@ -3289,8 +3304,16 @@ void AMyCharacter::UpdateLockOnCamera(float DeltaTime)
 		SpringArm->TargetArmLength, ArmLengthTarget, DeltaTime, InterpSpeed);
 }
 
-void AMyCharacter::GetLockOnCameraTargets(FVector& OutSocketTarget, float& OutArmLengthTarget, float& OutInterpSpeed) const
+void AMyCharacter::GetCameraTargets(FVector& OutSocketTarget, float& OutArmLengthTarget, float& OutInterpSpeed) const
 {
+	if (IsBowAiming())
+	{
+		OutSocketTarget = AimCameraSocketOffset;
+		OutArmLengthTarget = FMath::Max(0.f, CachedTargetArmLength + AimCameraArmLengthDelta);
+		OutInterpSpeed = AimCameraInterpSpeed;
+		return;
+	}
+
 	if (!LockOnComponent)
 	{
 		OutSocketTarget = CachedSocketOffset;
@@ -3315,6 +3338,54 @@ void AMyCharacter::GetLockOnCameraTargets(FVector& OutSocketTarget, float& OutAr
 	}
 
 	OutInterpSpeed = bFreeRun ? LockOnComponent->GetFreeRunCameraInterpSpeed() : LockOnComponent->GetSocketOffsetInterpSpeed();
+}
+
+bool AMyCharacter::ShouldSuspendLockOnCameraForAim() const
+{
+	return IsBowAiming() && IsLockingOn();
+}
+
+void AMyCharacter::CacheAimRotationState()
+{
+	if (bAimRotationStateCached)
+	{
+		return;
+	}
+
+	bAimRotationStateCached = true;
+	if (IsLockingOn())
+	{
+		bCachedAimOrientRotationToMovement = bCachedOrientRotationToMovement;
+		bCachedAimUseControllerRotationYaw = bCachedUseControllerRotationYaw;
+		return;
+	}
+
+	bCachedAimOrientRotationToMovement = GetCharacterMovement()->bOrientRotationToMovement;
+	bCachedAimUseControllerRotationYaw = bUseControllerRotationYaw;
+}
+
+void AMyCharacter::ApplyAimRotationMode()
+{
+	SetMovementRotationMode(false, true);
+}
+
+void AMyCharacter::RestoreAimRotationMode()
+{
+	if (!bAimRotationStateCached)
+	{
+		return;
+	}
+
+	if (IsLockingOn())
+	{
+		ApplyCurrentLockOnRotationMode();
+	}
+	else
+	{
+		SetMovementRotationMode(bCachedAimOrientRotationToMovement, bCachedAimUseControllerRotationYaw);
+	}
+
+	bAimRotationStateCached = false;
 }
 
 // ==================== 听觉感知 ====================
@@ -3392,22 +3463,38 @@ void AMyCharacter::StopMovementNoiseTimer()
 void AMyCharacter::CacheLockOnRotationState()
 {
 	// SocketOffset 由 BeginPlay 初始化，不在此处覆盖
-	bCachedOrientRotationToMovement = GetCharacterMovement()->bOrientRotationToMovement;
-	bCachedUseControllerRotationYaw = bUseControllerRotationYaw;
+	bCachedOrientRotationToMovement = bAimRotationStateCached
+		? bCachedAimOrientRotationToMovement
+		: GetCharacterMovement()->bOrientRotationToMovement;
+	bCachedUseControllerRotationYaw = bAimRotationStateCached
+		? bCachedAimUseControllerRotationYaw
+		: bUseControllerRotationYaw;
 	bCachedSpringArmUsePawnControlRotation = SpringArm->bUsePawnControlRotation;
 }
 
 void AMyCharacter::EnterLockOnRotationMode()
 {
-	SetMovementRotationMode(false, false);
 	SpringArm->bUsePawnControlRotation = true;
+	if (IsBowAiming())
+	{
+		ApplyAimRotationMode();
+		return;
+	}
+
+	SetMovementRotationMode(false, false);
 }
 
 void AMyCharacter::RestoreCachedRotationState()
 {
 	// SocketOffset 由 Tick 插值平滑恢复，ClearLockOn 只恢复旋转控制模式
-	SetMovementRotationMode(bCachedOrientRotationToMovement, bCachedUseControllerRotationYaw);
 	SpringArm->bUsePawnControlRotation = bCachedSpringArmUsePawnControlRotation;
+	if (IsBowAiming())
+	{
+		ApplyAimRotationMode();
+		return;
+	}
+
+	SetMovementRotationMode(bCachedOrientRotationToMovement, bCachedUseControllerRotationYaw);
 }
 
 void AMyCharacter::ClearCurrentLockOnTarget()
@@ -3479,7 +3566,7 @@ void AMyCharacter::UpdateLockOnControlRotation(float DeltaTime) const
 
 void AMyCharacter::UpdateLockOnActorFacing(float DeltaTime)
 {
-	if (!IsLockingOn() || ShouldUseLockOnFreeRun() ||
+	if (!IsLockingOn() || ShouldSuspendLockOnCameraForAim() || ShouldUseLockOnFreeRun() ||
 		ActionState == EActionState::EAS_Attacking ||
 		ActionState == EActionState::EAS_Dodging ||
 		ActionState == EActionState::EAS_Stunning ||

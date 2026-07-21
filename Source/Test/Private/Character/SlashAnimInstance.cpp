@@ -19,6 +19,8 @@ void USlashAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 		bIsBlocking = false;
 		bIsStunning = false;
 		bIsBowAiming = false;
+		BowAimYaw = 0.f;
+		BowAimPitch = 0.f;
 		return;
 	}
 
@@ -28,4 +30,15 @@ void USlashAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 	bIsStunning = MyCharacter->GetActionState() == EActionState::EAS_Stunning
 		|| MyCharacter->GetActionState() == EActionState::EAS_GuardBroken;
 	bIsBowAiming = MyCharacter->IsBowAiming();
+	if (bIsBowAiming)
+	{
+		const FRotator AimDelta = (MyCharacter->GetBaseAimRotation() - MyCharacter->GetActorRotation()).GetNormalized();
+		BowAimYaw = AimDelta.Yaw;
+		BowAimPitch = AimDelta.Pitch;
+	}
+	else
+	{
+		BowAimYaw = 0.f;
+		BowAimPitch = 0.f;
+	}
 }
