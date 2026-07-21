@@ -166,9 +166,6 @@ These TODOs are accepted future work, not permission to start implementation imm
 
 **Encounter authoring decision:** reusable Controller behavior and Spline authoring were already proven by `TODO-02A1/A2`. The former standalone `TODO-02B` is deliberately not marked Done and is absorbed as a mandatory adoption condition of `TODO-06A`: do not place a permanent `TestMap` encounter solely to repeat core validation. `TODO-02C` waits until that first permanent map-owned Controller exists.
 
-- [ ] **TODO-05B: Front Critical v1**
-  Prerequisite: `TODO-05A2` has authored and validated the dedicated enemy Stance-Break presentation and protected recovery window. Complete the existing enemy `EES_StanceBreak` loop with one front critical interaction. Align a valid stance-broken enemy via Motion Warping and apply configured critical damage from an AnimNotify. Do not add backstab, generic finisher infrastructure, or Boss criticals.
-
 ### Ranged Combat
 
 - [ ] **TODO-04B-C: Player Bow Charge And Confirmed Hit Feedback v1**
@@ -179,6 +176,11 @@ These TODOs are accepted future work, not permission to start implementation imm
 
 - [ ] **TODO-04E: Third-Person Camera Experience Polish v1**
   Prerequisite: the authored Erika archer, lock-target switching, and the visible player bow have all passed their focused PIE validation, so camera behavior is judged under actual mixed melee/ranged pressure rather than an isolated root-motion clip. First distinguish unstable root motion, Motion Warping, capsule collision, and SpringArm follow behavior. Then improve only proven camera issues through centralized, state-aware SpringArm position smoothing and obstruction recovery. Preserve direct mouse response, lock-on framing, and bow aim; do not globally enable rotation lag or use camera lag to hide invalid character displacement. Validate free running, lock-on switching, bow aim, attack, dodge, hit reaction, wall obstruction/recovery, and 30/60 FPS feel. This is a dedicated polish stage, not incidental tuning inside enemy or bow authoring.
+
+### Combat Punish And Criticals
+
+- [ ] **TODO-05B: Front Critical v1**
+  Prerequisite: `TODO-05A2` has authored and validated the dedicated enemy Stance-Break presentation and protected recovery window, and a DarkKnight-compatible front-critical Montage plus its intended AnimNotify timing are available. Complete the existing enemy `EES_StanceBreak` loop with one front critical interaction. Align a valid stance-broken enemy via Motion Warping and apply configured critical damage from an AnimNotify. Do not add backstab, generic finisher infrastructure, or Boss criticals. Deferred behind the player Bow presentation route until those dedicated Critical assets are ready.
 
 ### Level And Boss Slice
 
