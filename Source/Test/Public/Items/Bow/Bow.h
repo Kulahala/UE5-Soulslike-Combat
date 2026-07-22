@@ -6,9 +6,19 @@
 #include "Bow.generated.h"
 
 class USceneComponent;
+class USkeletalMeshComponent;
 class UStaticMeshComponent;
 class USoundBase;
 class UAnimMontage;
+
+/** 仅供 Bow 自身 AnimBP 消费的表现状态，不拥有玩家玩法状态或发射时机。 */
+UENUM(BlueprintType)
+enum class EBowPresentationState : uint8
+{
+	EBPS_Relaxed UMETA(DisplayName = "Relaxed"),
+	EBPS_Aiming UMETA(DisplayName = "Aiming"),
+	EBPS_Releasing UMETA(DisplayName = "Releasing")
+};
 
 /** 主手弓的静态投递配置；物品所有权、箭数和玩家动作仍由各自系统持有。 */
 UCLASS()
@@ -22,8 +32,12 @@ public:
 	bool HasValidProjectileConfig(FString& OutFailureReason) const;
 	FVector GetProjectileSpawnLocation() const;
 	void SetLoadedArrowVisualVisible(bool bVisible);
+	void SetBowPresentationState(EBowPresentationState NewState);
 	void PlayShotSound() const;
 	void PlayEmptyAmmoSound() const;
+
+	UFUNCTION(BlueprintPure, Category = "Bow|Presentation")
+	EBowPresentationState GetBowPresentationState() const;
 
 	FORCEINLINE FName GetAmmoDefinitionId() const { return AmmoDefinitionId; }
 	FORCEINLINE TSubclassOf<ACombatProjectile> GetProjectileClass() const { return ProjectileClass; }
@@ -33,6 +47,9 @@ public:
 	FORCEINLINE UAnimMontage* GetReleaseMontage() const { return ReleaseMontage; }
 
 protected:
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true", ToolTip = "玩家 Bow 的无碰撞 Skeletal 渲染层；静态 Mesh 仍保留为附着与 Trace 锚点。"))
+	USkeletalMeshComponent* BowSkeletalVisual = nullptr;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true", ToolTip = "已装填箭的作者可调锚点；正式 Bow Blueprint 应将它对齐到弦上的箭轴。"))
 	USceneComponent* LoadedArrowAnchor = nullptr;
 
@@ -65,4 +82,7 @@ protected:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Bow|Audio", meta = (AllowPrivateAccess = "true", ToolTip = "箭数不足时播放的可选音效。"))
 	USoundBase* EmptyAmmoSound = nullptr;
+
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Bow|Presentation", meta = (AllowPrivateAccess = "true", ToolTip = "仅驱动 Bow 自身 AnimBP 的瞬态表现状态。"))
+	EBowPresentationState BowPresentationState = EBowPresentationState::EBPS_Relaxed;
 };

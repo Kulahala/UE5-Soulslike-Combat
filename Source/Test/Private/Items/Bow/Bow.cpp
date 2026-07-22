@@ -1,13 +1,28 @@
 #include "Items/Bow/Bow.h"
 
 #include "Components/SceneComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Kismet/GameplayStatics.h"
 
+namespace
+{
+	const FName BowArrowSocketName(TEXT("BowArrowSocket"));
+}
+
 ABow::ABow()
 {
+	BowSkeletalVisual = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("BowSkeletalVisual"));
+	BowSkeletalVisual->SetupAttachment(GetMesh());
+	BowSkeletalVisual->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	BowSkeletalVisual->SetCollisionResponseToAllChannels(ECR_Ignore);
+	BowSkeletalVisual->SetGenerateOverlapEvents(false);
+	BowSkeletalVisual->SetSimulatePhysics(false);
+	BowSkeletalVisual->SetEnableGravity(false);
+	BowSkeletalVisual->SetCanEverAffectNavigation(false);
+
 	LoadedArrowAnchor = CreateDefaultSubobject<USceneComponent>(TEXT("LoadedArrowAnchor"));
-	LoadedArrowAnchor->SetupAttachment(GetMesh());
+	LoadedArrowAnchor->SetupAttachment(BowSkeletalVisual, BowArrowSocketName);
 
 	LoadedArrowVisual = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("LoadedArrowVisual"));
 	LoadedArrowVisual->SetupAttachment(LoadedArrowAnchor);
@@ -24,6 +39,16 @@ ABow::ABow()
 	ProjectileSpawnPoint = CreateDefaultSubobject<USceneComponent>(TEXT("ProjectileSpawnPoint"));
 	ProjectileSpawnPoint->SetupAttachment(LoadedArrowAnchor);
 	ProjectileClass = ACombatProjectile::StaticClass();
+}
+
+void ABow::SetBowPresentationState(EBowPresentationState NewState)
+{
+	BowPresentationState = NewState;
+}
+
+EBowPresentationState ABow::GetBowPresentationState() const
+{
+	return BowPresentationState;
 }
 
 bool ABow::HasValidProjectileConfig(FString& OutFailureReason) const

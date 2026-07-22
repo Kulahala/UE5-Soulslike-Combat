@@ -2246,6 +2246,7 @@ bool AMyCharacter::StartBowAimAction()
 	CacheAimRotationState();
 	ActionState = EActionState::EAS_Aiming;
 	ApplyAimRotationMode();
+	Bow->SetBowPresentationState(EBowPresentationState::EBPS_Aiming);
 	PlayBowDrawPresentation();
 	RefreshBowPresentation();
 	UpdateBowAmmoHUD();
@@ -2776,6 +2777,10 @@ void AMyCharacter::CancelBowAim(bool bClearBlockHeld)
 	}
 
 	RestoreAimRotationMode();
+	if (ABow* Bow = GetEquippedBow())
+	{
+		Bow->SetBowPresentationState(EBowPresentationState::EBPS_Relaxed);
+	}
 
 	bBowReleasePresentationPending = false;
 	StopBowPresentationMontages();
@@ -2823,6 +2828,7 @@ bool AMyCharacter::TryStartBowReleasePresentation(ABow* Bow)
 		return false;
 	}
 
+	Bow->SetBowPresentationState(EBowPresentationState::EBPS_Releasing);
 	bBowReleasePresentationPending = true;
 	ActiveBowReleaseMontage = ReleaseMontage;
 	BindMontageEndDelegate(AnimInstance, ReleaseMontage, &AMyCharacter::OnBowReleaseMontageEnded);
@@ -2840,6 +2846,13 @@ void AMyCharacter::AbortBowReleasePresentation()
 		AnimInstance && MontageToStop && AnimInstance->Montage_IsPlaying(MontageToStop))
 	{
 		AnimInstance->Montage_Stop(0.12f, MontageToStop);
+	}
+
+	if (ABow* Bow = GetEquippedBow())
+	{
+		Bow->SetBowPresentationState(IsBowAiming()
+			? EBowPresentationState::EBPS_Aiming
+			: EBowPresentationState::EBPS_Relaxed);
 	}
 
 	RefreshBowPresentation();
@@ -2888,6 +2901,12 @@ void AMyCharacter::OnBowReleaseMontageEnded(UAnimMontage* Montage, bool /*bInter
 
 	ActiveBowReleaseMontage = nullptr;
 	bBowReleasePresentationPending = false;
+	if (ABow* Bow = GetEquippedBow())
+	{
+		Bow->SetBowPresentationState(IsBowAiming()
+			? EBowPresentationState::EBPS_Aiming
+			: EBowPresentationState::EBPS_Relaxed);
+	}
 	RefreshBowPresentation();
 }
 
