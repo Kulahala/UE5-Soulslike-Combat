@@ -16,6 +16,7 @@ class AEnemy;
 class AShield;
 class AWeapon;
 class ABow;
+class ACombatProjectile;
 class USpringArmComponent;
 class UCameraComponent;
 class UPlayerHUDWidget;
@@ -35,6 +36,7 @@ class UItemDefinitionDataAsset;
 enum class EItemEquipmentSlot : uint8;
 struct FPlayerAttackMotionWarpingConfig;
 struct FCombatHitRequest;
+struct FCombatHitResult;
 
 UCLASS()
 class TEST_API AMyCharacter : public ABaseCharacter, public IBlockableInterface
@@ -292,14 +294,24 @@ private:
 	ABow* GetEquippedBow() const;
 	bool IsBowEquipped() const;
 	bool CanStartBowAim() const;
-	void CancelBowAim(bool bClearBlockHeld);
+	void CancelBowAim(bool bClearBlockHeld, bool bImmediateChargeFOVReset = false);
 	bool ConsumeProjectilePrepareFailureForDebug();
-	void PlayBowDrawPresentation();
+	bool StartBowCharge();
+	void CancelBowCharge(bool bImmediateFOVReset);
+	void RestoreBowAimPresentation();
+	bool ResolveBowAimLaunchContext(const ABow* Bow, FVector& OutSpawnLocation, FVector& OutLaunchDirection) const;
+	void PlayBowAimRaisePresentation();
 	bool TryStartBowReleasePresentation(ABow* Bow);
+	bool TryStartBowLoadPresentation(ABow* Bow);
 	void AbortBowReleasePresentation();
 	void StopBowPresentationMontages();
 	void RefreshBowPresentation();
+	void UpdateBowChargeCameraFOV(float DeltaTime);
+	void ResetBowChargeCameraFOV();
+	void OnBowDrawMontageEnded(UAnimMontage* Montage, bool bInterrupted);
 	void OnBowReleaseMontageEnded(UAnimMontage* Montage, bool bInterrupted);
+	void OnBowLoadMontageEnded(UAnimMontage* Montage, bool bInterrupted);
+	void HandleBowProjectileImpactResolved(AActor* HitActor, const FCombatHitResult& Result);
 
 	UFUNCTION()
 	void HandleLoadedAmmoQuantityChanged(FName DefinitionId, int32 NewQuantity);
@@ -319,6 +331,12 @@ private:
 
 	UPROPERTY(EditDefaultsOnly, Category = "Camera|Bow Aim", meta = (ToolTip = "Bow 瞄准右肩镜头的插值速度；FInterpTo/VInterpTo 自然表现为先快后慢。", ClampMin = "0.0"))
 	float AimCameraInterpSpeed = 12.f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Camera|Bow Charge", meta = (ClampMin = "0.0", ToolTip = "Bow LMB 蓄力时相对开始时基础 FOV 收紧的角度。"))
+	float BowChargeFOVDelta = 8.f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Camera|Bow Charge", meta = (ClampMin = "0.0", ToolTip = "Bow LMB 蓄力与取消时 FOV 收放插值速度。"))
+	float BowChargeFOVInterpSpeed = 12.f;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true", ToolTip = "玩家锁定组件，负责锁定状态、目标筛选和参数持有。"))
 	UPlayerLockOnComponent* LockOnComponent;
@@ -353,10 +371,17 @@ private:
 	bool bPendingExhaustedAfterAttack = false;
 	bool bGuardBreakRequested = false;
 
-	// 弓的瞄准输入仅在主手实际是 ABow 时生效；不与剑的蓄力状态复用。
+	// 弓的蓄力输入仅在主手实际是 ABow 时生效；不与剑的蓄力状态复用。
 	bool bBowDrawInputHeld = false;
+	bool bBowDrawReady = false;
 	bool bBowReleasePresentationPending = false;
+	bool bBowChargeFOVActive = false;
+	float CachedBaseCameraFOV = 90.f;
+	UPROPERTY(Transient)
+	ACombatProjectile* PreparedBowProjectile = nullptr;
+	UAnimMontage* ActiveBowDrawMontage = nullptr;
 	UAnimMontage* ActiveBowReleaseMontage = nullptr;
+	UAnimMontage* ActiveBowLoadMontage = nullptr;
 	bool bFailNextProjectilePrepareForDebug = false;
 
 	// 当前重叠的可拾取物品

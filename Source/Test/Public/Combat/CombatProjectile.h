@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Combat/CombatHitTypes.h"
 #include "GameFramework/Actor.h"
 #include "CombatProjectile.generated.h"
 
@@ -8,6 +9,9 @@ class AController;
 class USphereComponent;
 class UProjectileMovementComponent;
 class UWorld;
+
+/** 投射物仅在命中已进入共享战斗结算后广播；接收方只能消费结果做表现。 */
+DECLARE_MULTICAST_DELEGATE_TwoParams(FOnCombatProjectileImpactResolved, AActor*, const FCombatHitResult&);
 
 USTRUCT(BlueprintType)
 struct FProjectileDeliveryConfig
@@ -88,6 +92,14 @@ public:
 
 	bool IsPreparedForActivation() const;
 
+	/**
+	 * 仅更新尚未激活的 prepared 投射物本次发射位置与方向。
+	 * 不会修改攻击者、命中快照、碰撞、移动状态或 Actor 当前附着位置。
+	 */
+	bool UpdatePreparedLaunchContext(const FVector& NewLaunchLocation, const FVector& NewLaunchDirection);
+
+	FOnCombatProjectileImpactResolved& GetOnImpactResolved() { return OnImpactResolved; }
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
@@ -117,6 +129,7 @@ private:
 	bool bLaunchActivated = false;
 	bool bStartLaunchOnBeginPlay = true;
 	bool bImpactResolved = false;
+	FOnCombatProjectileImpactResolved OnImpactResolved;
 
 	static ACombatProjectile* SpawnProjectile(UWorld* World, TSubclassOf<ACombatProjectile> ProjectileClass,
 		const FProjectileLaunchParams& LaunchParams, bool bStartImmediately);

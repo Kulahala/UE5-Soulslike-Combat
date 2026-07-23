@@ -207,6 +207,28 @@ bool ACombatProjectile::IsPreparedForActivation() const
 		&& !ProjectileMovement->IsActive();
 }
 
+bool ACombatProjectile::UpdatePreparedLaunchContext(const FVector& NewLaunchLocation, const FVector& NewLaunchDirection)
+{
+	if (!IsPreparedForActivation())
+	{
+		UE_LOG(LogTemp, Warning,
+			TEXT("Combat projectile '%s' rejected launch-context update because it is no longer prepared."), *GetName());
+		return false;
+	}
+
+	const FVector NormalizedDirection = NewLaunchDirection.GetSafeNormal();
+	if (NormalizedDirection.IsNearlyZero())
+	{
+		UE_LOG(LogTemp, Warning,
+			TEXT("Combat projectile '%s' rejected launch-context update because the direction is zero."), *GetName());
+		return false;
+	}
+
+	LaunchLocation = NewLaunchLocation;
+	LaunchDirection = NormalizedDirection;
+	return true;
+}
+
 void ACombatProjectile::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	if (ProjectileMovement)
@@ -347,6 +369,8 @@ void ACombatProjectile::OnProjectileStopped(const FHitResult& ImpactResult)
 		UE_LOG(LogTemp, Display, TEXT("Combat projectile '%s' hit '%s'; final damage %.2f."),
 			*GetName(), *GetNameSafe(HitActor), Result.FinalDamage);
 	}
+
+	OnImpactResolved.Broadcast(HitActor, Result);
 
 	Destroy();
 }

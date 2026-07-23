@@ -4,6 +4,7 @@
 #include "Combat/ComboDataAsset.h"
 #include "Combat/AttackConfigDataAsset.h"
 #include "Combat/CombatHitTypes.h"
+#include "Combat/CombatProjectile.h"
 #include "Combat/HitReactionConfigDataAsset.h"
 #include "Character/Components/PlayerLockOnComponent.h"
 #include "Character/Controller/CharacterController.h"
@@ -23,6 +24,7 @@
 #include "Interfaces/InteractableInterface.h"
 #include "NiagaraFunctionLibrary.h"
 #include "Components/CapsuleComponent.h"
+#include "Components/SceneComponent.h"
 #include "HUD/PlayerHUDWidget.h"
 #include "AttributeComponent/AttributeComponent.h"
 #include "Enemy/Enemy.h"
@@ -108,6 +110,7 @@ void AMyCharacter::BeginPlay()
 	// 初始化缓存为当前实际值（Blueprint 可能已覆盖）
 	CachedSocketOffset = SpringArm->SocketOffset;
 	CachedTargetArmLength = SpringArm->TargetArmLength;
+	CachedBaseCameraFOV = Camera ? Camera->FieldOfView : 90.f;
 
 	if (Attributes)
 	{
@@ -132,7 +135,7 @@ void AMyCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	{
 		ItemOwnershipComponent->OnLoadedAmmoQuantityChanged.RemoveDynamic(this, &AMyCharacter::HandleLoadedAmmoQuantityChanged);
 	}
-	CancelBowAim(true);
+	CancelBowAim(true, true);
 	DestroyMaterializedLoadout();
 
 	if (PlayerHUDWidget)
@@ -157,6 +160,7 @@ void AMyCharacter::PossessedBy(AController* NewController)
 void AMyCharacter::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
+	UpdateBowChargeCameraFOV(DeltaTime);
 
 	ACharacterController* CC = Cast<ACharacterController>(GetController());
 
@@ -368,7 +372,7 @@ void AMyCharacter::OnAttackInputPressed()
 {
 	if (IsBowAiming())
 	{
-		bBowDrawInputHeld = true;
+		StartBowCharge();
 		return;
 	}
 
@@ -394,9 +398,20 @@ void AMyCharacter::OnAttackInputReleased()
 	{
 		const bool bWasDrawingBow = bBowDrawInputHeld;
 		bBowDrawInputHeld = false;
-		if (bWasDrawingBow)
+		if (!bWasDrawingBow)
 		{
-			TryStartAction(EPlayerActionType::RangedRelease);
+			return;
+		}
+
+		if (!bBowDrawReady)
+		{
+			CancelBowCharge(false);
+			return;
+		}
+
+		if (!TryStartAction(EPlayerActionType::RangedRelease))
+		{
+			CancelBowCharge(false);
 		}
 		return;
 	}
@@ -421,7 +436,7 @@ void AMyCharacter::OnAttackInputCanceled()
 {
 	if (IsBowAiming())
 	{
-		bBowDrawInputHeld = false;
+		CancelBowCharge(false);
 		return;
 	}
 
@@ -907,7 +922,7 @@ void AMyCharacter::Die()
 	ClearParryState();
 	InterruptPotion();  // 死亡时中断喝药
 	CancelChargeInputState();
-	CancelBowAim(true);
+	CancelBowAim(true, true);
 	bPendingExhaustedAfterAttack = false;
 	bGuardBreakRequested = false;
 	GetWorldTimerManager().ClearTimer(ExhaustionTimerHandle);
@@ -1100,12 +1115,7 @@ void AMyCharacter::ReleaseBlockInput()
 		CancelBowAim(false);
 		return;
 	}
-	bIsBlocking = false;
-	if (Attributes)
-	{
-		Attributes->SetStaminaRegenMultiplier(1.f);
-	}
-	StopBlockMontage(0.2f);
+	InterruptBlock(false);
 }
 
 void AMyCharacter::InterruptBlock(bool bClearHeld)
@@ -2242,22 +2252,24 @@ bool AMyCharacter::StartBowAimAction()
 	// 自由瞄准必须立刻接管 ControlRotation，不能被一次失败锁定遗留的归中插值拉回。
 	StopCameraRecenter();
 	bIsSprinting = false;
-	bBowDrawInputHeld = false;
+	CancelBowCharge(false);
 	CacheAimRotationState();
 	ActionState = EActionState::EAS_Aiming;
 	ApplyAimRotationMode();
+	// 当前 Aim Locomotion 已是半拉弓姿态；Bow AnimBP 用独立的物理 Aim 状态与其对齐。
 	Bow->SetBowPresentationState(EBowPresentationState::EBPS_Aiming);
-	PlayBowDrawPresentation();
+	PlayBowAimRaisePresentation();
 	RefreshBowPresentation();
 	UpdateBowAmmoHUD();
 	UpdateAimReticleHUD();
 	return true;
 }
 
-bool AMyCharacter::ReleaseBowArrow()
+bool AMyCharacter::StartBowCharge()
 {
 	ABow* Bow = GetEquippedBow();
-	if (!Bow || !ItemOwnershipComponent || bBowReleasePresentationPending)
+	if (!Bow || !ItemOwnershipComponent || bBowDrawInputHeld || IsValid(PreparedBowProjectile)
+		|| bBowReleasePresentationPending)
 	{
 		return false;
 	}
@@ -2265,7 +2277,7 @@ bool AMyCharacter::ReleaseBowArrow()
 	FString FailureReason;
 	if (!Bow->HasValidProjectileConfig(FailureReason))
 	{
-		UE_LOG(LogTemp, Warning, TEXT("%s: Bow release failed: %s"), *GetName(), *FailureReason);
+		UE_LOG(LogTemp, Warning, TEXT("%s: Bow charge failed: %s"), *GetName(), *FailureReason);
 		return false;
 	}
 
@@ -2273,41 +2285,33 @@ bool AMyCharacter::ReleaseBowArrow()
 	if (ItemOwnershipComponent->GetLoadedAmmoQuantity(AmmoDefinitionId) <= 0)
 	{
 		Bow->PlayEmptyAmmoSound();
-		UE_LOG(LogTemp, Display, TEXT("%s: Bow release blocked: no loaded '%s' remaining."), *GetName(), *AmmoDefinitionId.ToString());
+		UE_LOG(LogTemp, Display, TEXT("%s: Bow charge blocked: no loaded '%s' remaining."), *GetName(), *AmmoDefinitionId.ToString());
 		return false;
 	}
 
-	UWorld* World = GetWorld();
-	if (!World || !Camera)
+	UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
+	UAnimMontage* DrawMontage = Bow->GetDrawMontage();
+	UAnimMontage* ReleaseMontage = Bow->GetReleaseMontage();
+	UAnimMontage* LoadMontage = Bow->GetLoadMontage();
+	if (!AnimInstance || !DrawMontage || !ReleaseMontage || !LoadMontage)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("%s: Bow release failed: World or Camera is unavailable."), *GetName());
+		UE_LOG(LogTemp, Warning,
+			TEXT("%s: Bow charge blocked: AnimInstance, DrawMontage, ReleaseMontage, and LoadMontage are required for player firing."),
+			*GetName());
 		return false;
 	}
 
-	const FProjectileDeliveryConfig& DeliveryConfig = Bow->GetProjectileDeliveryConfig();
-	const FVector CameraLocation = Camera->GetComponentLocation();
-	const FVector CameraDirection = Camera->GetForwardVector().GetSafeNormal();
-	if (CameraDirection.IsNearlyZero())
+	// P2 的门以 Release/Load Montage 的真实播放状态为准，不能由取消路径的布尔值绕过。
+	if (AnimInstance->Montage_IsPlaying(ReleaseMontage)
+		|| (LoadMontage && AnimInstance->Montage_IsPlaying(LoadMontage)))
 	{
-		UE_LOG(LogTemp, Warning, TEXT("%s: Bow release failed: camera forward direction is zero."), *GetName());
 		return false;
 	}
 
-	const float AimDistance = DeliveryConfig.InitialSpeed * DeliveryConfig.MaxLifetime;
-	FVector AimPoint = CameraLocation + CameraDirection * AimDistance;
-	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(BowAim), false, this);
-	QueryParams.AddIgnoredActor(Bow);
-	FHitResult AimHit;
-	if (World->LineTraceSingleByChannel(AimHit, CameraLocation, AimPoint, ECC_Visibility, QueryParams))
+	FVector SpawnLocation = FVector::ZeroVector;
+	FVector LaunchDirection = FVector::ForwardVector;
+	if (!ResolveBowAimLaunchContext(Bow, SpawnLocation, LaunchDirection))
 	{
-		AimPoint = AimHit.ImpactPoint;
-	}
-
-	const FVector SpawnLocation = Bow->GetProjectileSpawnLocation();
-	const FVector LaunchDirection = (AimPoint - SpawnLocation).GetSafeNormal();
-	if (LaunchDirection.IsNearlyZero())
-	{
-		UE_LOG(LogTemp, Warning, TEXT("%s: Bow release failed: launch direction is zero."), *GetName());
 		return false;
 	}
 
@@ -2317,16 +2321,16 @@ bool AMyCharacter::ReleaseBowArrow()
 	LaunchParams.SpawnLocation = SpawnLocation;
 	LaunchParams.LaunchDirection = LaunchDirection;
 	LaunchParams.bOverrideDeliveryConfig = true;
-	LaunchParams.DeliveryConfigOverride = DeliveryConfig;
+	LaunchParams.DeliveryConfigOverride = Bow->GetProjectileDeliveryConfig();
 
-	ACombatProjectile* Projectile = ACombatProjectile::SpawnPreparedProjectile(World, Bow->GetProjectileClass(), LaunchParams);
+	ACombatProjectile* Projectile = ACombatProjectile::SpawnPreparedProjectile(GetWorld(), Bow->GetProjectileClass(), LaunchParams);
 	if (!Projectile || !Projectile->IsPreparedForActivation())
 	{
 		if (Projectile)
 		{
 			Projectile->Destroy();
 		}
-		UE_LOG(LogTemp, Warning, TEXT("%s: Bow release failed: prepared projectile is unavailable."), *GetName());
+		UE_LOG(LogTemp, Warning, TEXT("%s: Bow charge failed: prepared projectile is unavailable."), *GetName());
 		return false;
 	}
 
@@ -2334,25 +2338,96 @@ bool AMyCharacter::ReleaseBowArrow()
 	{
 		Projectile->Destroy();
 		UE_LOG(LogTemp, Warning,
-			TEXT("%s: BowDebugFailNextProjectilePrepare discarded a prepared projectile before consuming '%s'."),
+			TEXT("%s: BowDebugFailNextProjectilePrepare discarded a prepared projectile before charging '%s'."),
 			*GetName(), *AmmoDefinitionId.ToString());
+		RefreshBowPresentation();
+		return false;
+	}
+
+	if (!Bow->NockPreparedProjectile(Projectile))
+	{
+		RefreshBowPresentation();
+		return false;
+	}
+
+	PreparedBowProjectile = Projectile;
+	Projectile->GetOnImpactResolved().AddUObject(this, &AMyCharacter::HandleBowProjectileImpactResolved);
+	bBowDrawInputHeld = true;
+	bBowDrawReady = false;
+	RefreshBowPresentation();
+	ActiveBowDrawMontage = DrawMontage;
+	if (AnimInstance->Montage_Play(DrawMontage) <= 0.f)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s: Bow charge failed: DrawMontage could not play."), *GetName());
+		CancelBowCharge(false);
+		return false;
+	}
+
+	BindMontageEndDelegate(AnimInstance, DrawMontage, &AMyCharacter::OnBowDrawMontageEnded);
+	Bow->SetBowPresentationState(EBowPresentationState::EBPS_Charging);
+	bBowChargeFOVActive = true;
+	RefreshBowPresentation();
+	return true;
+}
+
+bool AMyCharacter::ReleaseBowArrow()
+{
+	ABow* Bow = GetEquippedBow();
+	ACombatProjectile* Projectile = PreparedBowProjectile;
+	if (!Bow || !ItemOwnershipComponent || !bBowDrawReady || bBowReleasePresentationPending
+		|| !IsValid(Projectile) || !Projectile->IsPreparedForActivation())
+	{
+		CancelBowCharge(false);
+		return false;
+	}
+
+	FString FailureReason;
+	if (!Bow->HasValidProjectileConfig(FailureReason))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s: Bow release failed: %s"), *GetName(), *FailureReason);
+		CancelBowCharge(false);
+		return false;
+	}
+
+	const FName AmmoDefinitionId = Bow->GetAmmoDefinitionId();
+	if (ItemOwnershipComponent->GetLoadedAmmoQuantity(AmmoDefinitionId) <= 0)
+	{
+		Bow->PlayEmptyAmmoSound();
+		UE_LOG(LogTemp, Display, TEXT("%s: Bow release blocked: no loaded '%s' remaining."), *GetName(), *AmmoDefinitionId.ToString());
+		CancelBowCharge(false);
+		return false;
+	}
+
+	FVector SpawnLocation = FVector::ZeroVector;
+	FVector LaunchDirection = FVector::ForwardVector;
+	if (!ResolveBowAimLaunchContext(Bow, SpawnLocation, LaunchDirection)
+		|| !Projectile->UpdatePreparedLaunchContext(SpawnLocation, LaunchDirection))
+	{
+		CancelBowCharge(false);
 		return false;
 	}
 
 	if (!TryStartBowReleasePresentation(Bow))
 	{
-		Projectile->Destroy();
+		CancelBowCharge(false);
 		return false;
 	}
 
 	USoulslikeGameInstance* GameInstance = GetGameInstance<USoulslikeGameInstance>();
 	if (!ItemOwnershipComponent->TryConsumeLoadedAmmo(AmmoDefinitionId, 1, GameInstance))
 	{
-		Projectile->Destroy();
+		CancelBowCharge(false);
 		AbortBowReleasePresentation();
 		return false;
 	}
 
+	Projectile->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
+	Projectile->SetActorLocationAndRotation(SpawnLocation, LaunchDirection.Rotation(), false, nullptr,
+		ETeleportType::TeleportPhysics);
+	PreparedBowProjectile = nullptr;
+	bBowDrawInputHeld = false;
+	bBowDrawReady = false;
+	bBowChargeFOVActive = false;
 	Projectile->CommitPreparedLaunch();
 
 	UpdateBowAmmoHUD();
@@ -2763,9 +2838,9 @@ bool AMyCharacter::CanStartBowAim() const
 		&& !GetCharacterMovement()->IsFalling();
 }
 
-void AMyCharacter::CancelBowAim(bool bClearBlockHeld)
+void AMyCharacter::CancelBowAim(bool bClearBlockHeld, bool bImmediateChargeFOVReset)
 {
-	bBowDrawInputHeld = false;
+	CancelBowCharge(bImmediateChargeFOVReset);
 	if (bClearBlockHeld)
 	{
 		bBlockInputHeld = false;
@@ -2785,19 +2860,103 @@ void AMyCharacter::CancelBowAim(bool bClearBlockHeld)
 	bBowReleasePresentationPending = false;
 	StopBowPresentationMontages();
 	RefreshBowPresentation();
-
 	UpdateAimReticleHUD();
 }
 
-void AMyCharacter::PlayBowDrawPresentation()
+void AMyCharacter::CancelBowCharge(bool bImmediateFOVReset)
+{
+	UAnimMontage* DrawMontageToStop = ActiveBowDrawMontage;
+	ActiveBowDrawMontage = nullptr;
+	bBowDrawInputHeld = false;
+	bBowDrawReady = false;
+	bBowChargeFOVActive = false;
+
+	if (IsValid(PreparedBowProjectile))
+	{
+		PreparedBowProjectile->GetOnImpactResolved().RemoveAll(this);
+		PreparedBowProjectile->Destroy();
+	}
+	PreparedBowProjectile = nullptr;
+
+	if (UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
+		AnimInstance && DrawMontageToStop && AnimInstance->Montage_IsPlaying(DrawMontageToStop))
+	{
+		AnimInstance->Montage_Stop(0.12f, DrawMontageToStop);
+	}
+
+	RestoreBowAimPresentation();
+
+	if (bImmediateFOVReset)
+	{
+		ResetBowChargeCameraFOV();
+	}
+
+	RefreshBowPresentation();
+}
+
+void AMyCharacter::RestoreBowAimPresentation()
+{
+	if (ABow* Bow = GetEquippedBow())
+	{
+		Bow->SetBowPresentationState(IsBowAiming()
+			? EBowPresentationState::EBPS_Aiming
+			: EBowPresentationState::EBPS_Relaxed);
+	}
+}
+
+bool AMyCharacter::ResolveBowAimLaunchContext(const ABow* Bow, FVector& OutSpawnLocation,
+	FVector& OutLaunchDirection) const
+{
+	UWorld* World = GetWorld();
+	if (!Bow || !World || !Camera)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s: Bow launch context failed: Bow, World, or Camera is unavailable."), *GetName());
+		return false;
+	}
+
+	const FVector CameraLocation = Camera->GetComponentLocation();
+	const FVector CameraDirection = Camera->GetForwardVector().GetSafeNormal();
+	if (CameraDirection.IsNearlyZero())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s: Bow launch context failed: camera forward direction is zero."), *GetName());
+		return false;
+	}
+
+	const FProjectileDeliveryConfig& DeliveryConfig = Bow->GetProjectileDeliveryConfig();
+	const float AimDistance = DeliveryConfig.InitialSpeed * DeliveryConfig.MaxLifetime;
+	FVector AimPoint = CameraLocation + CameraDirection * AimDistance;
+	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(BowAim), false, this);
+	QueryParams.AddIgnoredActor(Bow);
+	FHitResult AimHit;
+	if (World->LineTraceSingleByChannel(AimHit, CameraLocation, AimPoint, ECC_Visibility, QueryParams))
+	{
+		AimPoint = AimHit.ImpactPoint;
+	}
+
+	OutSpawnLocation = Bow->GetProjectileSpawnLocation();
+	OutLaunchDirection = (AimPoint - OutSpawnLocation).GetSafeNormal();
+	if (OutLaunchDirection.IsNearlyZero())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s: Bow launch context failed: launch direction is zero."), *GetName());
+		return false;
+	}
+
+	return true;
+}
+
+void AMyCharacter::PlayBowAimRaisePresentation()
 {
 	ABow* Bow = GetEquippedBow();
-	UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
-	UAnimMontage* DrawMontage = Bow ? Bow->GetDrawMontage() : nullptr;
-	if (!Bow || !AnimInstance || !DrawMontage || AnimInstance->Montage_Play(DrawMontage) <= 0.f)
+	UAnimMontage* AimRaiseMontage = Bow ? Bow->GetAimRaiseMontage() : nullptr;
+	if (!AimRaiseMontage)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("%s: Bow Draw presentation is unavailable; aiming continues without a Draw montage."),
-			*GetName());
+		return;
+	}
+
+	UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
+	if (!AnimInstance || AnimInstance->Montage_Play(AimRaiseMontage) <= 0.f)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s: Bow AimRaiseMontage could not play; aiming continues."), *GetName());
 	}
 }
 
@@ -2811,13 +2970,17 @@ bool AMyCharacter::TryStartBowReleasePresentation(ABow* Bow)
 	}
 
 	UAnimMontage* ReleaseMontage = Bow->GetReleaseMontage();
-	if (!ReleaseMontage)
+	UAnimMontage* LoadMontage = Bow->GetLoadMontage();
+	if (!ReleaseMontage || !LoadMontage)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("%s: Bow release blocked: ReleaseMontage is required for player firing."), *GetName());
+		UE_LOG(LogTemp, Warning,
+			TEXT("%s: Bow release blocked: ReleaseMontage and LoadMontage are required for player firing."), *GetName());
 		return false;
 	}
 
-	if (AnimInstance->Montage_IsPlaying(ReleaseMontage))
+	if (bBowReleasePresentationPending || ActiveBowLoadMontage
+		|| AnimInstance->Montage_IsPlaying(ReleaseMontage)
+		|| (LoadMontage && AnimInstance->Montage_IsPlaying(LoadMontage)))
 	{
 		return false;
 	}
@@ -2836,6 +2999,56 @@ bool AMyCharacter::TryStartBowReleasePresentation(ABow* Bow)
 	return true;
 }
 
+bool AMyCharacter::TryStartBowLoadPresentation(ABow* Bow)
+{
+	UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
+	if (!Bow || !AnimInstance || !IsBowAiming() || !bBlockInputHeld || !ItemOwnershipComponent
+		|| !Attributes || !Attributes->IsAlive())
+	{
+		return false;
+	}
+
+	const FName AmmoDefinitionId = Bow->GetAmmoDefinitionId();
+	if (ItemOwnershipComponent->GetLoadedAmmoQuantity(AmmoDefinitionId) <= 0)
+	{
+		return false;
+	}
+
+	UAnimMontage* LoadMontage = Bow->GetLoadMontage();
+	if (!LoadMontage)
+	{
+		UE_LOG(LogTemp, Warning,
+			TEXT("%s: Bow reload blocked: LoadMontage is required to return to aim after Release."), *GetName());
+		return false;
+	}
+
+	if (LoadMontage == Bow->GetReleaseMontage())
+	{
+		UE_LOG(LogTemp, Warning,
+			TEXT("%s: Bow reload blocked: LoadMontage must be different from ReleaseMontage."), *GetName());
+		return false;
+	}
+
+	if (AnimInstance->Montage_IsPlaying(LoadMontage)
+		|| (Bow->GetReleaseMontage() && AnimInstance->Montage_IsPlaying(Bow->GetReleaseMontage())))
+	{
+		return false;
+	}
+
+	if (AnimInstance->Montage_Play(LoadMontage) <= 0.f)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s: Bow reload blocked: LoadMontage could not play."), *GetName());
+		return false;
+	}
+
+	ActiveBowLoadMontage = LoadMontage;
+	bBowReleasePresentationPending = true;
+	Bow->SetBowPresentationState(EBowPresentationState::EBPS_Loading);
+	BindMontageEndDelegate(AnimInstance, LoadMontage, &AMyCharacter::OnBowLoadMontageEnded);
+	RefreshBowPresentation();
+	return true;
+}
+
 void AMyCharacter::AbortBowReleasePresentation()
 {
 	UAnimMontage* MontageToStop = ActiveBowReleaseMontage;
@@ -2848,25 +3061,28 @@ void AMyCharacter::AbortBowReleasePresentation()
 		AnimInstance->Montage_Stop(0.12f, MontageToStop);
 	}
 
-	if (ABow* Bow = GetEquippedBow())
-	{
-		Bow->SetBowPresentationState(IsBowAiming()
-			? EBowPresentationState::EBPS_Aiming
-			: EBowPresentationState::EBPS_Relaxed);
-	}
+	RestoreBowAimPresentation();
 
 	RefreshBowPresentation();
 }
 
 void AMyCharacter::StopBowPresentationMontages()
 {
+	ActiveBowDrawMontage = nullptr;
 	ActiveBowReleaseMontage = nullptr;
+	ActiveBowLoadMontage = nullptr;
 
 	ABow* Bow = GetEquippedBow();
 	UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
 	if (!Bow || !AnimInstance)
 	{
 		return;
+	}
+
+	if (UAnimMontage* AimRaiseMontage = Bow->GetAimRaiseMontage();
+		AimRaiseMontage && AnimInstance->Montage_IsPlaying(AimRaiseMontage))
+	{
+		AnimInstance->Montage_Stop(0.12f, AimRaiseMontage);
 	}
 
 	if (UAnimMontage* DrawMontage = Bow->GetDrawMontage(); DrawMontage && AnimInstance->Montage_IsPlaying(DrawMontage))
@@ -2878,6 +3094,11 @@ void AMyCharacter::StopBowPresentationMontages()
 	{
 		AnimInstance->Montage_Stop(0.12f, ReleaseMontage);
 	}
+
+	if (UAnimMontage* LoadMontage = Bow->GetLoadMontage(); LoadMontage && AnimInstance->Montage_IsPlaying(LoadMontage))
+	{
+		AnimInstance->Montage_Stop(0.12f, LoadMontage);
+	}
 }
 
 void AMyCharacter::RefreshBowPresentation()
@@ -2885,6 +3106,7 @@ void AMyCharacter::RefreshBowPresentation()
 	ABow* Bow = GetEquippedBow();
 	const bool bShouldShowLoadedArrow = Bow && ItemOwnershipComponent && IsBowAiming()
 		&& !bBowReleasePresentationPending
+		&& !IsValid(PreparedBowProjectile)
 		&& ItemOwnershipComponent->GetLoadedAmmoQuantity(Bow->GetAmmoDefinitionId()) > 0;
 	if (Bow)
 	{
@@ -2892,7 +3114,62 @@ void AMyCharacter::RefreshBowPresentation()
 	}
 }
 
-void AMyCharacter::OnBowReleaseMontageEnded(UAnimMontage* Montage, bool /*bInterrupted*/)
+void AMyCharacter::UpdateBowChargeCameraFOV(float DeltaTime)
+{
+	if (!Camera)
+	{
+		return;
+	}
+
+	const float TargetFOV = bBowChargeFOVActive
+		? FMath::Max(1.f, CachedBaseCameraFOV - BowChargeFOVDelta)
+		: CachedBaseCameraFOV;
+	const float NewFOV = FMath::FInterpTo(Camera->FieldOfView, TargetFOV, DeltaTime, BowChargeFOVInterpSpeed);
+	if (!FMath::IsNearlyEqual(Camera->FieldOfView, NewFOV))
+	{
+		Camera->SetFieldOfView(NewFOV);
+	}
+
+	if (PlayerHUDWidget)
+	{
+		const float ChargeDenominator = FMath::Max(BowChargeFOVDelta, KINDA_SMALL_NUMBER);
+		const float ReticleCharge = FMath::Clamp((CachedBaseCameraFOV - NewFOV) / ChargeDenominator, 0.f, 1.f);
+		PlayerHUDWidget->SetAimReticleCharge(ReticleCharge);
+	}
+}
+
+void AMyCharacter::ResetBowChargeCameraFOV()
+{
+	bBowChargeFOVActive = false;
+	if (Camera)
+	{
+		Camera->SetFieldOfView(CachedBaseCameraFOV);
+	}
+	if (PlayerHUDWidget)
+	{
+		PlayerHUDWidget->SetAimReticleCharge(0.f);
+	}
+}
+
+void AMyCharacter::OnBowDrawMontageEnded(UAnimMontage* Montage, bool bInterrupted)
+{
+	if (!ActiveBowDrawMontage || Montage != ActiveBowDrawMontage)
+	{
+		return;
+	}
+
+	ActiveBowDrawMontage = nullptr;
+	if (bInterrupted || !IsBowAiming() || !bBowDrawInputHeld || !IsValid(PreparedBowProjectile)
+		|| !PreparedBowProjectile->IsPreparedForActivation())
+	{
+		CancelBowCharge(false);
+		return;
+	}
+
+	bBowDrawReady = true;
+}
+
+void AMyCharacter::OnBowReleaseMontageEnded(UAnimMontage* Montage, bool bInterrupted)
 {
 	if (!ActiveBowReleaseMontage || Montage != ActiveBowReleaseMontage)
 	{
@@ -2900,14 +3177,65 @@ void AMyCharacter::OnBowReleaseMontageEnded(UAnimMontage* Montage, bool /*bInter
 	}
 
 	ActiveBowReleaseMontage = nullptr;
-	bBowReleasePresentationPending = false;
-	if (ABow* Bow = GetEquippedBow())
+	if (!bInterrupted && IsBowAiming() && bBlockInputHeld)
 	{
-		Bow->SetBowPresentationState(IsBowAiming()
-			? EBowPresentationState::EBPS_Aiming
-			: EBowPresentationState::EBPS_Relaxed);
+		if (TryStartBowLoadPresentation(GetEquippedBow()))
+		{
+			return;
+		}
+	}
+
+	bBowReleasePresentationPending = false;
+	RestoreBowAimPresentation();
+	RefreshBowPresentation();
+}
+
+void AMyCharacter::OnBowLoadMontageEnded(UAnimMontage* Montage, bool bInterrupted)
+{
+	if (!ActiveBowLoadMontage || Montage != ActiveBowLoadMontage)
+	{
+		return;
+	}
+
+	ActiveBowLoadMontage = nullptr;
+	bBowReleasePresentationPending = false;
+
+	ABow* Bow = GetEquippedBow();
+	const bool bCanReturnToAim = !bInterrupted
+		&& Bow
+		&& IsBowAiming()
+		&& bBlockInputHeld
+		&& Attributes
+		&& Attributes->IsAlive();
+	if (bCanReturnToAim)
+	{
+		Bow->SetBowPresentationState(EBowPresentationState::EBPS_Aiming);
+		RefreshBowPresentation();
+		return;
+	}
+
+	if (IsBowAiming())
+	{
+		CancelBowAim(false);
+		return;
+	}
+
+	if (Bow)
+	{
+		Bow->SetBowPresentationState(EBowPresentationState::EBPS_Relaxed);
 	}
 	RefreshBowPresentation();
+}
+
+void AMyCharacter::HandleBowProjectileImpactResolved(AActor* HitActor, const FCombatHitResult& Result)
+{
+	if (!IsLocallyControlled() || !Attributes || !Attributes->IsAlive() || !PlayerHUDWidget || !IsValid(HitActor) || !Result.bResolved
+		|| Result.bSuppressed || Result.bSameTeam || Result.bParried)
+	{
+		return;
+	}
+
+	PlayerHUDWidget->ShowBowHitMarker();
 }
 
 void AMyCharacter::HandleLoadedAmmoQuantityChanged(FName DefinitionId, int32 /*NewQuantity*/)
@@ -3785,9 +4113,10 @@ void AMyCharacter::DrawDebugInfo() const
 void AMyCharacter::StopBlockMontage(float BlendOutTime)
 {
 	UAnimMontage* BlockMontage = GetBlockMontage();
-	if (UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
-		AnimInstance && BlockMontage && AnimInstance->Montage_IsPlaying(BlockMontage))
+	if (UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance(); AnimInstance && BlockMontage)
 	{
+		// 禁用 Auto Blend Out 的持盾 Montage 可能保留末帧姿势但不再报告为 IsPlaying；
+		// 对指定 Montage 的 Stop 在没有活动实例时是安全空操作。
 		AnimInstance->Montage_Stop(BlendOutTime, BlockMontage);
 	}
 }

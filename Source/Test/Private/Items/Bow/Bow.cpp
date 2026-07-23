@@ -80,6 +80,42 @@ bool ABow::HasValidProjectileConfig(FString& OutFailureReason) const
 	return true;
 }
 
+bool ABow::NockPreparedProjectile(ACombatProjectile* PreparedProjectile) const
+{
+	auto RejectNock = [this, PreparedProjectile](const TCHAR* FailureReason)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s: Bow nock failed: %s"), *GetName(), FailureReason);
+		if (IsValid(PreparedProjectile))
+		{
+			PreparedProjectile->Destroy();
+		}
+		return false;
+	};
+
+	if (!IsValid(PreparedProjectile) || !PreparedProjectile->IsPreparedForActivation())
+	{
+		return RejectNock(TEXT("prepared projectile is unavailable."));
+	}
+
+	if (!BowSkeletalVisual || !BowSkeletalVisual->DoesSocketExist(BowArrowSocketName))
+	{
+		return RejectNock(TEXT("BowSkeletalVisual or BowArrowSocket is unavailable."));
+	}
+
+	if (!PreparedProjectile->GetRootComponent())
+	{
+		return RejectNock(TEXT("prepared projectile has no root component."));
+	}
+
+	if (!PreparedProjectile->AttachToComponent(BowSkeletalVisual,
+		FAttachmentTransformRules::SnapToTargetNotIncludingScale, BowArrowSocketName))
+	{
+		return RejectNock(TEXT("prepared projectile root could not attach to BowArrowSocket."));
+	}
+
+	return true;
+}
+
 FVector ABow::GetProjectileSpawnLocation() const
 {
 	return ProjectileSpawnPoint ? ProjectileSpawnPoint->GetComponentLocation() : GetActorLocation();

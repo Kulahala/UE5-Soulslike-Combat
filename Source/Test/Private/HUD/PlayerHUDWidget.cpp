@@ -164,6 +164,24 @@ void UPlayerHUDWidget::SetAimReticleVisible(bool bVisible)
 	Invalidate(EInvalidateWidgetReason::Paint);
 }
 
+void UPlayerHUDWidget::SetAimReticleCharge(float Charge)
+{
+	const float ClampedCharge = FMath::Clamp(Charge, 0.f, 1.f);
+	if (FMath::IsNearlyEqual(AimReticleCharge, ClampedCharge))
+	{
+		return;
+	}
+
+	AimReticleCharge = ClampedCharge;
+	Invalidate(EInvalidateWidgetReason::Paint);
+}
+
+void UPlayerHUDWidget::ShowBowHitMarker()
+{
+	BowHitMarkerRemaining = 0.12f;
+	Invalidate(EInvalidateWidgetReason::Paint);
+}
+
 void UPlayerHUDWidget::SetArrowCount(int32 LoadedCount, int32 Capacity, bool bVisible)
 {
 	if (!Text_ArrowCount)
@@ -237,6 +255,12 @@ void UPlayerHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime
 	UBaseHealthBarWidget::TickBufferDelayImpl(PB_Buffer, PB_Health,
 		CurrentBufferDelay, BufferDelayTime, BufferInterpSpeed, InDeltaTime);
 
+	if (BowHitMarkerRemaining > 0.f)
+	{
+		BowHitMarkerRemaining = FMath::Max(0.f, BowHitMarkerRemaining - InDeltaTime);
+		Invalidate(EInvalidateWidgetReason::Paint);
+	}
+
 	// 受击染红：渐入 → 指数衰减
 	if (bDamageFlashAttacking)
 	{
@@ -307,7 +331,7 @@ int32 UPlayerHUDWidget::NativePaint(const FPaintArgs& Args, const FGeometry& All
 	{
 		const FVector2f LocalSize = FVector2f(AllottedGeometry.GetLocalSize());
 		const FVector2f Center = LocalSize * 0.5f;
-		constexpr float ReticleHalfGap = 3.f;
+		const float ReticleHalfGap = FMath::Lerp(5.f, 1.25f, AimReticleCharge);
 		constexpr float ReticleOuterRadius = 10.f;
 
 		const FVector2f Segments[][2] = {
@@ -328,6 +352,38 @@ int32 UPlayerHUDWidget::NativePaint(const FPaintArgs& Args, const FGeometry& All
 			TArray<FVector2f> InnerPoints = { Segment[0], Segment[1] };
 			FSlateDrawElement::MakeLines(OutDrawElements, InnerLayer, AllottedGeometry.ToPaintGeometry(),
 				MoveTemp(InnerPoints), ESlateDrawEffect::None, FLinearColor(0.94f, 0.96f, 0.98f, 0.95f), true, 1.25f);
+		}
+		MaxLayer = InnerLayer;
+	}
+
+	if (BowHitMarkerRemaining > 0.f)
+	{
+		const FVector2f LocalSize = FVector2f(AllottedGeometry.GetLocalSize());
+		const FVector2f Center = LocalSize * 0.5f;
+		constexpr float HitMarkerInnerRadius = 3.f;
+		constexpr float HitMarkerOuterRadius = 12.f;
+		const float Opacity = FMath::Clamp(BowHitMarkerRemaining / 0.12f, 0.f, 1.f);
+		const FVector2f Directions[] = {
+			FVector2f(-1.f, -1.f).GetSafeNormal(),
+			FVector2f(1.f, 1.f).GetSafeNormal(),
+			FVector2f(-1.f, 1.f).GetSafeNormal(),
+			FVector2f(1.f, -1.f).GetSafeNormal()
+		};
+
+		const int32 OutlineLayer = MaxLayer + 1;
+		const int32 InnerLayer = OutlineLayer + 1;
+		for (const FVector2f& Direction : Directions)
+		{
+			const FVector2f SegmentStart = Center + Direction * HitMarkerInnerRadius;
+			const FVector2f SegmentEnd = Center + Direction * HitMarkerOuterRadius;
+
+			TArray<FVector2f> OutlinePoints = { SegmentStart, SegmentEnd };
+			FSlateDrawElement::MakeLines(OutDrawElements, OutlineLayer, AllottedGeometry.ToPaintGeometry(),
+				MoveTemp(OutlinePoints), ESlateDrawEffect::None, FLinearColor(0.02f, 0.03f, 0.04f, Opacity * 0.8f), true, 3.f);
+
+			TArray<FVector2f> InnerPoints = { SegmentStart, SegmentEnd };
+			FSlateDrawElement::MakeLines(OutDrawElements, InnerLayer, AllottedGeometry.ToPaintGeometry(),
+				MoveTemp(InnerPoints), ESlateDrawEffect::None, FLinearColor(0.96f, 0.97f, 0.99f, Opacity), true, 1.25f);
 		}
 		MaxLayer = InnerLayer;
 	}

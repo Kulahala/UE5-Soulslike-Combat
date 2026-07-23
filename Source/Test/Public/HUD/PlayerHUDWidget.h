@@ -28,6 +28,8 @@ public:
 	void BindToAttributes(UAttributeComponent* Attributes);
 	void SetPendingDamageFlashScale(float Scale);
 	void SetAimReticleVisible(bool bVisible);
+	void SetAimReticleCharge(float Charge);
+	void ShowBowHitMarker();
 	void SetArrowCount(int32 LoadedCount, int32 Capacity, bool bVisible);
 
 	UPROPERTY(meta = (BindWidget))
@@ -105,6 +107,8 @@ private:
 	float PotionCooldownDuration = 0.f;
 	bool bPotionCooldownActive = false;
 	bool bAimReticleVisible = false;
+	float AimReticleCharge = 0.f;
+	float BowHitMarkerRemaining = 0.f;
 
 	UPROPERTY(EditAnywhere, Category = "Potion UI", meta = (ClampMin = "0.0", ClampMax = "1.0", ToolTip = "药瓶冷却遮罩的不透明度。"))
 	float PotionCooldownOverlayOpacity = 0.65f;
