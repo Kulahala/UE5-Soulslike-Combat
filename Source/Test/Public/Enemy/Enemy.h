@@ -16,6 +16,7 @@ struct FPropertyChangedEvent;
 class AEnemy;
 class AEncounterController;
 class AController;
+class ABowBase;
 class UAIPerceptionComponent;
 class UAISenseConfig_Hearing;
 class UAISenseConfig_Sight;
@@ -497,6 +498,8 @@ private:
 	void DrawDebugInfo() const;
 	int32 CurrentAttackIndex = INDEX_NONE;
 	FActiveProjectileAttack ActiveProjectileAttack;
+	// Bow 配置缺失时 LOS 会被频繁轮询；每把无效 Bow 仅输出一次明确原因。
+	mutable TWeakObjectPtr<ABowBase> LastInvalidProjectileBow;
 	float LastAttackConfigWarningTime = -1000.f;
 	int32 PendingAttackIndex = INDEX_NONE;
 	float PendingAttackStartTime = 0.f;

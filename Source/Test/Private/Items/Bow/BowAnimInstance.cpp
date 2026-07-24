@@ -18,5 +18,5 @@ void UBowAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 
 void UBowAnimInstance::RefreshBowReference()
 {
-	Bow = Cast<ABow>(GetOwningActor());
+	Bow = Cast<ABowBase>(GetOwningActor());
 }

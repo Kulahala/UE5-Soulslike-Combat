@@ -22,6 +22,7 @@
 #include "HUD/BaseHealthBarWidget.h"
 #include "HUD/HealthBarComponent.h"
 #include "Items/Weapon/Weapon.h"
+#include "Items/Bow/BowBase.h"
 #include "Kismet/GameplayStatics.h"
 #include "MotionWarpingComponent.h"
 #include "Navigation/PathFollowingComponent.h"
@@ -947,6 +948,28 @@ bool AEnemy::BuildDebugProbeProjectileSnapshot(FActiveProjectileAttack& OutSnaps
 
 bool AEnemy::ResolveProjectileSpawnLocation(const FActiveProjectileAttack& Snapshot, FVector& OutSpawnLocation) const
 {
+	if (const ABowBase* Bow = Cast<ABowBase>(EquippedWeapon))
+	{
+		FTransform LaunchTransform;
+		FString FailureReason;
+		if (!Bow->TryGetLaunchTransform(LaunchTransform, FailureReason))
+		{
+			if (LastInvalidProjectileBow.Get() != Bow)
+			{
+				UE_LOG(LogTemp, Warning,
+					TEXT("%s rejected Bow projectile release: shared Bow PhysicalProfile/BowArrowSocket is invalid: %s"),
+					*GetName(), *FailureReason);
+				LastInvalidProjectileBow = const_cast<ABowBase*>(Bow);
+			}
+			return false;
+		}
+
+		LastInvalidProjectileBow.Reset();
+		OutSpawnLocation = LaunchTransform.GetLocation();
+		return true;
+	}
+
+	LastInvalidProjectileBow.Reset();
 	if (Snapshot.SpawnSocketName == NAME_None)
 	{
 		FRotator EyeRotation;

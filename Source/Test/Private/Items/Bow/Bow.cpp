@@ -1,31 +1,13 @@
 #include "Items/Bow/Bow.h"
 
-#include "Components/SceneComponent.h"
-#include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Items/Bow/BowPhysicalProfileDataAsset.h"
 #include "Kismet/GameplayStatics.h"
-
-namespace
-{
-	const FName BowArrowSocketName(TEXT("BowArrowSocket"));
-}
 
 ABow::ABow()
 {
-	BowSkeletalVisual = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("BowSkeletalVisual"));
-	BowSkeletalVisual->SetupAttachment(GetMesh());
-	BowSkeletalVisual->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	BowSkeletalVisual->SetCollisionResponseToAllChannels(ECR_Ignore);
-	BowSkeletalVisual->SetGenerateOverlapEvents(false);
-	BowSkeletalVisual->SetSimulatePhysics(false);
-	BowSkeletalVisual->SetEnableGravity(false);
-	BowSkeletalVisual->SetCanEverAffectNavigation(false);
-
-	LoadedArrowAnchor = CreateDefaultSubobject<USceneComponent>(TEXT("LoadedArrowAnchor"));
-	LoadedArrowAnchor->SetupAttachment(BowSkeletalVisual, BowArrowSocketName);
-
 	LoadedArrowVisual = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("LoadedArrowVisual"));
-	LoadedArrowVisual->SetupAttachment(LoadedArrowAnchor);
+	LoadedArrowVisual->SetupAttachment(BowSkeletalVisual, GetBowArrowSocketName());
 	LoadedArrowVisual->SetMobility(EComponentMobility::Movable);
 	LoadedArrowVisual->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	LoadedArrowVisual->SetCollisionResponseToAllChannels(ECR_Ignore);
@@ -33,22 +15,12 @@ ABow::ABow()
 	LoadedArrowVisual->SetSimulatePhysics(false);
 	LoadedArrowVisual->SetEnableGravity(false);
 	LoadedArrowVisual->SetCanEverAffectNavigation(false);
+	// 待机箭 Mesh 与局部轴修正由共享 PhysicalProfile 写入，不能在子 Blueprint 覆写。
+	LoadedArrowVisual->bEditableWhenInherited = false;
 	LoadedArrowVisual->SetVisibility(false, true);
 	LoadedArrowVisual->SetHiddenInGame(true, true);
 
-	ProjectileSpawnPoint = CreateDefaultSubobject<USceneComponent>(TEXT("ProjectileSpawnPoint"));
-	ProjectileSpawnPoint->SetupAttachment(LoadedArrowAnchor);
 	ProjectileClass = ACombatProjectile::StaticClass();
-}
-
-void ABow::SetBowPresentationState(EBowPresentationState NewState)
-{
-	BowPresentationState = NewState;
-}
-
-EBowPresentationState ABow::GetBowPresentationState() const
-{
-	return BowPresentationState;
 }
 
 bool ABow::HasValidProjectileConfig(FString& OutFailureReason) const
@@ -71,54 +43,13 @@ bool ABow::HasValidProjectileConfig(FString& OutFailureReason) const
 		return false;
 	}
 
-	if (!ProjectileSpawnPoint)
+	FTransform LaunchTransform;
+	if (!TryGetLaunchTransform(LaunchTransform, OutFailureReason))
 	{
-		OutFailureReason = TEXT("ProjectileSpawnPoint is unavailable.");
 		return false;
 	}
 
 	return true;
-}
-
-bool ABow::NockPreparedProjectile(ACombatProjectile* PreparedProjectile) const
-{
-	auto RejectNock = [this, PreparedProjectile](const TCHAR* FailureReason)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("%s: Bow nock failed: %s"), *GetName(), FailureReason);
-		if (IsValid(PreparedProjectile))
-		{
-			PreparedProjectile->Destroy();
-		}
-		return false;
-	};
-
-	if (!IsValid(PreparedProjectile) || !PreparedProjectile->IsPreparedForActivation())
-	{
-		return RejectNock(TEXT("prepared projectile is unavailable."));
-	}
-
-	if (!BowSkeletalVisual || !BowSkeletalVisual->DoesSocketExist(BowArrowSocketName))
-	{
-		return RejectNock(TEXT("BowSkeletalVisual or BowArrowSocket is unavailable."));
-	}
-
-	if (!PreparedProjectile->GetRootComponent())
-	{
-		return RejectNock(TEXT("prepared projectile has no root component."));
-	}
-
-	if (!PreparedProjectile->AttachToComponent(BowSkeletalVisual,
-		FAttachmentTransformRules::SnapToTargetNotIncludingScale, BowArrowSocketName))
-	{
-		return RejectNock(TEXT("prepared projectile root could not attach to BowArrowSocket."));
-	}
-
-	return true;
-}
-
-FVector ABow::GetProjectileSpawnLocation() const
-{
-	return ProjectileSpawnPoint ? ProjectileSpawnPoint->GetComponentLocation() : GetActorLocation();
 }
 
 void ABow::SetLoadedArrowVisualVisible(bool bVisible)
@@ -130,6 +61,20 @@ void ABow::SetLoadedArrowVisualVisible(bool bVisible)
 
 	LoadedArrowVisual->SetVisibility(bVisible, true);
 	LoadedArrowVisual->SetHiddenInGame(!bVisible, true);
+}
+
+void ABow::OnPhysicalProfileApplied()
+{
+	Super::OnPhysicalProfileApplied();
+
+	const UBowPhysicalProfileDataAsset* Profile = GetPhysicalProfile();
+	if (!Profile || !LoadedArrowVisual)
+	{
+		return;
+	}
+
+	LoadedArrowVisual->SetStaticMesh(Profile->GetNockedArrowStaticMesh());
+	LoadedArrowVisual->SetRelativeTransform(Profile->GetNockedArrowVisualRelativeTransform());
 }
 
 void ABow::PlayShotSound() const

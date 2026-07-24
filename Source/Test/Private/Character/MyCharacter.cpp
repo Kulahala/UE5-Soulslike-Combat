@@ -3002,7 +3002,15 @@ bool AMyCharacter::ResolveBowAimLaunchContext(const ABow* Bow, FVector& OutSpawn
 		AimPoint = AimHit.ImpactPoint;
 	}
 
-	OutSpawnLocation = Bow->GetProjectileSpawnLocation();
+	FTransform LaunchTransform;
+	FString FailureReason;
+	if (!Bow->TryGetLaunchTransform(LaunchTransform, FailureReason))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s: Bow launch context failed: %s"), *GetName(), *FailureReason);
+		return false;
+	}
+
+	OutSpawnLocation = LaunchTransform.GetLocation();
 	OutLaunchDirection = (AimPoint - OutSpawnLocation).GetSafeNormal();
 	if (OutLaunchDirection.IsNearlyZero())
 	{
