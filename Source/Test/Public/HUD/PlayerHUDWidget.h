@@ -29,6 +29,7 @@ public:
 	void SetPendingDamageFlashScale(float Scale);
 	void SetAimReticleVisible(bool bVisible);
 	void SetAimReticleCharge(float Charge);
+	void SetAimReticleReFireBlocked(bool bBlocked);
 	void ShowBowHitMarker();
 	void SetArrowCount(int32 LoadedCount, int32 Capacity, bool bVisible);
 
@@ -107,6 +108,7 @@ private:
 	float PotionCooldownDuration = 0.f;
 	bool bPotionCooldownActive = false;
 	bool bAimReticleVisible = false;
+	bool bAimReticleReFireBlocked = false;
 	float AimReticleCharge = 0.f;
 	float BowHitMarkerRemaining = 0.f;
 

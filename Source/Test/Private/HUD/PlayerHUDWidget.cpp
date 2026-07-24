@@ -176,6 +176,17 @@ void UPlayerHUDWidget::SetAimReticleCharge(float Charge)
 	Invalidate(EInvalidateWidgetReason::Paint);
 }
 
+void UPlayerHUDWidget::SetAimReticleReFireBlocked(bool bBlocked)
+{
+	if (bAimReticleReFireBlocked == bBlocked)
+	{
+		return;
+	}
+
+	bAimReticleReFireBlocked = bBlocked;
+	Invalidate(EInvalidateWidgetReason::Paint);
+}
+
 void UPlayerHUDWidget::ShowBowHitMarker()
 {
 	BowHitMarkerRemaining = 0.12f;
@@ -333,6 +344,9 @@ int32 UPlayerHUDWidget::NativePaint(const FPaintArgs& Args, const FGeometry& All
 		const FVector2f Center = LocalSize * 0.5f;
 		const float ReticleHalfGap = FMath::Lerp(5.f, 1.25f, AimReticleCharge);
 		constexpr float ReticleOuterRadius = 10.f;
+		const FLinearColor ReticleInnerColor = bAimReticleReFireBlocked
+			? FLinearColor(0.95f, 0.17f, 0.12f, 0.95f)
+			: FLinearColor(0.94f, 0.96f, 0.98f, 0.95f);
 
 		const FVector2f Segments[][2] = {
 			{ FVector2f(Center.X - ReticleOuterRadius, Center.Y), FVector2f(Center.X - ReticleHalfGap, Center.Y) },
@@ -351,7 +365,7 @@ int32 UPlayerHUDWidget::NativePaint(const FPaintArgs& Args, const FGeometry& All
 
 			TArray<FVector2f> InnerPoints = { Segment[0], Segment[1] };
 			FSlateDrawElement::MakeLines(OutDrawElements, InnerLayer, AllottedGeometry.ToPaintGeometry(),
-				MoveTemp(InnerPoints), ESlateDrawEffect::None, FLinearColor(0.94f, 0.96f, 0.98f, 0.95f), true, 1.25f);
+				MoveTemp(InnerPoints), ESlateDrawEffect::None, ReticleInnerColor, true, 1.25f);
 		}
 		MaxLayer = InnerLayer;
 	}

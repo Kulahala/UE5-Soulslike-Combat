@@ -296,6 +296,10 @@ private:
 	bool CanStartBowAim() const;
 	void CancelBowAim(bool bClearBlockHeld, bool bImmediateChargeFOVReset = false);
 	bool ConsumeProjectilePrepareFailureForDebug();
+	bool IsBowReFireGateBlocked() const;
+	bool CanBufferBowChargeInput() const;
+	void ClearBowChargeInputState();
+	void TryConsumeBufferedBowCharge(ABow* Bow);
 	bool StartBowCharge();
 	void CancelBowCharge(bool bImmediateFOVReset);
 	void RestoreBowAimPresentation();
@@ -371,7 +375,9 @@ private:
 	bool bPendingExhaustedAfterAttack = false;
 	bool bGuardBreakRequested = false;
 
-	// 弓的蓄力输入仅在主手实际是 ABow 时生效；不与剑的蓄力状态复用。
+	// 弓的原始 LMB、Reload 预输入和活跃 Draw 分开维护，避免 Montage 门期间绕过物理再发射限制。
+	bool bBowChargeInputHeld = false;
+	bool bBowChargeInputBuffered = false;
 	bool bBowDrawInputHeld = false;
 	bool bBowDrawReady = false;
 	bool bBowReleasePresentationPending = false;

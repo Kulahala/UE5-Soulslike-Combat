@@ -372,6 +372,18 @@ void AMyCharacter::OnAttackInputPressed()
 {
 	if (IsBowAiming())
 	{
+		bBowChargeInputHeld = true;
+		if (IsBowReFireGateBlocked())
+		{
+			if (CanBufferBowChargeInput())
+			{
+				bBowChargeInputBuffered = true;
+			}
+			UpdateAimReticleHUD();
+			return;
+		}
+
+		bBowChargeInputBuffered = false;
 		StartBowCharge();
 		return;
 	}
@@ -394,10 +406,17 @@ void AMyCharacter::OnAttackInputPressed()
 
 void AMyCharacter::OnAttackInputReleased()
 {
-	if (IsBowAiming())
+	const bool bBowInputOwned = IsBowAiming() || bBowChargeInputHeld || bBowChargeInputBuffered || bBowDrawInputHeld;
+	if (bBowInputOwned)
 	{
 		const bool bWasDrawingBow = bBowDrawInputHeld;
+		ClearBowChargeInputState();
 		bBowDrawInputHeld = false;
+		if (!IsBowAiming())
+		{
+			return;
+		}
+
 		if (!bWasDrawingBow)
 		{
 			return;
@@ -2269,7 +2288,7 @@ bool AMyCharacter::StartBowCharge()
 {
 	ABow* Bow = GetEquippedBow();
 	if (!Bow || !ItemOwnershipComponent || bBowDrawInputHeld || IsValid(PreparedBowProjectile)
-		|| bBowReleasePresentationPending)
+		|| IsBowReFireGateBlocked())
 	{
 		return false;
 	}
@@ -2298,13 +2317,6 @@ bool AMyCharacter::StartBowCharge()
 		UE_LOG(LogTemp, Warning,
 			TEXT("%s: Bow charge blocked: AnimInstance, DrawMontage, ReleaseMontage, and LoadMontage are required for player firing."),
 			*GetName());
-		return false;
-	}
-
-	// P2 的门以 Release/Load Montage 的真实播放状态为准，不能由取消路径的布尔值绕过。
-	if (AnimInstance->Montage_IsPlaying(ReleaseMontage)
-		|| (LoadMontage && AnimInstance->Montage_IsPlaying(LoadMontage)))
-	{
 		return false;
 	}
 
@@ -2425,6 +2437,7 @@ bool AMyCharacter::ReleaseBowArrow()
 	Projectile->SetActorLocationAndRotation(SpawnLocation, LaunchDirection.Rotation(), false, nullptr,
 		ETeleportType::TeleportPhysics);
 	PreparedBowProjectile = nullptr;
+	ClearBowChargeInputState();
 	bBowDrawInputHeld = false;
 	bBowDrawReady = false;
 	bBowChargeFOVActive = false;
@@ -2838,6 +2851,61 @@ bool AMyCharacter::CanStartBowAim() const
 		&& !GetCharacterMovement()->IsFalling();
 }
 
+bool AMyCharacter::IsBowReFireGateBlocked() const
+{
+	if (bBowReleasePresentationPending || ActiveBowReleaseMontage || ActiveBowLoadMontage)
+	{
+		return true;
+	}
+
+	const ABow* Bow = GetEquippedBow();
+	UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
+	if (!Bow || !AnimInstance)
+	{
+		return false;
+	}
+
+	UAnimMontage* ReleaseMontage = Bow->GetReleaseMontage();
+	UAnimMontage* LoadMontage = Bow->GetLoadMontage();
+	return (ReleaseMontage && AnimInstance->Montage_IsPlaying(ReleaseMontage))
+		|| (LoadMontage && AnimInstance->Montage_IsPlaying(LoadMontage));
+}
+
+bool AMyCharacter::CanBufferBowChargeInput() const
+{
+	return IsBowAiming()
+		&& bBlockInputHeld
+		&& bBowReleasePresentationPending
+		&& (ActiveBowReleaseMontage || ActiveBowLoadMontage)
+		&& Attributes
+		&& Attributes->IsAlive();
+}
+
+void AMyCharacter::ClearBowChargeInputState()
+{
+	bBowChargeInputHeld = false;
+	bBowChargeInputBuffered = false;
+}
+
+void AMyCharacter::TryConsumeBufferedBowCharge(ABow* Bow)
+{
+	const bool bShouldStartDraw = bBowChargeInputBuffered
+		&& bBowChargeInputHeld
+		&& Bow
+		&& Bow == GetEquippedBow()
+		&& IsBowAiming()
+		&& bBlockInputHeld
+		&& ItemOwnershipComponent
+		&& Attributes
+		&& Attributes->IsAlive()
+		&& ItemOwnershipComponent->GetLoadedAmmoQuantity(Bow->GetAmmoDefinitionId()) > 0;
+	bBowChargeInputBuffered = false;
+	if (bShouldStartDraw)
+	{
+		StartBowCharge();
+	}
+}
+
 void AMyCharacter::CancelBowAim(bool bClearBlockHeld, bool bImmediateChargeFOVReset)
 {
 	CancelBowCharge(bImmediateChargeFOVReset);
@@ -2867,6 +2935,7 @@ void AMyCharacter::CancelBowCharge(bool bImmediateFOVReset)
 {
 	UAnimMontage* DrawMontageToStop = ActiveBowDrawMontage;
 	ActiveBowDrawMontage = nullptr;
+	ClearBowChargeInputState();
 	bBowDrawInputHeld = false;
 	bBowDrawReady = false;
 	bBowChargeFOVActive = false;
@@ -3054,6 +3123,7 @@ void AMyCharacter::AbortBowReleasePresentation()
 	UAnimMontage* MontageToStop = ActiveBowReleaseMontage;
 	ActiveBowReleaseMontage = nullptr;
 	bBowReleasePresentationPending = false;
+	ClearBowChargeInputState();
 
 	if (UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
 		AnimInstance && MontageToStop && AnimInstance->Montage_IsPlaying(MontageToStop))
@@ -3112,6 +3182,7 @@ void AMyCharacter::RefreshBowPresentation()
 	{
 		Bow->SetLoadedArrowVisualVisible(bShouldShowLoadedArrow);
 	}
+	UpdateAimReticleHUD();
 }
 
 void AMyCharacter::UpdateBowChargeCameraFOV(float DeltaTime)
@@ -3173,6 +3244,7 @@ void AMyCharacter::OnBowReleaseMontageEnded(UAnimMontage* Montage, bool bInterru
 {
 	if (!ActiveBowReleaseMontage || Montage != ActiveBowReleaseMontage)
 	{
+		UpdateAimReticleHUD();
 		return;
 	}
 
@@ -3186,6 +3258,7 @@ void AMyCharacter::OnBowReleaseMontageEnded(UAnimMontage* Montage, bool bInterru
 	}
 
 	bBowReleasePresentationPending = false;
+	ClearBowChargeInputState();
 	RestoreBowAimPresentation();
 	RefreshBowPresentation();
 }
@@ -3194,6 +3267,7 @@ void AMyCharacter::OnBowLoadMontageEnded(UAnimMontage* Montage, bool bInterrupte
 {
 	if (!ActiveBowLoadMontage || Montage != ActiveBowLoadMontage)
 	{
+		UpdateAimReticleHUD();
 		return;
 	}
 
@@ -3210,10 +3284,12 @@ void AMyCharacter::OnBowLoadMontageEnded(UAnimMontage* Montage, bool bInterrupte
 	if (bCanReturnToAim)
 	{
 		Bow->SetBowPresentationState(EBowPresentationState::EBPS_Aiming);
+		TryConsumeBufferedBowCharge(Bow);
 		RefreshBowPresentation();
 		return;
 	}
 
+	ClearBowChargeInputState();
 	if (IsBowAiming())
 	{
 		CancelBowAim(false);
@@ -3987,7 +4063,9 @@ void AMyCharacter::UpdateAimReticleHUD() const
 {
 	if (PlayerHUDWidget)
 	{
-		PlayerHUDWidget->SetAimReticleVisible(IsBowAiming());
+		const bool bVisible = IsBowAiming();
+		PlayerHUDWidget->SetAimReticleVisible(bVisible);
+		PlayerHUDWidget->SetAimReticleReFireBlocked(bVisible && IsBowReFireGateBlocked());
 	}
 }
 
