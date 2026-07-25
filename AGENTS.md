@@ -67,6 +67,15 @@ For complex multi-file C++, Blueprint/UMG, content, architecture, source-plus-as
 - `VibeUE` is the auxiliary route for capabilities specific to its registry: Python discovery/execution, animation graph or montage services, terrain tools, log reading, and VibeUE skills. Its UE 5.7 server is independent at `http://127.0.0.1:8088`; do not repeat an operation already assigned to UnrealClaude.
 - Before a VibeUE-specific operation, load the relevant Agent Skill through the project-exposed skill manager, then use targeted `discover_python_class` or `discover_python_function` calls before writing `execute_python_code`. Prefer `manage_asset` for asset search, open, save, move, duplicate, and delete operations when it is exposed; do not guess method names or asset paths.
 
+### Rider MCP And CodeGraph
+
+- When `.codegraph/` exists, `CodeGraph` remains the primary code-intelligence route for C++ symbols, repository-scale callers/callees, call paths, blast radius and change impact. `Rider MCP` semantic navigation supplements it; it does not replace it.
+- Use `Rider MCP` for live IDE state and source-tool work: Problems View, semantic source lookup, refactor previews, configured run/debug sessions, breakpoints/logpoints, and runtime value inspection. Before relying on any Rider feature, make one targeted read-only call against the current solution; a listening port or a tool list alone is not evidence that its UE C++ provider resolves the needed symbol.
+- Rider Call Hierarchy and Quick Documentation are not automatically authoritative for UE C++ symbols. If the requested symbol does not resolve through Rider, fall back to `CodeGraph` rather than guessing an FQN or repeating the same request.
+- The user owns manual `TestEditor` compilation and PIE. Do not use `Rider MCP` `build_solution_*` tools to bypass that boundary. For ordinary source edits, keep using the repository edit path; use Rider mutation/refactoring tools only when a preview has shown their exact impact and the scope is user-authorized. Never issue the same source mutation through Rider and another writer.
+- `Rider MCP` is not an alternate Unreal asset-mutation route. `.uasset`, `.umap`, Blueprint, UMG and level writes remain `UnrealClaude` primary and `VibeUE` auxiliary, with one documented writer per asset operation.
+- Rider Agent Skills are Rider-side agent context, not automatic Codex MCP capabilities. Do not install or duplicate them for Codex unless their exact content is reviewed, they add a verified non-overlapping capability, and their ownership does not conflict with this file or the installed Codex UE skills.
+
 ### Preconditions And Mutation Protocol
 
 - Live asset work requires all of: this task scoped to `E:\UnRealEngine\Test`, `UnrealEditor.exe` running the Test project, the required `3000` and/or `8088` endpoint listening, and the configured MCP connection successfully completing `initialize -> tools/list ->` one read-only `tools/call`.
