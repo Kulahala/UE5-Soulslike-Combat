@@ -398,7 +398,7 @@ UDataAsset → UTreasureData (static mesh, gold value, pickup sound, scale)
 UDataAsset → UPlayerCharacterProfileDataAsset (single player character config entry: AttackConfig + ActionConfig + ReactionConfig)
 UDataAsset → UPlayerActionConfigDataAsset (player-only Dodge, Block, GuardBreak, Parry, and Potion presentation/resource configuration; no input-priority authority)
 UDataAsset → UHitReactionConfigDataAsset (shared HitReact / Death config; enemy-only `StanceBreak.Montage` is separate from player GuardBreak)
-UDataAsset → UComboDataAsset (combo chain: SectionName, DamageMultiplier, StaminaCost, PoiseDamageMultiplier per segment)
+UDataAsset → UComboDataAsset (linear per-entry combo chain: Montage, EntrySection, DamageMultiplier, StaminaCost, PoiseDamageMultiplier, MotionWarping per segment)
 UDataAsset → UAttackConfigDataAsset (LightAttackCombo + SpecialAttacks for sprint/jump-style specials + ChargedAttack)
 UDataAsset → UEnemyAttackConfigDataAsset (Enemy attacks: montage, section, post-attack cooldown (v1.5: excludes montage duration and starts after attack end/interruption), MinDistance/MaxDistance, weight, damage/block-stamina multipliers, optional Motion Warping target config)
 FCombatTeamHelper (static helper: ShareTeamTag for same-team detection via Actor Tags whitelist — Player / Enemy)
@@ -420,11 +420,11 @@ FCombatTeamHelper (static helper: ShareTeamTag for same-team detection via Actor
 ## Combat Pipeline
 
 1. `ACharacterController` splits attack input: `Started` → `Input_AttackPressed()`, `Completed` / `Canceled` → `Input_AttackReleased()`
-2. **Attack Priority**: combo window buffer first → sprint attack (if sprinting + moving + weapon equipped) → charged decision timer → short release falls back to combo/normal `Attack()`
+2. **Attack input**: `AMyCharacter`'s private action-intent resolver determines whether the input starts now, buffers once, rejects, or ends a held action. Only `AttackPress` may buffer once while an authored ComboWindow is open; there is no numeric action-priority race or shared global input buffer.
 3. **Sprint Attack**: Independent system, triggers when sprinting + moving + weapon equipped + grounded. Uses `AttackConfig->FindSpecialAttack(ESpecialAttackType::SprintAttack)`, faces movement direction, stops sprinting after attack, does not use ComboWindow, and reuses `OnAttackMontageEnded`.
 4. **Charged Attack**: Holding past `ChargeInputThreshold` enters `ChargedAttack.Montage` section `Default`; releasing while charging jumps to section `Release` and applies charged damage/poise multipliers.
-5. **Combo System**: `Attack()` queries `UComboDataAsset` for current segment config (SectionName, DamageMultiplier, StaminaCost); `UAnimNotify_ComboBranchPoint` increments `ComboCounter` only when buffered input successfully branches to the next segment
-6. `PlayAttackMontage(SectionName)` plays normal/combo attack animation from `AttackConfig->LightAttackCombo->ComboMontage` with `UAnimNotifyState_WeaponCollision` + `UAnimNotifyState_ComboWindow` baked in
+5. **Per-entry Combo System**: `Attack()` resolves the current `FComboSegment` from `UComboDataAsset`; each segment owns its own `Montage + EntrySection` plus damage, stamina, poise and Motion Warping data. A first segment plays that Montage and enters `Entry`; `ComboCounter` advances only after a continuation segment actually starts.
+6. **Continuation handoff**: when the next entry uses the active Montage, the character rebinds its current playback delegate and calls `Montage_JumpToSection(Entry)`. When it uses another Montage, the character records the old Montage/token as a planned handoff, starts the target Montage and its new token/delegate, writes the target combat snapshot, jumps to `Entry`, then clears the short-lived handoff marker. A planned old end delegate cannot recover the target attack.
 7. **NotifyBegin** → `AWeapon::StartWeaponTrace()` (records old box positions)
 8. **NotifyTick** → `AWeapon::ExecuteWeaponTrace()` (sweeps from old→new center to prevent ghost swings)
 9. A confirmed weapon sweep builds an `FCombatHitRequest` and calls the shared `FCombatHitResolver::ResolveAndApply()`.
@@ -437,9 +437,9 @@ FCombatTeamHelper (static helper: ShareTeamTag for same-team detection via Actor
    - **Poise / stance break**: the resolver applies target poise before `GetHit()`; parry clears the attacker enemy's poise, then the resolver checks `ShouldTriggerStanceBreak()` after `GetHit()` so `EES_StanceBreak` is not overwritten by ordinary stun.
 10. `AWeapon` retains only melee-specific post-resolution behavior: CameraShake, HitStop and the per-swing `IgnoreActors` blacklist. These do not belong to the resolver or projectile delivery.
 11. **NotifyEnd** → clears `IgnoreActors` blacklist
-12. **Combo Window**: `AnimNotifyState_ComboWindow` marks input-buffer timing; `Input_AttackPressed()` sets `bComboInputReceived` during the window before any charged timer starts
-13. **Combo Branch Point**: `UAnimNotify_ComboBranchPoint` is the single normal continuation point. It closes the current combo window, consumes `bComboInputReceived`, and if a next segment exists and the player is not entering exhaustion, jumps to the next attack section without restarting the montage. If no input is buffered, the montage continues into the current section's `end` recovery.
-14. `OnAttackMontageEnded` delegate fires → recovery helpers clear charged input / restore rotation / handle delayed exhaustion → `ResetCombo()`, restore `EAS_UnOccupied` or `EAS_Exhausted`, resume stamina regen
+12. **Combo Window**: `UAnimNotifyState_ComboWindow` is the sole LMB buffer owner. It records at most one `bComboInputReceived`; no Dodge, Parry, Block or Potion input becomes a delayed combo action.
+13. **Combo Branch Window**: the project-owned per-entry Montages use `UAnimNotifyState_ComboBranchWindow` over the short post-strike pause. Opening it immediately consumes an earlier buffered LMB; a new LMB inside it immediately tries the same continuation. If no continuation starts, window end clears the unused buffer and the Montage enters `Recovery`. `UAnimNotify_ComboBranchPoint` remains only as compatibility support for older reference Montages.
+14. **Cancel and recovery**: `UAnimNotifyState_PlayerActionCancelWindow` may overlap the BranchWindow and Recovery. A Dodge, Parry, Block or Potion still starts immediately only after its action-intent preflight succeeds; attack Montage end, hit, Guard Break, death, Bonfire, equipment teardown and EndPlay converge through the guarded recovery/cleanup paths.
 
 <a name="projectile-delivery-core"></a>
 ## Projectile Delivery Core
@@ -475,7 +475,7 @@ FCombatTeamHelper (static helper: ShareTeamTag for same-team detection via Actor
 - **阶段合同**：Idle 以及合法的 Exhausted -> Potion 可在 preflight 通过后 `StartNow`。Attack Startup/Active 只允许 Combo Window 记录一次 Attack `BufferOnce`；作者化 `ActionCancelWindow` 内只有 preflight 已通过的 Potion / Block / Dodge / Parry 可打断攻击。Block 与 Bow Aim 是可逆 held 状态，Release 走 `EndHeld`，而 Attack/Potion 不会以最新输入取代它们；`Block + LMB` 明确 `Reject`。Dodge、Parry 与成功开始的 Potion 是承诺式动作，在自然结束前拒绝新的离散玩家动作。Bow Draw、prepared candidate、Release 与 Load 继续由 Bow 自己的 gate/缓冲所有权控制。
 - **Preflight 与清理顺序**：`IsActionStartPreflightValid()` 在任何 `CleanupInterruptedAction()` 前验证目标 Montage、AnimInstance、资源、冷却、装备、落地、Bow 配置和状态。因此无药、无体力、缺 Montage 或失效 Bow 的输入只会被拒绝，不会先取消已有动作。成功转出 Attack 时才收束旧攻击清理；从 Block 转 Dodge/Parry 时也只在目标前置条件已通过后中断防御。
 - **动作与输入所有权**：`EPlayerActionType` 继续表示当前动作和最终启动目标；普通、冲刺与蓄力攻击仍是 `Attack` 的内部变体，不扩展 public action state。Block 保留 `bBlockInputHeld` / `bIsBlocking` 的 held 语义；攻击 CancelWindow 内的 held Block/Aim synthetic retry 是唯一允许的主动 held 补播。Potion、Dodge、Parry 结束后不自动补播 held Block/Aim。Combo Window 唯一拥有 `bComboInputReceived`，Bow Load 唯一拥有 `bBowChargeInputBuffered`；两者不共用全局输入缓冲。
-- **Attack Montage 身份**：普通、冲刺、蓄力与 Combo continuation 使用 `ActiveAttackMontage + ActiveAttackPlaybackId`。新播放生成 token，continuation 只重绑同一 token；取消、恢复、teardown 与 EndPlay 先使 token 失效。迟到的 Montage End Delegate 必须同时匹配 Montage、token 和 `EAS_Attacking`，才可触及 Combo、Motion Warping、旋转、蓄力或体力恢复。
+- **Attack Montage 身份与交接**：普通、冲刺、蓄力和首段 Combo 播放建立 `ActiveAttackMontage + ActiveAttackPlaybackId`。同 Montage continuation 复用该 token 并只跳转其 `EntrySection`；跨 Montage continuation 在 `Montage_Play()` 前短暂记录 planned old Montage/token，目标成功起播后建立新 token。planned old delegate 直接忽略，其他迟到 End Delegate 必须同时匹配当前 Montage、token 和 `EAS_Attacking`，才可触及 Combo、Motion Warping、旋转、蓄力或体力恢复。取消、恢复、teardown 与 EndPlay 先使 token 和 planned-handoff 上下文失效。
 - **配置边界**：`UPlayerActionConfigDataAsset` 仅定义 Dodge/Block/GuardBreak/Parry/Potion 的 Montage、体力、冷却、治疗与相关表现配置；不再定义或暴露 `Priority`、`SharedPriority` 或 Priority helper。`UAttackConfigDataAsset` 仍拥有 Attack Montage/Combo 配置；`ReactionConfig` 仍拥有 HitReact/Death 配置。
 - **CancelWindow 与恢复**：`UAnimNotifyState_PlayerActionCancelWindow` 只开关 `bActionCancelWindowOpen`。`ResetCombo()`、攻击取消、受击与外部 teardown 会关闭该窗口；窗口开启时保留既有 held Block/Aim synthetic retry，但所有实际启动仍重新经过 resolver 和 preflight。
 
@@ -659,12 +659,13 @@ FCombatTeamHelper (static helper: ShareTeamTag for same-team detection via Actor
 <a name="combo-system"></a>
 ## Combo System（连招系统）
 
-- **架构**：数据驱动 + AnimNotifyState 驱动窗口。`UAttackConfigDataAsset` 统一管理 `LightAttackCombo`（连招链）、`SpecialAttacks`（冲刺/跳跃）、`ChargedAttack`（蓄力）
+- **架构**：数据驱动的线性 per-entry Montage 链 + AnimNotifyState 窗口。`UAttackConfigDataAsset` 统一管理 `LightAttackCombo`（连招链）、`SpecialAttacks`（冲刺/跳跃）与 `ChargedAttack`（蓄力）；`FComboSegment` 以 `Montage + EntrySection`、伤害、体力、韧性和 Motion Warping 组成一个完整攻击模块。
 - **配置入口**：主角 Blueprint 只配置 `PlayerProfile`；`AMyCharacter` 通过 `PlayerProfile->AttackConfig` 读取主角攻击配置，通过 `PlayerProfile->ActionConfig` 读取 Dodge / Block / Parry / Potion Montage，通过 `PlayerProfile->ReactionConfig` 读取受击和死亡 Montage。主角攻击 Montage 只走 `UAttackConfigDataAsset`；敌人攻击 Montage 只走 `UEnemyAttackConfigDataAsset`。旧 `ABaseCharacter::AttackMontage` 字段已删除；`ABaseCharacter::PlayAttackMontage()` 仅保留为 protected 旧路径报警，不再播放基类攻击 Montage。
-- **配置校验**：`UAttackConfigDataAsset`、`UComboDataAsset`、`UEnemyAttackConfigDataAsset` 在资产加载后和编辑器属性变更后输出配置 warning，用于定位缺失 Montage、空连招段、无效权重、Motion Warping 配置缺口等问题；这些 warning 不改变主角攻击选择规则。敌人攻击配置仍会 normalize 距离、冷却、倍率和 Motion Warping 数值下限。
-- **续接时序关键**：`AnimNotifyState_ComboWindow` 只缓存输入；`UAnimNotify_ComboBranchPoint` 才消费输入并跳到下一段攻击 Section。续接时 montage 已经在播放，只能 `Montage_JumpToSection()`，不能重新 `Montage_Play()`。`OnAttackMontageEnded()` 不再负责正常连招续接，只负责最终恢复/疲惫处理。
-- **蒙太奇契约**：`ComboChain` 只配置攻击 Section（例如 `Attack1/Attack2/Attack3`）；`end1/end2/end3` 是 montage 内部不接招时的收招 Section，不进入 `ComboChain`。
-- **中断清理**：所有中断点（`GetHit`、`Die`、`HandleExhausted`、`Dodge`）必须调用 `ResetCombo()`
+- **配置校验**：`UAttackConfigDataAsset` 与 `UComboDataAsset` 在资产加载后和编辑器属性变更后为每条目检查 Montage 非空、`EntrySection` 非空且存在于该 Montage，以及既有数值/Motion Warping 合法性；这些 warning 不改变主角攻击选择规则。敌人攻击配置仍会 normalize 距离、冷却、倍率和 Motion Warping 数值下限。
+- **窗口与输入所有权**：`AnimNotifyState_ComboWindow` 只缓存一次 LMB；`AnimNotifyState_ComboBranchWindow` 在攻击末端停顿消费早输入并接收窗口内晚输入。`PlayerActionCancelWindow` 与 BranchWindow 同期开启并延续到 Recovery，允许 preflight-valid 的 Dodge / Parry / Block / Potion 立即取消后摇，但这些动作没有预输入或自然结束补播。
+- **交接合同**：同 Montage 续段只能 `Montage_JumpToSection(EntrySection)`；跨 Montage 续段必须从 planned old-Montage/token 标记进入新的 `Montage_Play()`、新 playback token/delegate 与目标 `EntrySection`。`OnAttackMontageEnded()` 不负责正常连招续接，只负责最终恢复/疲惫处理；旧计划性交接的 `bInterrupted` 回调不能重置目标段。
+- **蒙太奇契约**：每条项目 Montage 自己拥有 `Entry -> Recovery -> End`，没有跨资产 Section 链接。DataAsset 可替换或重排姿势兼容的完整条目；碰撞、音效、Motion Warping、Combo/Cancel 窗口和 Recovery 节奏仍由该条 Montage 作者化。
+- **中断清理**：`ResetCombo()`、攻击取消、`GetHit`、Guard Break、`Die`、Bonfire、装备 teardown 与 EndPlay 都关闭窗口、清空未消费输入、失效 playback/handoff 身份并恢复攻击侧状态。
 
 <a name="player-character-profile"></a>
 ## Player Character Profile

@@ -75,6 +75,8 @@ public:
 	/* 连招系统 */
 	void OpenComboWindow();
 	void CloseComboWindow();
+	void OpenComboBranchWindow();
+	void CloseComboBranchWindow();
 	void ResetCombo();
 	bool TryConsumeComboInputAtBranchPoint();
 	FORCEINLINE bool IsComboWindowOpen() const { return bComboWindowOpen; }
@@ -170,7 +172,6 @@ public:
 protected:
 	/* 蒙太奇 */
 	void PlayBlockMontage(const FName& SectionName); // 播放防御蒙太奇
-	virtual void PlayAttackMontage(const FName& SectionName) override;
 	void PlayPotionMontage();
 	virtual bool CanAttack() const override;
 	virtual void OnAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted) override;
@@ -230,7 +231,11 @@ private:
 	void RecoverFromAttackMontageEnd();
 	void CleanupInterruptedAttack();
 	bool BeginAttackMontagePlayback(UAnimInstance* AnimInstance, UAnimMontage* Montage);
+	void BufferComboInput();
+	bool TryConsumeBufferedComboContinuation();
+	bool TryConsumeComboInputAtBranchWindow();
 	bool RebindActiveAttackMontageEndDelegate(UAnimInstance* AnimInstance, UAnimMontage* Montage);
+	void ClearPlannedAttackHandoff();
 	void InvalidateActiveAttackMontagePlayback();
 	void HandleActiveAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted, uint32 PlaybackId);
 	// 玩家侧 7 处 Montage EndDelegate 绑定的统一入口；敌人侧保留局部绑定，避免收尾期扩大重构范围。
@@ -397,6 +402,8 @@ private:
 	UAnimMontage* ActiveAttackMontage = nullptr;
 	uint32 ActiveAttackPlaybackId = 0;
 	uint32 NextAttackPlaybackId = 0;
+	TWeakObjectPtr<UAnimMontage> PlannedAttackHandoffMontage;
+	uint32 PlannedAttackHandoffPlaybackId = 0;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Combat|Charge", meta = (ToolTip = "按住攻击超过该时间后进入蓄力判定。"))
 	float ChargeInputThreshold = 0.2f;
@@ -530,6 +537,7 @@ private:
 	/* 连招系统 */
 	int32 ComboCounter = 0;
 	bool bComboWindowOpen = false;
+	bool bComboBranchWindowOpen = false;
 	bool bComboInputReceived = false;
 	bool bActionCancelWindowOpen = false;
 

@@ -14,6 +14,7 @@
 
 #include "Camera/CameraComponent.h"
 #include "Animation/AnimInstance.h"
+#include "Animation/AnimMontage.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/SpringArmComponent.h"
@@ -409,7 +410,7 @@ void AMyCharacter::OnAttackInputPressed()
 	const EPlayerActionIntentResolution Resolution = ResolvePlayerActionIntent(EPlayerActionIntent::AttackPress);
 	if (Resolution == EPlayerActionIntentResolution::BufferOnce)
 	{
-		bComboInputReceived = true;
+		BufferComboInput();
 		return;
 	}
 	if (Resolution != EPlayerActionIntentResolution::StartNow)
@@ -608,7 +609,7 @@ void AMyCharacter::Attack()
 	const EPlayerActionIntentResolution Resolution = ResolvePlayerActionIntent(EPlayerActionIntent::AttackPress);
 	if (Resolution == EPlayerActionIntentResolution::BufferOnce)
 	{
-		bComboInputReceived = true;
+		BufferComboInput();
 		return;
 	}
 	if (Resolution == EPlayerActionIntentResolution::StartNow)
@@ -650,7 +651,7 @@ bool AMyCharacter::StartAttackAction()
 bool AMyCharacter::StartComboSegment(int32 SegmentIndex, EComboPlaybackMode PlaybackMode)
 {
 	UAttackConfigDataAsset* AttackConfig = GetAttackConfig();
-	if (!AttackConfig || !AttackConfig->LightAttackCombo || !AttackConfig->LightAttackCombo->ComboMontage)
+	if (!AttackConfig || !AttackConfig->LightAttackCombo)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("AttackConfig or LightAttackCombo not configured"));
 		return false;
@@ -663,99 +664,159 @@ bool AMyCharacter::StartComboSegment(int32 SegmentIndex, EComboPlaybackMode Play
 		return false;
 	}
 
-	UAnimMontage* MontageToPlay = (AttackConfig && AttackConfig->LightAttackCombo)
-		? AttackConfig->LightAttackCombo->ComboMontage.Get()
-		: nullptr;
-	if (!MontageToPlay)
+	UAnimMontage* MontageToPlay = Segment->Montage.Get();
+	if (!MontageToPlay || Segment->EntrySection == NAME_None
+		|| MontageToPlay->GetSectionIndex(Segment->EntrySection) == INDEX_NONE)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("%s: StartComboSegment - no ComboMontage available"), *GetName());
+		UE_LOG(LogTemp, Warning,
+		       TEXT("%s: StartComboSegment[%d] has an invalid Montage or EntrySection."),
+		       *GetName(), SegmentIndex);
 		return false;
 	}
 
-	UAnimInstance* ContinuationAnimInstance = nullptr;
-	if (PlaybackMode == EComboPlaybackMode::Continuation)
+	UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
+	if (!AnimInstance || !Attributes)
 	{
-		ContinuationAnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
-		if (!ContinuationAnimInstance)
-		{
-			UE_LOG(LogTemp, Warning, TEXT("%s: StartComboSegment - no AnimInstance available"), *GetName());
-			return false;
-		}
-
-		if (!ContinuationAnimInstance->Montage_IsPlaying(MontageToPlay))
-		{
-			UE_LOG(LogTemp, Warning, TEXT("%s: StartComboSegment - continuation montage is not playing"), *GetName());
-			return false;
-		}
-
-		if (!RebindActiveAttackMontageEndDelegate(ContinuationAnimInstance, MontageToPlay))
-		{
-			UE_LOG(LogTemp, Warning, TEXT("%s: StartComboSegment - active attack playback is unavailable for continuation."), *GetName());
-			return false;
-		}
+		UE_LOG(LogTemp, Warning, TEXT("%s: StartComboSegment requires an AnimInstance and AttributeComponent."), *GetName());
+		return false;
 	}
 
-	if (Attributes)
+	if (Segment->MotionWarping.bUseMotionWarping
+		&& (!MotionWarpingComponent || Segment->MotionWarping.MaxWarpDistance <= 0.f))
 	{
-		Attributes->UseStamina(Segment->StaminaCost);
-		Attributes->PauseStaminaRegen();
+		UE_LOG(LogTemp, Warning,
+		       TEXT("%s: StartComboSegment[%d] has invalid Motion Warping configuration."),
+		       *GetName(), SegmentIndex);
+		return false;
 	}
 
-	SetAttackDamageMultiplier(Segment->DamageMultiplier);
-	if (EquippedWeapon)
+	if (PlaybackMode == EComboPlaybackMode::Continuation && !Attributes->CheckStamina(Segment->StaminaCost))
 	{
-		CurrentPoiseDamage = EquippedWeapon->GetBasePoiseDamage() * Segment->PoiseDamageMultiplier;
+		UE_LOG(LogTemp, Display,
+		       TEXT("%s: StartComboSegment[%d] rejected because stamina %.2f is below cost %.2f."),
+		       *GetName(), SegmentIndex, Attributes->GetCurrentStamina(), Segment->StaminaCost);
+		return false;
 	}
-
-	ActionState = EActionState::EAS_Attacking;
-	UpdateAttackMotionWarpTarget(Segment->MotionWarping);
 
 	if (PlaybackMode == EComboPlaybackMode::NewPlayback)
 	{
-		const uint32 PreviousPlaybackId = ActiveAttackPlaybackId;
-		PlayAttackMontage(Segment->SectionName);
-		if (ActiveAttackMontage != MontageToPlay || ActiveAttackPlaybackId == PreviousPlaybackId)
+		if (ActionState != EActionState::EAS_UnOccupied)
 		{
-			RecoverFromAttackMontageEnd();
+			UE_LOG(LogTemp, Warning, TEXT("%s: StartComboSegment - new playback requires an unoccupied action state."), *GetName());
 			return false;
 		}
+
+		if (AnimInstance->Montage_Play(MontageToPlay) <= 0.f
+			|| !AnimInstance->Montage_IsPlaying(MontageToPlay))
+		{
+			UE_LOG(LogTemp, Warning, TEXT("%s: StartComboSegment failed to play Montage '%s'."),
+			       *GetName(), *GetNameSafe(MontageToPlay));
+			return false;
+		}
+
+		ActionState = EActionState::EAS_Attacking;
+		if (!BeginAttackMontagePlayback(AnimInstance, MontageToPlay))
+		{
+			AnimInstance->Montage_Stop(0.f, MontageToPlay);
+			ActionState = EActionState::EAS_UnOccupied;
+			return false;
+		}
+
+		Attributes->UseStamina(Segment->StaminaCost);
+		Attributes->PauseStaminaRegen();
+		SetAttackDamageMultiplier(Segment->DamageMultiplier);
+		if (EquippedWeapon)
+		{
+			CurrentPoiseDamage = EquippedWeapon->GetBasePoiseDamage() * Segment->PoiseDamageMultiplier;
+		}
+		UpdateAttackMotionWarpTarget(Segment->MotionWarping);
+		AnimInstance->Montage_JumpToSection(Segment->EntrySection, MontageToPlay);
 	}
 	else
 	{
-		ContinuationAnimInstance->Montage_JumpToSection(Segment->SectionName, MontageToPlay);
+		if (ActionState != EActionState::EAS_Attacking || !ActiveAttackMontage || ActiveAttackPlaybackId == 0)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("%s: StartComboSegment - continuation has no active attack playback."), *GetName());
+			return false;
+		}
+
+		UAnimMontage* PreviousMontage = ActiveAttackMontage;
+		const uint32 PreviousPlaybackId = ActiveAttackPlaybackId;
+		const bool bSameMontage = PreviousMontage == MontageToPlay;
+
+		if (bSameMontage)
+		{
+			if (!AnimInstance->Montage_IsPlaying(PreviousMontage))
+			{
+				HandleActiveAttackMontageEnded(PreviousMontage, true, PreviousPlaybackId);
+				return false;
+			}
+
+			if (!RebindActiveAttackMontageEndDelegate(AnimInstance, PreviousMontage))
+			{
+				UE_LOG(LogTemp, Warning, TEXT("%s: StartComboSegment - failed to rebind same-Montage end delegate."), *GetName());
+				return false;
+			}
+
+			Attributes->UseStamina(Segment->StaminaCost);
+			Attributes->PauseStaminaRegen();
+			SetAttackDamageMultiplier(Segment->DamageMultiplier);
+			if (EquippedWeapon)
+			{
+				CurrentPoiseDamage = EquippedWeapon->GetBasePoiseDamage() * Segment->PoiseDamageMultiplier;
+			}
+			UpdateAttackMotionWarpTarget(Segment->MotionWarping);
+			AnimInstance->Montage_JumpToSection(Segment->EntrySection, MontageToPlay);
+		}
+		else
+		{
+			PlannedAttackHandoffMontage = PreviousMontage;
+			PlannedAttackHandoffPlaybackId = PreviousPlaybackId;
+
+			if (AnimInstance->Montage_Play(MontageToPlay) <= 0.f
+				|| !AnimInstance->Montage_IsPlaying(MontageToPlay))
+			{
+				ClearPlannedAttackHandoff();
+				if (!AnimInstance->Montage_IsPlaying(PreviousMontage))
+				{
+					HandleActiveAttackMontageEnded(PreviousMontage, true, PreviousPlaybackId);
+				}
+				UE_LOG(LogTemp, Warning, TEXT("%s: StartComboSegment failed to hand off to Montage '%s'."),
+				       *GetName(), *GetNameSafe(MontageToPlay));
+				return false;
+			}
+
+			if (!BeginAttackMontagePlayback(AnimInstance, MontageToPlay))
+			{
+				AnimInstance->Montage_Stop(0.f, MontageToPlay);
+				ClearPlannedAttackHandoff();
+				if (!AnimInstance->Montage_IsPlaying(PreviousMontage))
+				{
+					HandleActiveAttackMontageEnded(PreviousMontage, true, PreviousPlaybackId);
+				}
+				return false;
+			}
+
+			Attributes->UseStamina(Segment->StaminaCost);
+			Attributes->PauseStaminaRegen();
+			SetAttackDamageMultiplier(Segment->DamageMultiplier);
+			if (EquippedWeapon)
+			{
+				CurrentPoiseDamage = EquippedWeapon->GetBasePoiseDamage() * Segment->PoiseDamageMultiplier;
+			}
+			UpdateAttackMotionWarpTarget(Segment->MotionWarping);
+			AnimInstance->Montage_JumpToSection(Segment->EntrySection, MontageToPlay);
+			ClearPlannedAttackHandoff();
+		}
 	}
 
 	EmitNoise(AttackNoiseLoudness, AttackNoiseRange);
 	bComboInputReceived = false;
 
 	UE_LOG(LogTemp, Log, TEXT("Attack Segment %d: %s (Damage x%.1f)"),
-	       SegmentIndex, *Segment->SectionName.ToString(), Segment->DamageMultiplier);
+	       SegmentIndex, *Segment->EntrySection.ToString(), Segment->DamageMultiplier);
 
 	return true;
-}
-
-void AMyCharacter::PlayAttackMontage(const FName& SectionName)
-{
-	UAttackConfigDataAsset* AttackConfig = GetAttackConfig();
-	UAnimMontage* MontageToPlay = (AttackConfig && AttackConfig->LightAttackCombo)
-		? AttackConfig->LightAttackCombo->ComboMontage.Get()
-		: nullptr;
-	if (!MontageToPlay)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("%s: PlayAttackMontage - no ComboMontage available"), *GetName());
-		return;
-	}
-
-	UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
-	if (!AnimInstance || AnimInstance->Montage_Play(MontageToPlay) <= 0.f)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("%s: PlayAttackMontage failed to play '%s'."),
-		       *GetName(), *GetNameSafe(MontageToPlay));
-		return;
-	}
-
-	AnimInstance->Montage_JumpToSection(SectionName, MontageToPlay);
-	BeginAttackMontagePlayback(AnimInstance, MontageToPlay);
 }
 
 void AMyCharacter::OpenComboWindow()
@@ -770,12 +831,36 @@ void AMyCharacter::CloseComboWindow()
 	UE_LOG(LogTemp, Log, TEXT("Combo window closed"));
 }
 
+void AMyCharacter::OpenComboBranchWindow()
+{
+	if (ActionState != EActionState::EAS_Attacking)
+	{
+		return;
+	}
+
+	bComboBranchWindowOpen = true;
+	TryConsumeComboInputAtBranchWindow();
+}
+
+void AMyCharacter::CloseComboBranchWindow()
+{
+	if (!bComboBranchWindowOpen)
+	{
+		return;
+	}
+
+	bComboBranchWindowOpen = false;
+	bComboInputReceived = false;
+}
+
 void AMyCharacter::ResetCombo()
 {
 	ComboCounter = 0;
 	bComboWindowOpen = false;
+	bComboBranchWindowOpen = false;
 	bComboInputReceived = false;
 	bActionCancelWindowOpen = false;
+	ClearPlannedAttackHandoff();
 	SetAttackDamageMultiplier(1.0f);
 	CurrentPoiseDamage = EquippedWeapon ? EquippedWeapon->GetBasePoiseDamage() : 1.f;
 	ClearAttackMotionWarpTarget();
@@ -853,7 +938,36 @@ void AMyCharacter::ClearAttackMotionWarpTarget()
 bool AMyCharacter::TryConsumeComboInputAtBranchPoint()
 {
 	bComboWindowOpen = false;
+	return TryConsumeBufferedComboContinuation();
+}
 
+void AMyCharacter::BufferComboInput()
+{
+	bComboInputReceived = true;
+	if (bComboBranchWindowOpen)
+	{
+		TryConsumeComboInputAtBranchWindow();
+	}
+}
+
+bool AMyCharacter::TryConsumeComboInputAtBranchWindow()
+{
+	if (!bComboBranchWindowOpen)
+	{
+		return false;
+	}
+
+	const bool bDidContinue = TryConsumeBufferedComboContinuation();
+	if (bDidContinue)
+	{
+		bComboBranchWindowOpen = false;
+	}
+
+	return bDidContinue;
+}
+
+bool AMyCharacter::TryConsumeBufferedComboContinuation()
+{
 	if (!bComboInputReceived)
 	{
 		return false;
@@ -884,14 +998,12 @@ bool AMyCharacter::TryConsumeComboInputAtBranchPoint()
 		return false;
 	}
 
-	const int32 PreviousComboIndex = ComboCounter;
-	ComboCounter = NextComboIndex;
-	if (StartComboSegment(ComboCounter, EComboPlaybackMode::Continuation))
+	if (StartComboSegment(NextComboIndex, EComboPlaybackMode::Continuation))
 	{
+		ComboCounter = NextComboIndex;
 		return true;
 	}
 
-	ComboCounter = PreviousComboIndex;
 	return false;
 }
 
@@ -3750,14 +3862,26 @@ bool AMyCharacter::RebindActiveAttackMontageEndDelegate(UAnimInstance* AnimInsta
 	return true;
 }
 
+void AMyCharacter::ClearPlannedAttackHandoff()
+{
+	PlannedAttackHandoffMontage.Reset();
+	PlannedAttackHandoffPlaybackId = 0;
+}
+
 void AMyCharacter::InvalidateActiveAttackMontagePlayback()
 {
 	ActiveAttackMontage = nullptr;
 	ActiveAttackPlaybackId = 0;
+	ClearPlannedAttackHandoff();
 }
 
 void AMyCharacter::HandleActiveAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted, uint32 PlaybackId)
 {
+	if (Montage == PlannedAttackHandoffMontage.Get() && PlaybackId == PlannedAttackHandoffPlaybackId)
+	{
+		return;
+	}
+
 	if (!ActiveAttackMontage || Montage != ActiveAttackMontage || PlaybackId != ActiveAttackPlaybackId
 		|| ActionState != EActionState::EAS_Attacking)
 	{

@@ -1,5 +1,6 @@
 #include "Combat/ComboDataAsset.h"
 
+#include "Animation/AnimMontage.h"
 #include "UObject/UnrealType.h"
 
 void UComboDataAsset::PostLoad()
@@ -26,11 +27,6 @@ void UComboDataAsset::LogConfigWarnings() const
 		return;
 	}
 
-	if (!ComboMontage)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("%s: ComboMontage is not set."), *GetName());
-	}
-
 	if (ComboChain.IsEmpty())
 	{
 		UE_LOG(LogTemp, Warning, TEXT("%s: ComboChain is empty; light attacks will have no playable combo segments."), *GetName());
@@ -39,9 +35,18 @@ void UComboDataAsset::LogConfigWarnings() const
 	for (int32 Index = 0; Index < ComboChain.Num(); ++Index)
 	{
 		const FComboSegment& Segment = ComboChain[Index];
-		if (Segment.SectionName == NAME_None)
+		if (!Segment.Montage)
 		{
-			UE_LOG(LogTemp, Warning, TEXT("%s: ComboChain[%d] has no SectionName."), *GetName(), Index);
+			UE_LOG(LogTemp, Warning, TEXT("%s: ComboChain[%d] has no Montage."), *GetName(), Index);
+		}
+		else if (Segment.EntrySection == NAME_None)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("%s: ComboChain[%d] has no EntrySection."), *GetName(), Index);
+		}
+		else if (Segment.Montage->GetSectionIndex(Segment.EntrySection) == INDEX_NONE)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("%s: ComboChain[%d] EntrySection '%s' does not exist in Montage '%s'."),
+			       *GetName(), Index, *Segment.EntrySection.ToString(), *GetNameSafe(Segment.Montage.Get()));
 		}
 
 		if (Segment.DamageMultiplier <= 0.f)

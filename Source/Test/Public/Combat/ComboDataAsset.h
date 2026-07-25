@@ -13,8 +13,11 @@ struct FComboSegment
 {
 	GENERATED_BODY()
 
-	UPROPERTY(EditAnywhere, Category = "Animation", meta = (ToolTip = "该连招段播放的蒙太奇 Section 名称。"))
-	FName SectionName = NAME_None;
+	UPROPERTY(EditAnywhere, Category = "Animation", meta = (ToolTip = "该连招段要播放的 Montage。"))
+	TObjectPtr<UAnimMontage> Montage = nullptr;
+
+	UPROPERTY(EditAnywhere, Category = "Animation", meta = (ToolTip = "该连招段在 Montage 中的入口 Section，默认从 Entry 开始。"))
+	FName EntrySection = FName(TEXT("Entry"));
 
 	UPROPERTY(EditAnywhere, Category = "Damage", meta = (ClampMin = "0.1", ClampMax = "5.0", ToolTip = "该段伤害倍率（相对武器基础伤害）。"))
 	float DamageMultiplier = 1.0f;
@@ -38,9 +41,6 @@ class TEST_API UComboDataAsset : public UDataAsset
 	GENERATED_BODY()
 
 public:
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Animation", meta = (ToolTip = "轻攻击连招共用的蒙太奇。ComboChain 中的 Section 必须存在于此蒙太奇。"))
-	TObjectPtr<UAnimMontage> ComboMontage = nullptr;
-
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Combo", meta = (ToolTip = "轻攻击连招段列表，按输入续接顺序执行。"))
 	TArray<FComboSegment> ComboChain;
 

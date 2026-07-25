@@ -3,6 +3,7 @@
 #include "Combat/AttackConfigDataAsset.h"
 #include "Combat/ComboDataAsset.h"
 
+#include "Animation/AnimMontage.h"
 #include "UObject/UnrealType.h"
 
 const FSpecialAttackConfig* UAttackConfigDataAsset::FindSpecialAttack(ESpecialAttackType AttackType) const
@@ -48,16 +49,32 @@ void UAttackConfigDataAsset::LogConfigWarnings() const
 	}
 	else
 	{
-		if (!LightAttackCombo->ComboMontage)
-		{
-			UE_LOG(LogTemp, Warning, TEXT("%s: LightAttackCombo '%s' has no ComboMontage."),
-			       *GetName(), *LightAttackCombo->GetName());
-		}
-
 		if (LightAttackCombo->ComboChain.IsEmpty())
 		{
 			UE_LOG(LogTemp, Warning, TEXT("%s: LightAttackCombo '%s' has an empty ComboChain."),
 			       *GetName(), *LightAttackCombo->GetName());
+		}
+
+		for (int32 Index = 0; Index < LightAttackCombo->ComboChain.Num(); ++Index)
+		{
+			const FComboSegment& Segment = LightAttackCombo->ComboChain[Index];
+			if (!Segment.Montage)
+			{
+				UE_LOG(LogTemp, Warning, TEXT("%s: LightAttackCombo '%s' ComboChain[%d] has no Montage."),
+				       *GetName(), *LightAttackCombo->GetName(), Index);
+			}
+			else if (Segment.EntrySection == NAME_None)
+			{
+				UE_LOG(LogTemp, Warning, TEXT("%s: LightAttackCombo '%s' ComboChain[%d] has no EntrySection."),
+				       *GetName(), *LightAttackCombo->GetName(), Index);
+			}
+			else if (Segment.Montage->GetSectionIndex(Segment.EntrySection) == INDEX_NONE)
+			{
+				UE_LOG(LogTemp, Warning,
+				       TEXT("%s: LightAttackCombo '%s' ComboChain[%d] EntrySection '%s' does not exist in Montage '%s'."),
+				       *GetName(), *LightAttackCombo->GetName(), Index,
+				       *Segment.EntrySection.ToString(), *GetNameSafe(Segment.Montage.Get()));
+			}
 		}
 	}
 
