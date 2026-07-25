@@ -277,25 +277,31 @@ void ACharacterController::Input_MoveEnd()
 
 void ACharacterController::Input_Look(const FInputActionValue& Value)
 {
+	const FVector2D LookAxisVector = Value.Get<FVector2D>();
 	if (AMyCharacter* MyCharacter = GetMyCharacter())
 	{
+		if (!LookAxisVector.IsNearlyZero())
+		{
+			MyCharacter->StopCameraRecenter();
+		}
+
 		if (MyCharacter->IsLockingOn() && !MyCharacter->IsBowAiming()) return;
 	}
 
 	if (APawn* ControlledPawn = GetPawn())
 	{
-		FVector2D LookAxisVector = Value.Get<FVector2D>();
+		FVector2D AdjustedLookAxisVector = LookAxisVector;
 		if (const UTestGameUserSettings* UserSettings = UTestGameUserSettings::GetTestGameUserSettings())
 		{
-			LookAxisVector *= UserSettings->GetLookSensitivity();
+			AdjustedLookAxisVector *= UserSettings->GetLookSensitivity();
 			if (UserSettings->GetInvertY())
 			{
-				LookAxisVector.Y *= -1.f;
+				AdjustedLookAxisVector.Y *= -1.f;
 			}
 		}
 
-		ControlledPawn->AddControllerYawInput(LookAxisVector.X);
-		ControlledPawn->AddControllerPitchInput(LookAxisVector.Y);
+		ControlledPawn->AddControllerYawInput(AdjustedLookAxisVector.X);
+		ControlledPawn->AddControllerPitchInput(AdjustedLookAxisVector.Y);
 	}
 }
 

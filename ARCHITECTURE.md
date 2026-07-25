@@ -635,6 +635,9 @@ FCombatTeamHelper (static helper: ShareTeamTag for same-team detection via Actor
 - **死亡与失效**：当前锁定敌人死亡时，`AMyCharacter` 使用既有 `FindBestTarget()` 在当前前方、`LockOnRadius` 内自动选择下一有效敌人；无候选则正常解锁。跑出 `LockOnBreakRadius`、Actor 无效、玩家死亡或玩家硬直均不自动换锁，沿用既有解锁路径。
 - **角色朝向与相机朝向拆分**：`LockOnRotationInterpSpeed` 只控制 Controller/Camera 朝向目标的插值速度；`LockOnFacingTurnRate` 控制非 free-run 锁定状态下角色模型每秒最大转向角度，避免锁定开始或松开 Shift 后瞬间吸回目标 yaw。
 - **锁定相机**：默认使用居中后上方构图，`LockOnSocketOffset` 负责 SpringArm 高度偏移，`LockOnCameraPitch` 负责控制器俯视角；只有有效 Bow Aim 临时改用其独立绝对右肩目标，不与 Lock-On 偏移叠加。
+- **相机目标与写入顺序**：`AMyCharacter::GetCameraTargets()` 是唯一逻辑相机目标来源，优先级固定为 `Bow Aim > Lock-On Free-Run / Lock-On > Default`。每帧先完成 Lock-On 的有效性清理、目标交接和旋转写入，再解析 SpringArm 目标；`SocketOffset` 与 `TargetArmLength` 只由该相机路径写入。Bow Aim 的绝对右肩 Offset 不会叠加 Lock-On Offset。
+- **墙体遮挡回弹**：同名原生 `SpringArm` 的实际类型是 `UObstructionRecoverySpringArmComponent`。它不创建第二个 Camera、SpringArm 或 World Trace，而是在引擎既有 Sphere Sweep 的 `BlendLocations(...)` 结果层处理回弹：物理命中立即返回引擎 `TraceHitLocation`；完整目标路径连续清障后，才从当前路径的安全比例平滑回 `DesiredArmLocation`。角色侧始终保留真实目标臂长，不能以碰撞位移反向压短它。`IsPhysicallyObstructed()` 表示实际 Sweep 命中；引擎 `IsCollisionFixApplied()` 在回弹期间只表示相机尚未到完整 Desired 点，不能作为真实墙体命中的新消费入口。
+- **无目标归中让位**：失败锁定后的短归中仍由 `AMyCharacter` 管理，但 `ACharacterController::Input_Look()` 收到非零原始 Look 输入即停止归中。锁定、Bow Aim、Bonfire、死亡、硬直、Guard Break 和 EndPlay 也会停止归中并重置 SpringArm 回弹缓存，因此不会留下迟到的 ControlRotation、短臂或 Offset 写入。
 - **锁定目标反馈**：`AEnemy::SetTargetedByPlayer()` 是敌人被玩家锁定的统一反馈入口；锁定时保持血条可见，并显示 Enemy 自持的 `LockOnMarker` screen-space WidgetComponent，解锁时隐藏标记并恢复血条延迟隐藏流程。
 - **锁定冲刺 Free-Run**：`ShouldUseLockOnFreeRun()` 条件 = `bIsLockingOn && bIsSprinting && EAS_UnOccupied && !IsFalling && 有移动输入`。满足时角色临时恢复自由移动语义，控制器/相机继续盯敌人。
 - **Free-Run 相机让位**：锁定冲刺时会根据本地移动输入添加轻量侧向/后撤相机 offset，避免高速绕行时视野过窄；`LockOnFreeRunCameraInterpSpeed` 默认较慢，避免前后左右切换时镜头频繁抖动。

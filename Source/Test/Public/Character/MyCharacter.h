@@ -262,7 +262,9 @@ private:
 	bool IsCombatPresenceActive() const;
 	float CalcBaseSpeed(float DotProduct) const;
 	void UpdateLockOnCamera(float DeltaTime);
+	void ResetCameraObstructionRecovery(bool bRestoreCurrentTarget = false);
 	void GetCameraTargets(FVector& OutSocketTarget, float& OutArmLengthTarget, float& OutInterpSpeed) const;
+	bool CanUpdateCameraRecenter() const;
 	bool ShouldSuspendLockOnCameraForAim() const;
 	void CacheAimRotationState();
 	void ApplyAimRotationMode();
@@ -335,6 +337,12 @@ private:
 
 	UPROPERTY(EditDefaultsOnly, Category = "Camera|Bow Aim", meta = (ToolTip = "Bow 瞄准右肩镜头的插值速度；FInterpTo/VInterpTo 自然表现为先快后慢。", ClampMin = "0.0"))
 	float AimCameraInterpSpeed = 12.f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Camera|Obstruction", meta = (ClampMin = "0.0", ToolTip = "SpringArm 在完整路径清障后，从安全比例回弹至目标位置的插值速度。"))
+	float CameraObstructionRecoveryInterpSpeed = 16.f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Camera|Obstruction", meta = (ClampMin = "0.0", ToolTip = "SpringArm 在完整路径持续清障后开始回弹前的稳定等待时间（秒）。"))
+	float CameraObstructionClearDelay = 0.08f;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Camera|Bow Charge", meta = (ClampMin = "0.0", ToolTip = "Bow LMB 蓄力时相对开始时基础 FOV 收紧的角度。"))
 	float BowChargeFOVDelta = 8.f;

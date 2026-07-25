@@ -6,6 +6,7 @@
 #include "Combat/CombatHitTypes.h"
 #include "Combat/CombatProjectile.h"
 #include "Combat/HitReactionConfigDataAsset.h"
+#include "Character/Components/ObstructionRecoverySpringArmComponent.h"
 #include "Character/Components/PlayerLockOnComponent.h"
 #include "Character/Controller/CharacterController.h"
 #include "Game/SoulslikeGameInstance.h"
@@ -53,7 +54,7 @@ AMyCharacter::AMyCharacter()
 	BaseHitKnockbackDistance = 10.f;
 
 	// 相机组件
-	SpringArm = CreateDefaultSubobject<USpringArmComponent>(TEXT("SpringArm"));
+	SpringArm = CreateDefaultSubobject<UObstructionRecoverySpringArmComponent>(TEXT("SpringArm"));
 	SpringArm->SetupAttachment(GetRootComponent());
 	SpringArm->TargetArmLength = 360.f;
 	SpringArm->SocketOffset = FVector(0.f, 0.f, 90.f);
@@ -111,6 +112,12 @@ void AMyCharacter::BeginPlay()
 	CachedSocketOffset = SpringArm->SocketOffset;
 	CachedTargetArmLength = SpringArm->TargetArmLength;
 	CachedBaseCameraFOV = Camera ? Camera->FieldOfView : 90.f;
+	if (UObstructionRecoverySpringArmComponent* RecoverySpringArm = Cast<UObstructionRecoverySpringArmComponent>(SpringArm))
+	{
+		RecoverySpringArm->ConfigureObstructionRecovery(
+			CameraObstructionRecoveryInterpSpeed, CameraObstructionClearDelay);
+	}
+	ResetCameraObstructionRecovery();
 
 	if (Attributes)
 	{
@@ -131,6 +138,8 @@ void AMyCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	bBonfireServiceProtected = false;
 	bFailNextProjectilePrepareForDebug = false;
 	ClearCombatPresence();
+	StopCameraRecenter();
+	ResetCameraObstructionRecovery();
 	if (ItemOwnershipComponent)
 	{
 		ItemOwnershipComponent->OnLoadedAmmoQuantityChanged.RemoveDynamic(this, &AMyCharacter::HandleLoadedAmmoQuantityChanged);
@@ -180,12 +189,11 @@ void AMyCharacter::Tick(float DeltaTime)
 		}
 	}
 
+	// 先完成有效性清理、目标交接与旋转，避免相机在本帧读取到已失效的锁定目标。
+	UpdateLockOn(DeltaTime);
 	UpdateLockOnCamera(DeltaTime);
 
-	// UpdateLockOn 放在早退之前：内部已有死亡/硬直 guard，但有效性清理必须在所有状态下执行
-	UpdateLockOn(DeltaTime);
-
-	// 新增：相机归中（必须在早退之前，受击硬直时继续归中）
+	// 相机归中在动作早退前检查；锁定、瞄准与硬中断由内部 guard 立即停止。
 	if (bRecenteringCamera)
 	{
 		UpdateCameraRecenter(DeltaTime);
@@ -913,6 +921,8 @@ void AMyCharacter::GetHit_Implementation(const FVector& ImpactPoint, AActor* Hit
 		InterruptBlock(false);
 		if (bIsParrying) InterruptParry();
 		ActionState = EActionState::EAS_Stunning;
+		StopCameraRecenter();
+		ResetCameraObstructionRecovery();
 		Attributes->ResumeStaminaRegen();  // 硬直接管，恢复体力暂停
 
 		// 硬直时停止移动噪音
@@ -946,7 +956,8 @@ void AMyCharacter::Die()
 	bGuardBreakRequested = false;
 	GetWorldTimerManager().ClearTimer(ExhaustionTimerHandle);
 	ClearLockOn();
-	bRecenteringCamera = false; // 新增：死亡时中断归中
+	StopCameraRecenter();
+	ResetCameraObstructionRecovery();
 	ActionState = EActionState::EAS_Dead;
 
 	// 停止移动噪音定时器
@@ -1025,6 +1036,8 @@ void AMyCharacter::StartGuardBreak()
 	}
 	CancelChargeInputState();
 	CancelBowAim(true);
+	StopCameraRecenter();
+	ResetCameraObstructionRecovery();
 	bIsSprinting = false;
 	StopMovementNoiseTimer();
 	ActionState = EActionState::EAS_GuardBroken;
@@ -1507,7 +1520,8 @@ void AMyCharacter::SetBonfireServiceProtection(bool bEnabled)
 	InterruptBlock(true);
 	ClearParryState();
 	ClearLockOn();
-	bRecenteringCamera = false;
+	StopCameraRecenter();
+	ResetCameraObstructionRecovery();
 	StopMovementNoiseTimer();
 	GetCharacterMovement()->StopMovementImmediately();
 }
@@ -2275,6 +2289,7 @@ bool AMyCharacter::StartBowAimAction()
 	CacheAimRotationState();
 	ActionState = EActionState::EAS_Aiming;
 	ApplyAimRotationMode();
+	ResetCameraObstructionRecovery(true);
 	// 当前 Aim Locomotion 已是半拉弓姿态；Bow AnimBP 用独立的物理 Aim 状态与其对齐。
 	Bow->SetBowPresentationState(EBowPresentationState::EBPS_Aiming);
 	PlayBowAimRaisePresentation();
@@ -2908,6 +2923,7 @@ void AMyCharacter::TryConsumeBufferedBowCharge(ABow* Bow)
 
 void AMyCharacter::CancelBowAim(bool bClearBlockHeld, bool bImmediateChargeFOVReset)
 {
+	const bool bWasBowAiming = IsBowAiming();
 	CancelBowCharge(bImmediateChargeFOVReset);
 	if (bClearBlockHeld)
 	{
@@ -2920,6 +2936,10 @@ void AMyCharacter::CancelBowAim(bool bClearBlockHeld, bool bImmediateChargeFOVRe
 	}
 
 	RestoreAimRotationMode();
+	if (bWasBowAiming)
+	{
+		ResetCameraObstructionRecovery(true);
+	}
 	if (ABow* Bow = GetEquippedBow())
 	{
 		Bow->SetBowPresentationState(EBowPresentationState::EBPS_Relaxed);
@@ -3579,6 +3599,7 @@ void AMyCharacter::ClearLockOn()
 
 	ClearCurrentLockOnTarget();
 	RestoreCachedRotationState();
+	ResetCameraObstructionRecovery(true);
 }
 
 void AMyCharacter::FindLockOnTarget()
@@ -3732,7 +3753,31 @@ void AMyCharacter::UpdateLockOnCamera(float DeltaTime)
 	SpringArm->SocketOffset = FMath::VInterpTo(
 		SpringArm->SocketOffset, SocketTarget, DeltaTime, InterpSpeed);
 	SpringArm->TargetArmLength = FMath::FInterpTo(
-		SpringArm->TargetArmLength, ArmLengthTarget, DeltaTime, InterpSpeed);
+		SpringArm->TargetArmLength, FMath::Max(0.f, ArmLengthTarget), DeltaTime, InterpSpeed);
+}
+
+void AMyCharacter::ResetCameraObstructionRecovery(bool bRestoreCurrentTarget)
+{
+	if (!SpringArm)
+	{
+		return;
+	}
+
+	if (UObstructionRecoverySpringArmComponent* RecoverySpringArm = Cast<UObstructionRecoverySpringArmComponent>(SpringArm))
+	{
+		RecoverySpringArm->ResetObstructionRecovery();
+	}
+
+	if (!bRestoreCurrentTarget)
+	{
+		return;
+	}
+
+	FVector SocketTarget = FVector::ZeroVector;
+	float ArmLengthTarget = 0.f;
+	float InterpSpeed = 0.f;
+	GetCameraTargets(SocketTarget, ArmLengthTarget, InterpSpeed);
+	SpringArm->TargetArmLength = FMath::Max(0.f, ArmLengthTarget);
 }
 
 void AMyCharacter::GetCameraTargets(FVector& OutSocketTarget, float& OutArmLengthTarget, float& OutInterpSpeed) const
@@ -3943,10 +3988,11 @@ void AMyCharacter::SetLockOnTarget(AEnemy* NewTarget)
 		return;
 	}
 
-	bRecenteringCamera = false; // 新增：锁定时中断归中
+	StopCameraRecenter();
 	LockOnComponent->SetLockedTarget(NewTarget);
 	CacheLockOnRotationState();
 	EnterLockOnRotationMode();
+	ResetCameraObstructionRecovery(true);
 }
 
 bool AMyCharacter::TryRetargetLockOnAfterTargetDeath()
@@ -4125,6 +4171,47 @@ void AMyCharacter::DrawDebugInfo() const
 		? ActionStateNames[ActionStateIndex]
 		: TEXT("Invalid");
 	FDebugDrawHelper::Add(FString::Printf(TEXT("State: %s"), ActionStateName), FColor::Yellow);
+
+	if (SpringArm)
+	{
+		const UObstructionRecoverySpringArmComponent* RecoverySpringArm =
+			Cast<UObstructionRecoverySpringArmComponent>(SpringArm);
+		const bool bCollisionFixed = RecoverySpringArm
+			? RecoverySpringArm->IsPhysicallyObstructed()
+			: SpringArm->IsCollisionFixApplied();
+		const bool bRecoveryActive = RecoverySpringArm && RecoverySpringArm->IsObstructionRecoveryActive();
+		if (bCollisionFixed || bRecoveryActive)
+		{
+			FVector CameraSocketTarget = FVector::ZeroVector;
+			float CameraArmTarget = 0.f;
+			float CameraInterpSpeed = 0.f;
+			GetCameraTargets(CameraSocketTarget, CameraArmTarget, CameraInterpSpeed);
+
+			const FVector UnfixedCameraPosition = SpringArm->GetUnfixedCameraPosition();
+			const FVector FixedCameraPosition = SpringArm->GetSocketLocation(USpringArmComponent::SocketName);
+			const float CollisionDisplacement = FVector::Dist(UnfixedCameraPosition, FixedCameraPosition);
+			const float RecoveryAlpha = RecoverySpringArm ? RecoverySpringArm->GetObstructionRecoveryAlpha() : 1.f;
+			const float ObstructionClearElapsed = RecoverySpringArm ? RecoverySpringArm->GetObstructionClearElapsed() : 0.f;
+			FDebugDrawHelper::Add(FString::Printf(
+				TEXT("Camera: %s | Arm %.1f -> %.1f @ %.1f | Offset Y %.1f Z %.1f | Recovery %.3f%s"),
+				bCollisionFixed ? TEXT("Blocked") : TEXT("Clear"),
+				SpringArm->TargetArmLength,
+				CameraArmTarget,
+				CameraInterpSpeed,
+				CameraSocketTarget.Y,
+				CameraSocketTarget.Z,
+				RecoveryAlpha,
+				bRecoveryActive ? TEXT(" [active]") : TEXT("")),
+				bCollisionFixed ? FColor::Orange : FColor::Cyan);
+			FDebugDrawHelper::Add(FString::Printf(
+				TEXT("CameraPos: Fixed Z %.1f | Unfixed Z %.1f | Delta %.1f | Clear %.3fs"),
+				FixedCameraPosition.Z,
+				UnfixedCameraPosition.Z,
+				CollisionDisplacement,
+				ObstructionClearElapsed),
+				bCollisionFixed ? FColor::Orange : FColor::White);
+		}
+	}
 	if (IsCombatPresenceActive())
 	{
 		const float Remaining = FMath::Max(0.f, CombatPresenceExitDelay -
@@ -4214,7 +4301,11 @@ bool AMyCharacter::ShouldInterruptBlock() const
 
 void AMyCharacter::StartCameraRecenter()
 {
-	if (IsLockingOn()) return; // 锁定中不归中
+	if (!CanUpdateCameraRecenter())
+	{
+		StopCameraRecenter();
+		return;
+	}
 
 	// 快照当前朝向作为目标
 	RecenterTargetRotation = GetActorRotation();
@@ -4226,8 +4317,18 @@ void AMyCharacter::StartCameraRecenter()
 
 void AMyCharacter::UpdateCameraRecenter(float DeltaTime)
 {
+	if (!CanUpdateCameraRecenter())
+	{
+		StopCameraRecenter();
+		return;
+	}
+
 	APlayerController* PC = Cast<APlayerController>(GetController());
-	if (!PC) return;
+	if (!PC)
+	{
+		StopCameraRecenter();
+		return;
+	}
 
 	FRotator Current = PC->GetControlRotation();
 
@@ -4241,6 +4342,18 @@ void AMyCharacter::UpdateCameraRecenter(float DeltaTime)
 	{
 		bRecenteringCamera = false;
 	}
+}
+
+bool AMyCharacter::CanUpdateCameraRecenter() const
+{
+	return !IsLockingOn()
+		&& !IsBowAiming()
+		&& !bBonfireServiceProtected
+		&& ActionState != EActionState::EAS_Dead
+		&& ActionState != EActionState::EAS_Stunning
+		&& ActionState != EActionState::EAS_GuardBroken
+		&& Attributes
+		&& Attributes->IsAlive();
 }
 
 // ==================== 状态恢复 Helpers ====================
