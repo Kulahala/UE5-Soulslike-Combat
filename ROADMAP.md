@@ -208,7 +208,7 @@ These TODOs are accepted future work, not permission to start implementation imm
   Prerequisite: `TODO-02C` has a durable clear event in the first authored level. Add one authored reward/drop-table path shared by encounter completion and fixed world rewards. Verify a single equipment reward and Gold write-through. Do not add random affixes, durability, crafting, merchants, or inventory sorting.
 
 - [ ] **TODO-06B: First Boss Encounter v1**
-  Add one Boss fog-boundary presentation, configured first Boss as an `AEnemy` variant, fixed Gold plus Remnant/Emblem reward, and Boss completion persistence. Do not introduce a Boss-specific C++ base unless the existing enemy and encounter boundaries demonstrably fail.
+  Add one Boss fog-boundary presentation, configured first Boss as an `AEnemy` variant, fixed Gold plus Remnant/Emblem reward, and Boss completion persistence. The first Boss must escalate through `Phase 1 -> Transition -> Phase 2` and include at least one authored complete attack-chain pattern: AI selects that pattern once rather than re-rolling every hit, so a shared prefix may branch as `M1 -> M2 -> M3 -> M4` or `M1 -> M2 -> M3 -> M5`. The later 06B plan must choose from the real animation assets whether those nodes use explicit separate-Montage handoffs or Sections inside one Pattern Montage, while preserving pose continuity and interrupt cleanup. Do not introduce a Boss-specific C++ base unless the existing enemy and encounter boundaries demonstrably fail.
 
 - [ ] **TODO-06C: Completion Flow v1**
   Add a completion screen and return to `MainMenu`. `Continue` must return to the final checkpoint with the Boss defeated, reward retained, and arena boundary open.
