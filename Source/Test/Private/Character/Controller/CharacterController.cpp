@@ -340,11 +340,6 @@ void ACharacterController::Input_AttackPressed()
 
 	if (AMyCharacter* MyCharacter = GetMyCharacter())
 	{
-		if (MyCharacter->IsComboWindowOpen())
-		{
-			MyCharacter->SetComboInputReceived(true);
-			return;
-		}
 		MyCharacter->OnAttackInputPressed();
 	}
 }

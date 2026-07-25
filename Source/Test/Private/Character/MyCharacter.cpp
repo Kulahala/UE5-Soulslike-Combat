@@ -135,6 +135,7 @@ void AMyCharacter::BeginPlay()
 
 void AMyCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	InvalidateActiveAttackMontagePlayback();
 	bBonfireServiceProtected = false;
 	bFailNextProjectilePrepareForDebug = false;
 	ClearCombatPresence();
@@ -348,16 +349,22 @@ bool AMyCharacter::PerformSprintAttack()
 
 	// 7. 播放攻击蒙太奇（关键：必须保留 Montage_Play + Montage_SetEndDelegate 模式！）
 	// 原因：当前实现依赖手动绑定 delegate，不能简化为 PlayAnimMontage()
-	ActionState = EActionState::EAS_Attacking;
 	if (AnimInstance->Montage_Play(SprintConfig->Montage) <= 0.f)
 	{
 		ClearAttackMotionWarpTarget();
+		RestoreRotationMode();
+		if (Attributes)
+		{
+			Attributes->ResumeStaminaRegen();
+		}
+		return false;
 	}
+	ActionState = EActionState::EAS_Attacking;
+	BeginAttackMontagePlayback(AnimInstance, SprintConfig->Montage);
 
 	// 冲刺攻击发出噪音
 	EmitNoise(AttackNoiseLoudness, AttackNoiseRange);
 
-	BindMontageEndDelegate(AnimInstance, SprintConfig->Montage, &AMyCharacter::OnAttackMontageEnded);
 	return true;
 }
 
@@ -381,24 +388,38 @@ void AMyCharacter::OnAttackInputPressed()
 	if (IsBowAiming())
 	{
 		bBowChargeInputHeld = true;
-		if (IsBowReFireGateBlocked())
+		switch (ResolvePlayerActionIntent(EPlayerActionIntent::AttackPress))
 		{
-			if (CanBufferBowChargeInput())
-			{
-				bBowChargeInputBuffered = true;
-			}
+		case EPlayerActionIntentResolution::BufferOnce:
+			bBowChargeInputBuffered = true;
+			UpdateAimReticleHUD();
+			return;
+		case EPlayerActionIntentResolution::StartNow:
+			bBowChargeInputBuffered = false;
+			StartBowCharge();
+			return;
+		case EPlayerActionIntentResolution::EndHeld:
+		case EPlayerActionIntentResolution::Reject:
+		default:
 			UpdateAimReticleHUD();
 			return;
 		}
+	}
 
-		bBowChargeInputBuffered = false;
-		StartBowCharge();
+	const EPlayerActionIntentResolution Resolution = ResolvePlayerActionIntent(EPlayerActionIntent::AttackPress);
+	if (Resolution == EPlayerActionIntentResolution::BufferOnce)
+	{
+		bComboInputReceived = true;
+		return;
+	}
+	if (Resolution != EPlayerActionIntentResolution::StartNow)
+	{
 		return;
 	}
 
 	if (ShouldUseSprintAttack())
 	{
-		Attack();
+		TryStartAction(EPlayerActionType::Attack);
 		return;
 	}
 	if (!CanStartChargedAttack())
@@ -417,6 +438,7 @@ void AMyCharacter::OnAttackInputReleased()
 	const bool bBowInputOwned = IsBowAiming() || bBowChargeInputHeld || bBowChargeInputBuffered || bBowDrawInputHeld;
 	if (bBowInputOwned)
 	{
+		const EPlayerActionIntentResolution Resolution = ResolvePlayerActionIntent(EPlayerActionIntent::AttackRelease);
 		const bool bWasDrawingBow = bBowDrawInputHeld;
 		ClearBowChargeInputState();
 		bBowDrawInputHeld = false;
@@ -430,7 +452,7 @@ void AMyCharacter::OnAttackInputReleased()
 			return;
 		}
 
-		if (!bBowDrawReady)
+		if (Resolution != EPlayerActionIntentResolution::StartNow)
 		{
 			CancelBowCharge(false);
 			return;
@@ -440,6 +462,11 @@ void AMyCharacter::OnAttackInputReleased()
 		{
 			CancelBowCharge(false);
 		}
+		return;
+	}
+
+	if (ResolvePlayerActionIntent(EPlayerActionIntent::AttackRelease) != EPlayerActionIntentResolution::EndHeld)
+	{
 		return;
 	}
 
@@ -461,6 +488,11 @@ void AMyCharacter::OnAttackInputReleased()
 
 void AMyCharacter::OnAttackInputCanceled()
 {
+	if (ResolvePlayerActionIntent(EPlayerActionIntent::AttackCancel) != EPlayerActionIntentResolution::EndHeld)
+	{
+		return;
+	}
+
 	if (IsBowAiming())
 	{
 		CancelBowCharge(false);
@@ -475,8 +507,10 @@ void AMyCharacter::OnAttackInputCanceled()
 		if (AnimInstance && AttackConfig && AttackConfig->ChargedAttack.Montage
 			&& AnimInstance->Montage_IsPlaying(AttackConfig->ChargedAttack.Montage))
 		{
-			// 输入取消必须实际停止蓄力蒙太奇；结束回调再统一恢复攻击状态。
+			// 输入取消先失效当前 token，再主动恢复；迟到的 End Delegate 不能回写后续动作。
+			InvalidateActiveAttackMontagePlayback();
 			AnimInstance->Montage_Stop(0.15f, AttackConfig->ChargedAttack.Montage);
+			CleanupInterruptedAttack();
 			return;
 		}
 
@@ -516,11 +550,14 @@ void AMyCharacter::EnterChargeMode()
 	PlayMontageSection(AttackConfig->ChargedAttack.Montage, ChargeSectionName);
 
 	UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
-	if (AnimInstance)
+	if (AnimInstance && AnimInstance->Montage_IsPlaying(AttackConfig->ChargedAttack.Montage))
 	{
-		BindMontageEndDelegate(AnimInstance, AttackConfig->ChargedAttack.Montage,
-		                       &AMyCharacter::OnAttackMontageEnded);
+		BeginAttackMontagePlayback(AnimInstance, AttackConfig->ChargedAttack.Montage);
+		return;
 	}
+
+	UE_LOG(LogTemp, Warning, TEXT("%s: ChargedAttack montage could not play."), *GetName());
+	RecoverFromAttackMontageEnd();
 }
 
 void AMyCharacter::PerformChargedRelease()
@@ -568,7 +605,16 @@ void AMyCharacter::PerformChargedRelease()
 
 void AMyCharacter::Attack()
 {
-	TryStartAction(EPlayerActionType::Attack);
+	const EPlayerActionIntentResolution Resolution = ResolvePlayerActionIntent(EPlayerActionIntent::AttackPress);
+	if (Resolution == EPlayerActionIntentResolution::BufferOnce)
+	{
+		bComboInputReceived = true;
+		return;
+	}
+	if (Resolution == EPlayerActionIntentResolution::StartNow)
+	{
+		TryStartAction(EPlayerActionType::Attack);
+	}
 }
 
 bool AMyCharacter::StartAttackAction()
@@ -641,6 +687,12 @@ bool AMyCharacter::StartComboSegment(int32 SegmentIndex, EComboPlaybackMode Play
 			UE_LOG(LogTemp, Warning, TEXT("%s: StartComboSegment - continuation montage is not playing"), *GetName());
 			return false;
 		}
+
+		if (!RebindActiveAttackMontageEndDelegate(ContinuationAnimInstance, MontageToPlay))
+		{
+			UE_LOG(LogTemp, Warning, TEXT("%s: StartComboSegment - active attack playback is unavailable for continuation."), *GetName());
+			return false;
+		}
 	}
 
 	if (Attributes)
@@ -660,12 +712,17 @@ bool AMyCharacter::StartComboSegment(int32 SegmentIndex, EComboPlaybackMode Play
 
 	if (PlaybackMode == EComboPlaybackMode::NewPlayback)
 	{
+		const uint32 PreviousPlaybackId = ActiveAttackPlaybackId;
 		PlayAttackMontage(Segment->SectionName);
+		if (ActiveAttackMontage != MontageToPlay || ActiveAttackPlaybackId == PreviousPlaybackId)
+		{
+			RecoverFromAttackMontageEnd();
+			return false;
+		}
 	}
 	else
 	{
 		ContinuationAnimInstance->Montage_JumpToSection(Segment->SectionName, MontageToPlay);
-		BindMontageEndDelegate(ContinuationAnimInstance, MontageToPlay, &AMyCharacter::OnAttackMontageEnded);
 	}
 
 	EmitNoise(AttackNoiseLoudness, AttackNoiseRange);
@@ -689,9 +746,16 @@ void AMyCharacter::PlayAttackMontage(const FName& SectionName)
 		return;
 	}
 
-	PlayMontageSection(MontageToPlay, SectionName);
+	UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
+	if (!AnimInstance || AnimInstance->Montage_Play(MontageToPlay) <= 0.f)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s: PlayAttackMontage failed to play '%s'."),
+		       *GetName(), *GetNameSafe(MontageToPlay));
+		return;
+	}
 
-	BindMontageEndDelegate(GetMesh()->GetAnimInstance(), MontageToPlay, &AMyCharacter::OnAttackMontageEnded);
+	AnimInstance->Montage_JumpToSection(SectionName, MontageToPlay);
+	BeginAttackMontagePlayback(AnimInstance, MontageToPlay);
 }
 
 void AMyCharacter::OpenComboWindow()
@@ -843,7 +907,7 @@ void AMyCharacter::OpenActionCancelWindow()
 	// 攻击开始会先退出举盾，正常情况下 bIsBlocking 与 EAS_Attacking 不并存。
 	if (bBlockInputHeld)
 	{
-		TryStartAction(EPlayerActionType::Block);
+		TryResumeBlock();
 	}
 }
 
@@ -916,6 +980,7 @@ void AMyCharacter::GetHit_Implementation(const FVector& ImpactPoint, AActor* Hit
 	}
 	else if (Attributes->IsAlive() && PendingHitContext.bApplyStun)
 	{
+		InvalidateActiveAttackMontagePlayback();
 		ResetCombo();
 		CloseActionCancelWindow();
 		InterruptBlock(false);
@@ -935,6 +1000,7 @@ void AMyCharacter::GetHit_Implementation(const FVector& ImpactPoint, AActor* Hit
 
 void AMyCharacter::Die()
 {
+	InvalidateActiveAttackMontagePlayback();
 	bBonfireServiceProtected = false;
 	bFailNextProjectilePrepareForDebug = false;
 	ClearCombatPresence();
@@ -1026,6 +1092,7 @@ void AMyCharacter::StartGuardBreak()
 	}
 
 	GetWorldTimerManager().ClearTimer(ExhaustionTimerHandle);
+	InvalidateActiveAttackMontagePlayback();
 	bPendingExhaustedAfterAttack = false;
 	ResetCombo();
 	CloseActionCancelWindow();
@@ -1118,10 +1185,8 @@ bool AMyCharacter::CanAttack() const
 
 bool AMyCharacter::CanStartBlock() const
 {
-	return EquippedShield
-		&& !IsBowEquipped()
-		&& ActionState == EActionState::EAS_UnOccupied
-		&& !GetCharacterMovement()->IsFalling();
+	return ActionState == EActionState::EAS_UnOccupied
+		&& IsActionStartPreflightValid(EPlayerActionType::Block, false);
 }
 
 void AMyCharacter::StartBlockInput()
@@ -1130,17 +1195,37 @@ void AMyCharacter::StartBlockInput()
 
 	bBlockInputHeld = true;
 	bIsSprinting = false;
-	if (IsBowEquipped())
+	const EPlayerActionIntentResolution Resolution = ResolvePlayerActionIntent(EPlayerActionIntent::BlockPress);
+	if (Resolution == EPlayerActionIntentResolution::StartNow)
 	{
-		TryStartAction(EPlayerActionType::RangedAim);
+		const EPlayerActionType TargetAction = IsBowEquipped()
+			? EPlayerActionType::RangedAim
+			: EPlayerActionType::Block;
+		if (TryStartAction(TargetAction))
+		{
+			return;
+		}
+	}
+
+	// 仅攻击起手 / 活跃期保留 held 输入，供同一攻击的作者化 CancelWindow 触发一次 synthetic retry。
+	if (!ShouldRetainBlockInputForAttackCancel())
+	{
+		bBlockInputHeld = false;
+	}
+	if (Resolution == EPlayerActionIntentResolution::StartNow)
+	{
 		return;
 	}
-	TryResumeBlock();
 }
 
 void AMyCharacter::ReleaseBlockInput()
 {
 	bBlockInputHeld = false;
+	if (ResolvePlayerActionIntent(EPlayerActionIntent::BlockRelease) != EPlayerActionIntentResolution::EndHeld)
+	{
+		return;
+	}
+
 	if (IsBowAiming())
 	{
 		// 正常收起瞄准后，实际未结束的 Release Montage 仍会阻止再次放箭。
@@ -1163,16 +1248,17 @@ void AMyCharacter::InterruptBlock(bool bClearHeld)
 
 void AMyCharacter::TryResumeBlock()
 {
-	if (IsBowEquipped())
+	if (!bBlockInputHeld)
 	{
-		if (bBlockInputHeld && ActionState == EActionState::EAS_UnOccupied)
-		{
-			TryStartAction(EPlayerActionType::RangedAim);
-		}
 		return;
 	}
 
-	TryStartAction(EPlayerActionType::Block);
+	if (ResolvePlayerActionIntent(EPlayerActionIntent::BlockPress) == EPlayerActionIntentResolution::StartNow)
+	{
+		TryStartAction(IsBowEquipped()
+			? EPlayerActionType::RangedAim
+			: EPlayerActionType::Block);
+	}
 }
 
 FBlockResult AMyCharacter::TryBlockHit(const FCombatHitRequest& Request)
@@ -1288,17 +1374,16 @@ FBlockResult AMyCharacter::TryBlockHit(const FCombatHitRequest& Request)
 
 bool AMyCharacter::CanStartParry() const
 {
-	return EquippedShield
-		&& !IsBowEquipped()
-		&& ActionState == EActionState::EAS_UnOccupied
-		&& !bParryOnCooldown
-		&& Attributes
-		&& !GetCharacterMovement()->IsFalling();
+	return ActionState == EActionState::EAS_UnOccupied
+		&& IsActionStartPreflightValid(EPlayerActionType::Parry, false);
 }
 
 void AMyCharacter::Input_Parry()
 {
-	TryStartAction(EPlayerActionType::Parry);
+	if (ResolvePlayerActionIntent(EPlayerActionIntent::Parry) == EPlayerActionIntentResolution::StartNow)
+	{
+		TryStartAction(EPlayerActionType::Parry);
+	}
 }
 
 void AMyCharacter::SetParryActive(bool bActive)
@@ -1360,13 +1445,15 @@ void AMyCharacter::OnParryMontageEnded(UAnimMontage* Montage, bool bInterrupted)
 bool AMyCharacter::CanDodge() const
 {
 	return ActionState == EActionState::EAS_UnOccupied
-		&& !GetCharacterMovement()->IsFalling()
-		&& Attributes;
+		&& IsActionStartPreflightValid(EPlayerActionType::Dodge, false);
 }
 
 void AMyCharacter::Dodge()
 {
-	TryStartAction(EPlayerActionType::Dodge);
+	if (ResolvePlayerActionIntent(EPlayerActionIntent::Dodge) == EPlayerActionIntentResolution::StartNow)
+	{
+		TryStartAction(EPlayerActionType::Dodge);
+	}
 }
 
 FVector AMyCharacter::ComputeDodgeDirection() const
@@ -1510,6 +1597,7 @@ void AMyCharacter::SetBonfireServiceProtection(bool bEnabled)
 	}
 
 	ClearCombatPresence();
+	InvalidateActiveAttackMontagePlayback();
 	ResetCombo();
 	CloseActionCancelWindow();
 	CancelChargeInputState();
@@ -2008,6 +2096,7 @@ void AMyCharacter::DestroyMaterializedLoadoutSlot(EItemEquipmentSlot EquipmentSl
 {
 	if (EquipmentSlot == EItemEquipmentSlot::MainHand)
 	{
+		InvalidateActiveAttackMontagePlayback();
 		CancelBowAim(true);
 		if (IsValid(EquippedWeapon))
 		{
@@ -2117,93 +2206,268 @@ void AMyCharacter::RefreshInteractionPrompt()
 bool AMyCharacter::CanUsePotion() const
 {
 	return (ActionState == EActionState::EAS_UnOccupied || ActionState == EActionState::EAS_Exhausted)
-		&& !GetCharacterMovement()->IsFalling()
-		&& Attributes && Attributes->HasPotion()
-		&& !bPotionOnCooldown
-		&& Attributes->GetHealthPercent() < 1.0f;
+		&& IsActionStartPreflightValid(EPlayerActionType::Potion, false);
 }
 
 void AMyCharacter::UsePotion()
 {
-	TryStartAction(EPlayerActionType::Potion);
+	if (ResolvePlayerActionIntent(EPlayerActionIntent::Potion) == EPlayerActionIntentResolution::StartNow)
+	{
+		TryStartAction(EPlayerActionType::Potion);
+	}
 }
 
-bool AMyCharacter::TryStartAction(EPlayerActionType Action)
+bool AMyCharacter::IsBowCommittedActionActive() const
 {
-	/*
-	 * 玩家动作统一入口。
-	 * 这里先判断“当前动作能否被目标动作取消”，再启动目标动作，避免各输入函数各自维护优先级。
-	 * Block 是按住输入维持的常驻姿态：允许被更高优先级动作打断，但目标动作资源校验失败时不提前丢盾。
-	 */
-	const EPlayerActionType CurrentAction = GetCurrentPlayerActionType();
-	const bool bIsBowReleaseFromAim = CurrentAction == EPlayerActionType::RangedAim
-		&& Action == EPlayerActionType::RangedRelease;
-	const bool bShouldCancel = !bIsBowReleaseFromAim && CanCancelCurrentActionWith(Action);
-	if (CurrentAction != EPlayerActionType::None && CurrentAction != Action && !bShouldCancel && !bIsBowReleaseFromAim)
-	{
-		return false;
-	}
+	return IsBowAiming()
+		&& (bBowDrawInputHeld || bBowDrawReady || IsValid(PreparedBowProjectile)
+			|| bBowReleasePresentationPending || ActiveBowDrawMontage || ActiveBowReleaseMontage || ActiveBowLoadMontage);
+}
 
-	if (bShouldCancel)
-	{
-		// Block 是常驻姿态，目标动作会在资源校验通过后自行 InterruptBlock()，避免目标资源缺失时丢失举盾。
-		if (CurrentAction != EPlayerActionType::Block)
-		{
-			CleanupInterruptedAction(CurrentAction);
-		}
-	}
+bool AMyCharacter::ShouldRetainBlockInputForAttackCancel() const
+{
+	return GetCurrentPlayerActionType() == EPlayerActionType::Attack && !bActionCancelWindowOpen;
+}
 
-	bool bStarted = false;
+bool AMyCharacter::IsActionStartPreflightValid(EPlayerActionType Action, bool bRequireCommittedResource) const
+{
+	UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
 
 	switch (Action)
 	{
 	case EPlayerActionType::Attack:
-		bStarted = StartAttackAction();
-		break;
+		return CanAttack() || ShouldUseSprintAttack();
 	case EPlayerActionType::Dodge:
-		bStarted = CanDodge() && StartDodgeAction();
-		break;
+		return AnimInstance && GetDodgeMontage() && Attributes && !GetCharacterMovement()->IsFalling()
+			&& (!bRequireCommittedResource || Attributes->CheckStamina(GetDodgeStaminaCost(false)));
 	case EPlayerActionType::Block:
-		if (bIsBlocking)
-		{
-			bStarted = true;
-			break;
-		}
-		if (!bBlockInputHeld)
-		{
-			bStarted = false;
-			break;
-		}
-		bStarted = CanStartBlock() && StartBlockAction();
-		break;
+		return bBlockInputHeld && EquippedShield && !IsBowEquipped() && AnimInstance && GetBlockMontage()
+			&& !GetCharacterMovement()->IsFalling();
 	case EPlayerActionType::Parry:
-		bStarted = CanStartParry() && StartParryAction();
-		break;
+		return EquippedShield && !IsBowEquipped() && AnimInstance && GetParryMontage() && !bParryOnCooldown
+			&& Attributes && !GetCharacterMovement()->IsFalling()
+			&& (!bRequireCommittedResource || Attributes->CheckStamina(EquippedShield->GetParryStaminaCost()));
 	case EPlayerActionType::Potion:
-		bStarted = CanUsePotion() && StartPotionAction();
-		break;
+	{
+		const UPlayerActionConfigDataAsset* ActionConfig = GetActionConfig();
+		UAnimMontage* PotionMontage = GetPotionMontage();
+		return ActionConfig && Attributes && Attributes->HasPotion() && !bPotionOnCooldown
+			&& Attributes->GetHealthPercent() < 1.f && !GetCharacterMovement()->IsFalling()
+			&& (!PotionMontage || AnimInstance);
+	}
 	case EPlayerActionType::RangedAim:
-		bStarted = IsBowAiming() || (bBlockInputHeld && CanStartBowAim() && StartBowAimAction());
-		break;
+	{
+		ABow* Bow = GetEquippedBow();
+		if (!Bow || !bBlockInputHeld || bIsBlocking || !Attributes || !Attributes->IsAlive()
+			|| bBonfireServiceProtected || GetCharacterMovement()->IsFalling())
+		{
+			return false;
+		}
+
+		FString FailureReason;
+		return Bow->HasValidProjectileConfig(FailureReason);
+	}
 	case EPlayerActionType::RangedRelease:
-		bStarted = bIsBowReleaseFromAim && ReleaseBowArrow();
-		break;
+		return IsBowAiming() && bBowDrawReady && !bBowReleasePresentationPending
+			&& IsValid(PreparedBowProjectile) && PreparedBowProjectile->IsPreparedForActivation();
 	case EPlayerActionType::HitReact:
 	case EPlayerActionType::Death:
 	case EPlayerActionType::None:
 	default:
-		bStarted = false;
-		break;
+		return false;
 	}
+}
 
-	if (bShouldCancel && !bStarted)
+AMyCharacter::EPlayerActionIntentResolution AMyCharacter::ResolvePlayerActionIntent(EPlayerActionIntent Intent) const
+{
+	const EPlayerActionType CurrentAction = GetCurrentPlayerActionType();
+
+	switch (Intent)
 	{
-		UE_LOG(LogTemp, Warning,
-		       TEXT("%s: Cancel from %s to %s was allowed, but the target action failed to start. Check stamina, cooldown and PlayerActionConfigDataAsset montage bindings."),
-		       *GetName(), *UEnum::GetValueAsString(CurrentAction), *UEnum::GetValueAsString(Action));
+	case EPlayerActionIntent::AttackPress:
+		if (IsBowAiming())
+		{
+			if (IsBowReFireGateBlocked())
+			{
+				return CanBufferBowChargeInput()
+					? EPlayerActionIntentResolution::BufferOnce
+					: EPlayerActionIntentResolution::Reject;
+			}
+
+			return !bBowDrawInputHeld && !IsValid(PreparedBowProjectile)
+				? EPlayerActionIntentResolution::StartNow
+				: EPlayerActionIntentResolution::Reject;
+		}
+
+		// Block 是可逆 held 状态；不能因其 ActionState 仍为 UnOccupied 而让 LMB 绕过防御。
+		if (CurrentAction == EPlayerActionType::Block || bIsBlocking)
+		{
+			return EPlayerActionIntentResolution::Reject;
+		}
+
+		if (CurrentAction == EPlayerActionType::Attack)
+		{
+			return bComboWindowOpen && !bComboInputReceived
+				? EPlayerActionIntentResolution::BufferOnce
+				: EPlayerActionIntentResolution::Reject;
+		}
+
+		return ActionState == EActionState::EAS_UnOccupied
+			&& IsActionStartPreflightValid(EPlayerActionType::Attack, false)
+			? EPlayerActionIntentResolution::StartNow
+			: EPlayerActionIntentResolution::Reject;
+
+	case EPlayerActionIntent::AttackRelease:
+		if (IsBowAiming() || bBowChargeInputHeld || bBowChargeInputBuffered || bBowDrawInputHeld)
+		{
+			if (!IsBowAiming() || !bBowDrawInputHeld || !bBowDrawReady)
+			{
+				return EPlayerActionIntentResolution::EndHeld;
+			}
+
+			return IsActionStartPreflightValid(EPlayerActionType::RangedRelease, false)
+				? EPlayerActionIntentResolution::StartNow
+				: EPlayerActionIntentResolution::EndHeld;
+		}
+
+		return (bAttackInputHeld || bIsChargingAttack)
+			? EPlayerActionIntentResolution::EndHeld
+			: EPlayerActionIntentResolution::Reject;
+
+	case EPlayerActionIntent::AttackCancel:
+		if (IsBowAiming())
+		{
+			return EPlayerActionIntentResolution::EndHeld;
+		}
+
+		return (bAttackInputHeld || bIsChargingAttack)
+			? EPlayerActionIntentResolution::EndHeld
+			: EPlayerActionIntentResolution::Reject;
+
+	case EPlayerActionIntent::BlockPress:
+	{
+		const EPlayerActionType TargetAction = IsBowEquipped()
+			? EPlayerActionType::RangedAim
+			: EPlayerActionType::Block;
+		if (CurrentAction == TargetAction)
+		{
+			return EPlayerActionIntentResolution::StartNow;
+		}
+
+		if (CurrentAction == EPlayerActionType::None)
+		{
+			return ActionState == EActionState::EAS_UnOccupied
+				&& IsActionStartPreflightValid(TargetAction, false)
+				? EPlayerActionIntentResolution::StartNow
+				: EPlayerActionIntentResolution::Reject;
+		}
+
+		if (CurrentAction == EPlayerActionType::Attack && bActionCancelWindowOpen)
+		{
+			return IsActionStartPreflightValid(TargetAction, true)
+				? EPlayerActionIntentResolution::StartNow
+				: EPlayerActionIntentResolution::Reject;
+		}
+
+		return EPlayerActionIntentResolution::Reject;
 	}
 
-	return bStarted;
+	case EPlayerActionIntent::BlockRelease:
+		return CurrentAction == EPlayerActionType::Block || CurrentAction == EPlayerActionType::RangedAim
+			? EPlayerActionIntentResolution::EndHeld
+			: EPlayerActionIntentResolution::Reject;
+
+	case EPlayerActionIntent::Dodge:
+	case EPlayerActionIntent::Parry:
+	case EPlayerActionIntent::Potion:
+	{
+		const EPlayerActionType TargetAction = Intent == EPlayerActionIntent::Dodge
+			? EPlayerActionType::Dodge
+			: Intent == EPlayerActionIntent::Parry
+				? EPlayerActionType::Parry
+				: EPlayerActionType::Potion;
+
+		if (CurrentAction == EPlayerActionType::None)
+		{
+			const bool bStateAllowsStart = TargetAction == EPlayerActionType::Potion
+				? (ActionState == EActionState::EAS_UnOccupied || ActionState == EActionState::EAS_Exhausted)
+				: ActionState == EActionState::EAS_UnOccupied;
+			return bStateAllowsStart && IsActionStartPreflightValid(TargetAction, false)
+				? EPlayerActionIntentResolution::StartNow
+				: EPlayerActionIntentResolution::Reject;
+		}
+
+		if (CurrentAction == EPlayerActionType::Attack)
+		{
+			return bActionCancelWindowOpen && IsActionStartPreflightValid(TargetAction, true)
+				? EPlayerActionIntentResolution::StartNow
+				: EPlayerActionIntentResolution::Reject;
+		}
+
+		if (TargetAction != EPlayerActionType::Potion && CurrentAction == EPlayerActionType::Block)
+		{
+			return IsActionStartPreflightValid(TargetAction, true)
+				? EPlayerActionIntentResolution::StartNow
+				: EPlayerActionIntentResolution::Reject;
+		}
+
+		if (TargetAction != EPlayerActionType::Potion && CurrentAction == EPlayerActionType::RangedAim
+			&& !IsBowCommittedActionActive())
+		{
+			return IsActionStartPreflightValid(TargetAction, true)
+				? EPlayerActionIntentResolution::StartNow
+				: EPlayerActionIntentResolution::Reject;
+		}
+
+		return EPlayerActionIntentResolution::Reject;
+	}
+
+	default:
+		return EPlayerActionIntentResolution::Reject;
+	}
+}
+
+bool AMyCharacter::TryStartAction(EPlayerActionType Action)
+{
+	const EPlayerActionType CurrentAction = GetCurrentPlayerActionType();
+	const bool bWillInterruptExistingAction = CurrentAction != EPlayerActionType::None && CurrentAction != Action;
+	if (!IsActionStartPreflightValid(Action, bWillInterruptExistingAction))
+	{
+		return false;
+	}
+
+	if (CurrentAction == EPlayerActionType::Attack && Action != EPlayerActionType::Attack)
+	{
+		CleanupInterruptedAction(CurrentAction);
+	}
+	else if (CurrentAction == EPlayerActionType::RangedAim && Action != EPlayerActionType::RangedAim
+		&& Action != EPlayerActionType::RangedRelease)
+	{
+		CleanupInterruptedAction(CurrentAction);
+	}
+
+	switch (Action)
+	{
+	case EPlayerActionType::Attack:
+		return StartAttackAction();
+	case EPlayerActionType::Dodge:
+		return StartDodgeAction();
+	case EPlayerActionType::Block:
+		return bIsBlocking || StartBlockAction();
+	case EPlayerActionType::Parry:
+		return StartParryAction();
+	case EPlayerActionType::Potion:
+		return StartPotionAction();
+	case EPlayerActionType::RangedAim:
+		return IsBowAiming() || StartBowAimAction();
+	case EPlayerActionType::RangedRelease:
+		return ReleaseBowArrow();
+	case EPlayerActionType::HitReact:
+	case EPlayerActionType::Death:
+	case EPlayerActionType::None:
+	default:
+		return false;
+	}
 }
 
 bool AMyCharacter::StartDodgeAction()
@@ -2215,6 +2479,8 @@ bool AMyCharacter::StartDodgeAction()
 		return false;
 	}
 
+	// Dodge 是承诺式动作；即使它从 Attack CancelWindow 或 Block 进入，也不能在结束后自动补播 held Block / Aim。
+	bBlockInputHeld = false;
 	ResetCombo();
 
 	if (bIsBlocking) InterruptBlock(false);
@@ -2485,6 +2751,8 @@ bool AMyCharacter::StartParryAction()
 		return false;
 	}
 
+	// Parry 成功启动后由自身占有输入，结束前不保留此前的防御 held 意图。
+	bBlockInputHeld = false;
 	if (bIsBlocking)
 	{
 		InterruptBlock(false);
@@ -2529,24 +2797,6 @@ EPlayerActionType AMyCharacter::GetCurrentPlayerActionType() const
 	default:
 		return EPlayerActionType::None;
 	}
-}
-
-int32 AMyCharacter::GetActionPriority(EPlayerActionType Action) const
-{
-	const UPlayerActionConfigDataAsset* ActionConfig = GetActionConfig();
-	return ActionConfig ? ActionConfig->GetActionPriority(Action) : MIN_int32;
-}
-
-bool AMyCharacter::IsStrictlyHigherPriority(EPlayerActionType NewAction, EPlayerActionType CurrentAction) const
-{
-	const UPlayerActionConfigDataAsset* ActionConfig = GetActionConfig();
-	return ActionConfig && ActionConfig->IsStrictlyHigherPriority(NewAction, CurrentAction);
-}
-
-bool AMyCharacter::IsAtLeastSamePriority(EPlayerActionType NewAction, EPlayerActionType CurrentAction) const
-{
-	const UPlayerActionConfigDataAsset* ActionConfig = GetActionConfig();
-	return ActionConfig && ActionConfig->IsAtLeastSamePriority(NewAction, CurrentAction);
 }
 
 float AMyCharacter::GetDodgeStaminaCost(bool bLogFallback) const
@@ -2620,62 +2870,6 @@ FName AMyCharacter::GetBlockRaiseSection() const
 	return FName("BlockRaise");
 }
 
-bool AMyCharacter::CanCancelCurrentActionWith(EPlayerActionType NewAction) const
-{
-	switch (NewAction)
-	{
-	case EPlayerActionType::Attack:
-	case EPlayerActionType::Dodge:
-	case EPlayerActionType::Block:
-	case EPlayerActionType::Parry:
-	case EPlayerActionType::Potion:
-		break;
-	case EPlayerActionType::RangedRelease:
-		return GetCurrentPlayerActionType() == EPlayerActionType::RangedAim;
-	case EPlayerActionType::HitReact:
-	case EPlayerActionType::Death:
-	case EPlayerActionType::RangedAim:
-	case EPlayerActionType::None:
-	default:
-		return false;
-	}
-
-	const EPlayerActionType CurrentAction = GetCurrentPlayerActionType();
-	if (CurrentAction == EPlayerActionType::None || CurrentAction == NewAction)
-	{
-		return false;
-	}
-
-	if (CurrentAction == EPlayerActionType::HitReact || CurrentAction == EPlayerActionType::Death)
-	{
-		return false;
-	}
-
-	// 举盾是按住输入维持的姿态，不依赖蒙太奇 CancelWindow；其他动作由 NotifyState 开窗。
-	if (CurrentAction != EPlayerActionType::Block && CurrentAction != EPlayerActionType::RangedAim
-		&& !bActionCancelWindowOpen)
-	{
-		return false;
-	}
-
-	if (!IsStrictlyHigherPriority(NewAction, CurrentAction))
-	{
-		return false;
-	}
-
-	if (NewAction == EPlayerActionType::Block && !bBlockInputHeld)
-	{
-		return false;
-	}
-
-	if (CurrentAction == EPlayerActionType::Attack && NewAction != EPlayerActionType::Potion && ShouldRecoverToExhausted_Attack())
-	{
-		return false;
-	}
-
-	return true;
-}
-
 void AMyCharacter::CleanupInterruptedAction(EPlayerActionType InterruptedAction)
 {
 	CloseActionCancelWindow();
@@ -2731,6 +2925,8 @@ bool AMyCharacter::StartPotionAction()
 
 	if (Attributes->UsePotion())
 	{
+		// Potion 成功消费后不自动恢复此前按住的 Block / Aim；玩家需松开再按。
+		bBlockInputHeld = false;
 		if (bIsSprinting) StopSprinting();
 
 		if (PotionMontage)
@@ -2857,13 +3053,8 @@ bool AMyCharacter::IsBowAiming() const
 
 bool AMyCharacter::CanStartBowAim() const
 {
-	return IsBowEquipped()
-		&& !bIsBlocking
-		&& ActionState == EActionState::EAS_UnOccupied
-		&& Attributes
-		&& Attributes->IsAlive()
-		&& !bBonfireServiceProtected
-		&& !GetCharacterMovement()->IsFalling();
+	return ActionState == EActionState::EAS_UnOccupied
+		&& IsActionStartPreflightValid(EPlayerActionType::RangedAim, false);
 }
 
 bool AMyCharacter::IsBowReFireGateBlocked() const
@@ -3514,6 +3705,68 @@ void AMyCharacter::BindMontageEndDelegate(UAnimInstance* AnimInstance, UAnimMont
 	FOnMontageEnded EndDelegate;
 	EndDelegate.BindUObject(this, Callback);
 	AnimInstance->Montage_SetEndDelegate(EndDelegate, Montage);
+}
+
+bool AMyCharacter::BeginAttackMontagePlayback(UAnimInstance* AnimInstance, UAnimMontage* Montage)
+{
+	if (!AnimInstance || !Montage)
+	{
+		return false;
+	}
+
+	++NextAttackPlaybackId;
+	if (NextAttackPlaybackId == 0)
+	{
+		++NextAttackPlaybackId;
+	}
+
+	ActiveAttackMontage = Montage;
+	ActiveAttackPlaybackId = NextAttackPlaybackId;
+
+	FOnMontageEnded EndDelegate;
+	const uint32 PlaybackId = ActiveAttackPlaybackId;
+	EndDelegate.BindWeakLambda(this, [this, PlaybackId](UAnimMontage* EndedMontage, bool bInterrupted)
+	{
+		HandleActiveAttackMontageEnded(EndedMontage, bInterrupted, PlaybackId);
+	});
+	AnimInstance->Montage_SetEndDelegate(EndDelegate, Montage);
+	return true;
+}
+
+bool AMyCharacter::RebindActiveAttackMontageEndDelegate(UAnimInstance* AnimInstance, UAnimMontage* Montage)
+{
+	if (!AnimInstance || !Montage || ActiveAttackMontage != Montage || ActiveAttackPlaybackId == 0)
+	{
+		return false;
+	}
+
+	FOnMontageEnded EndDelegate;
+	const uint32 PlaybackId = ActiveAttackPlaybackId;
+	EndDelegate.BindWeakLambda(this, [this, PlaybackId](UAnimMontage* EndedMontage, bool bInterrupted)
+	{
+		HandleActiveAttackMontageEnded(EndedMontage, bInterrupted, PlaybackId);
+	});
+	AnimInstance->Montage_SetEndDelegate(EndDelegate, Montage);
+	return true;
+}
+
+void AMyCharacter::InvalidateActiveAttackMontagePlayback()
+{
+	ActiveAttackMontage = nullptr;
+	ActiveAttackPlaybackId = 0;
+}
+
+void AMyCharacter::HandleActiveAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted, uint32 PlaybackId)
+{
+	if (!ActiveAttackMontage || Montage != ActiveAttackMontage || PlaybackId != ActiveAttackPlaybackId
+		|| ActionState != EActionState::EAS_Attacking)
+	{
+		return;
+	}
+
+	// 先使 token 失效，再进入任何会重置 Combo、Motion Warping、旋转或体力的恢复路径。
+	InvalidateActiveAttackMontagePlayback();
+	OnAttackMontageEnded(Montage, bInterrupted);
 }
 
 void AMyCharacter::OnAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted)
@@ -4403,6 +4656,8 @@ EActionState AMyCharacter::RecoverActionStateAfterMontage(EActionState ExpectedS
 
 void AMyCharacter::RecoverFromAttackMontageEnd()
 {
+	InvalidateActiveAttackMontagePlayback();
+
 	// 旋转恢复必须在早期还原：free-run 攻击设了双 false，打断后必须还原
 	RestoreRotationMode();
 	CancelChargeInputState();
@@ -4431,5 +4686,6 @@ void AMyCharacter::RecoverFromAttackMontageEnd()
 
 void AMyCharacter::CleanupInterruptedAttack()
 {
+	InvalidateActiveAttackMontagePlayback();
 	RecoverFromAttackMontageEnd();
 }

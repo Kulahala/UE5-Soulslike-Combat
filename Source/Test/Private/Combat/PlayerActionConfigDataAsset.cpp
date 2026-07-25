@@ -2,48 +2,6 @@
 
 #include "Animation/AnimMontage.h"
 
-int32 UPlayerActionConfigDataAsset::GetActionPriority(EPlayerActionType Action) const
-{
-	switch (Action)
-	{
-	case EPlayerActionType::None:
-		return MIN_int32;
-	case EPlayerActionType::Attack:
-		return SharedPriority.Attack;
-	case EPlayerActionType::Dodge:
-		return Dodge.Priority;
-	case EPlayerActionType::Block:
-		return Block.Priority;
-	case EPlayerActionType::Parry:
-		return Parry.Priority;
-	case EPlayerActionType::Potion:
-		return Potion.Priority;
-	case EPlayerActionType::RangedAim:
-		return Block.Priority;
-	case EPlayerActionType::RangedRelease:
-		return SharedPriority.Attack;
-	case EPlayerActionType::HitReact:
-		return SharedPriority.HitReact;
-	case EPlayerActionType::Death:
-		return SharedPriority.Death;
-	}
-
-	// 故意不写 default：让 -Wswitch 在 EPlayerActionType 加新值时提示这里需要同步。
-	return MIN_int32;
-}
-
-bool UPlayerActionConfigDataAsset::IsStrictlyHigherPriority(EPlayerActionType NewAction,
-                                                            EPlayerActionType CurrentAction) const
-{
-	return GetActionPriority(NewAction) > GetActionPriority(CurrentAction);
-}
-
-bool UPlayerActionConfigDataAsset::IsAtLeastSamePriority(EPlayerActionType NewAction,
-                                                         EPlayerActionType CurrentAction) const
-{
-	return GetActionPriority(NewAction) >= GetActionPriority(CurrentAction);
-}
-
 void UPlayerActionConfigDataAsset::PostLoad()
 {
 	Super::PostLoad();
@@ -89,13 +47,6 @@ void UPlayerActionConfigDataAsset::LogConfigWarnings() const
 	}
 
 	// Potion.Montage 故意不检查：为空时走即时治疗 + 冷却 fallback。
-	if (SharedPriority.Attack < 0 || Dodge.Priority < 0 || Block.Priority < 0 || Parry.Priority < 0
-		|| Potion.Priority < 0 || SharedPriority.HitReact < 0 ||
-		SharedPriority.Death < 0)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("%s: Action priority contains a negative value. Action priority expects non-negative values, larger numbers are higher priority."), *GetName());
-	}
-
 	if (Dodge.StaminaCost < 0.f)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("%s: Dodge.StaminaCost is negative."), *GetName());

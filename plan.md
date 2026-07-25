@@ -20,4 +20,4 @@
 
 ## 计划 (Plan)
 
-<!-- 当前无活动计划。TODO-04E 已通过用户编译、PIE 与严格 review；稳定合同见 ARCHITECTURE.md，阶段结果见 ROADMAP.md。 -->
+<!-- 当前无活动计划。TODO-05C0 已通过用户编译、PIE 与严格 review；稳定合同见 ARCHITECTURE.md，阶段结果见 ROADMAP.md。 -->

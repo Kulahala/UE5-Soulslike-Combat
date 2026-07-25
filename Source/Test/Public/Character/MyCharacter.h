@@ -78,7 +78,6 @@ public:
 	void ResetCombo();
 	bool TryConsumeComboInputAtBranchPoint();
 	FORCEINLINE bool IsComboWindowOpen() const { return bComboWindowOpen; }
-	FORCEINLINE void SetComboInputReceived(bool bReceived) { bComboInputReceived = bReceived; }
 	UFUNCTION(BlueprintCallable, Category = "Combat", meta = (ToolTip = "返回当前轻攻击连招段索引，主要供调试或 UI 显示使用。"))
 	FORCEINLINE int32 GetComboCounter() const { return ComboCounter; }
 	void OpenActionCancelWindow();
@@ -199,6 +198,27 @@ protected:
 	float CombatPresenceExitDelay = 4.f;
 
 private:
+	/** 仅在角色内部使用的输入意图；不扩展 EActionState，也不向 Blueprint / SaveGame 暴露。 */
+	enum class EPlayerActionIntent : uint8
+	{
+		AttackPress,
+		AttackRelease,
+		AttackCancel,
+		BlockPress,
+		BlockRelease,
+		Dodge,
+		Parry,
+		Potion
+	};
+
+	enum class EPlayerActionIntentResolution : uint8
+	{
+		StartNow,
+		BufferOnce,
+		Reject,
+		EndHeld
+	};
+
 	/* 动作状态恢复 Helpers */
 	bool ShouldRecoverToExhausted_Generic() const;
 	bool ShouldRecoverToExhausted_Attack() const;
@@ -209,6 +229,10 @@ private:
 	EActionState RecoverActionStateAfterMontage(EActionState ExpectedState, bool bResumeStaminaRegen);
 	void RecoverFromAttackMontageEnd();
 	void CleanupInterruptedAttack();
+	bool BeginAttackMontagePlayback(UAnimInstance* AnimInstance, UAnimMontage* Montage);
+	bool RebindActiveAttackMontageEndDelegate(UAnimInstance* AnimInstance, UAnimMontage* Montage);
+	void InvalidateActiveAttackMontagePlayback();
+	void HandleActiveAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted, uint32 PlaybackId);
 	// 玩家侧 7 处 Montage EndDelegate 绑定的统一入口；敌人侧保留局部绑定，避免收尾期扩大重构范围。
 	void BindMontageEndDelegate(UAnimInstance* AnimInstance, UAnimMontage* Montage,
 	                            void (AMyCharacter::*Callback)(UAnimMontage*, bool));
@@ -219,15 +243,12 @@ private:
 	 */
 	void UpdateAttackMotionWarpTarget(const FPlayerAttackMotionWarpingConfig& Config);
 	void ClearAttackMotionWarpTarget();
-	/**
-	 * 尝试启动指定动作。
-	 * 返回 true 表示“当前处于或刚启动该动作”，不区分“新启动”和“已在执行”。
-	 * 返回 false 表示“不能进入该动作”（条件不满足、资源缺失、占位类型）。
-	 *
-	 * 注意：Block 的幂等 return true 不代表播放了新的 BlockRaise，仅代表举盾态成立。
-	 * 阶段 3 若需要区分“触发新动作 vs 已在执行”，再扩展返回类型。
-	 */
+	/** 已完成意图决策后的动作执行器；不能再负责 Priority 或输入竞争判断。 */
 	bool TryStartAction(EPlayerActionType Action);
+	EPlayerActionIntentResolution ResolvePlayerActionIntent(EPlayerActionIntent Intent) const;
+	bool IsActionStartPreflightValid(EPlayerActionType Action, bool bRequireCommittedResource) const;
+	bool IsBowCommittedActionActive() const;
+	bool ShouldRetainBlockInputForAttackCancel() const;
 	bool StartAttackAction();
 	bool StartDodgeAction();
 	bool StartBlockAction();
@@ -236,11 +257,7 @@ private:
 	bool StartBowAimAction();
 	bool ReleaseBowArrow();
 	EPlayerActionType GetCurrentPlayerActionType() const;
-	bool CanCancelCurrentActionWith(EPlayerActionType NewAction) const;
 	void CleanupInterruptedAction(EPlayerActionType InterruptedAction);
-	int32 GetActionPriority(EPlayerActionType Action) const;
-	bool IsStrictlyHigherPriority(EPlayerActionType NewAction, EPlayerActionType CurrentAction) const;
-	bool IsAtLeastSamePriority(EPlayerActionType NewAction, EPlayerActionType CurrentAction) const;
 	float GetDodgeStaminaCost(bool bLogFallback) const;
 	float GetPotionCooldown(bool bLogFallback) const;
 	float GetPotionFallbackHealPercent() const;
@@ -376,6 +393,10 @@ private:
 	bool bIsChargingAttack = false;
 	float AttackInputPressTime = 0.f;
 	FTimerHandle ChargeDecisionTimer;
+	UPROPERTY(Transient)
+	UAnimMontage* ActiveAttackMontage = nullptr;
+	uint32 ActiveAttackPlaybackId = 0;
+	uint32 NextAttackPlaybackId = 0;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Combat|Charge", meta = (ToolTip = "按住攻击超过该时间后进入蓄力判定。"))
 	float ChargeInputThreshold = 0.2f;
