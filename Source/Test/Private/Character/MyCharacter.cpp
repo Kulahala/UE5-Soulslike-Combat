@@ -2372,8 +2372,19 @@ bool AMyCharacter::IsActionStartPreflightValid(EPlayerActionType Action, bool bR
 	case EPlayerActionType::Attack:
 		return CanAttack() || ShouldUseSprintAttack();
 	case EPlayerActionType::Dodge:
-		return AnimInstance && GetDodgeMontage() && Attributes && !GetCharacterMovement()->IsFalling()
-			&& (!bRequireCommittedResource || Attributes->CheckStamina(GetDodgeStaminaCost(false)));
+	{
+		if (!AnimInstance || !GetDodgeMontage() || !Attributes || GetCharacterMovement()->IsFalling())
+		{
+			return false;
+		}
+
+		const float RequiredDodgeStamina = GetDodgeStaminaCost(false);
+		// 翻滚允许在仍有正耐力时透支一次；耐力已耗尽时不能借由 CancelWindow 再次启动。
+		const bool bCanCommitDodge = !bRequireCommittedResource
+			|| Attributes->CheckStamina(RequiredDodgeStamina)
+			|| Attributes->GetCurrentStamina() > 0.f;
+		return bCanCommitDodge;
+	}
 	case EPlayerActionType::Block:
 		return bBlockInputHeld && EquippedShield && !IsBowEquipped() && AnimInstance && GetBlockMontage()
 			&& !GetCharacterMovement()->IsFalling();
