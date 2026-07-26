@@ -648,6 +648,20 @@ bool AMyCharacter::StartAttackAction()
 	return true;
 }
 
+void AMyCharacter::ApplyComboSegmentStartEffects(const FComboSegment& Segment, UAnimInstance* AnimInstance,
+	UAnimMontage* Montage)
+{
+	Attributes->UseStamina(Segment.StaminaCost);
+	Attributes->PauseStaminaRegen();
+	SetAttackDamageMultiplier(Segment.DamageMultiplier);
+	if (EquippedWeapon)
+	{
+		CurrentPoiseDamage = EquippedWeapon->GetBasePoiseDamage() * Segment.PoiseDamageMultiplier;
+	}
+	UpdateAttackMotionWarpTarget(Segment.MotionWarping);
+	AnimInstance->Montage_JumpToSection(Segment.EntrySection, Montage);
+}
+
 bool AMyCharacter::StartComboSegment(int32 SegmentIndex, EComboPlaybackMode PlaybackMode)
 {
 	UAttackConfigDataAsset* AttackConfig = GetAttackConfig();
@@ -722,15 +736,7 @@ bool AMyCharacter::StartComboSegment(int32 SegmentIndex, EComboPlaybackMode Play
 			return false;
 		}
 
-		Attributes->UseStamina(Segment->StaminaCost);
-		Attributes->PauseStaminaRegen();
-		SetAttackDamageMultiplier(Segment->DamageMultiplier);
-		if (EquippedWeapon)
-		{
-			CurrentPoiseDamage = EquippedWeapon->GetBasePoiseDamage() * Segment->PoiseDamageMultiplier;
-		}
-		UpdateAttackMotionWarpTarget(Segment->MotionWarping);
-		AnimInstance->Montage_JumpToSection(Segment->EntrySection, MontageToPlay);
+		ApplyComboSegmentStartEffects(*Segment, AnimInstance, MontageToPlay);
 	}
 	else
 	{
@@ -758,15 +764,7 @@ bool AMyCharacter::StartComboSegment(int32 SegmentIndex, EComboPlaybackMode Play
 				return false;
 			}
 
-			Attributes->UseStamina(Segment->StaminaCost);
-			Attributes->PauseStaminaRegen();
-			SetAttackDamageMultiplier(Segment->DamageMultiplier);
-			if (EquippedWeapon)
-			{
-				CurrentPoiseDamage = EquippedWeapon->GetBasePoiseDamage() * Segment->PoiseDamageMultiplier;
-			}
-			UpdateAttackMotionWarpTarget(Segment->MotionWarping);
-			AnimInstance->Montage_JumpToSection(Segment->EntrySection, MontageToPlay);
+			ApplyComboSegmentStartEffects(*Segment, AnimInstance, MontageToPlay);
 		}
 		else
 		{
@@ -797,15 +795,7 @@ bool AMyCharacter::StartComboSegment(int32 SegmentIndex, EComboPlaybackMode Play
 				return false;
 			}
 
-			Attributes->UseStamina(Segment->StaminaCost);
-			Attributes->PauseStaminaRegen();
-			SetAttackDamageMultiplier(Segment->DamageMultiplier);
-			if (EquippedWeapon)
-			{
-				CurrentPoiseDamage = EquippedWeapon->GetBasePoiseDamage() * Segment->PoiseDamageMultiplier;
-			}
-			UpdateAttackMotionWarpTarget(Segment->MotionWarping);
-			AnimInstance->Montage_JumpToSection(Segment->EntrySection, MontageToPlay);
+			ApplyComboSegmentStartEffects(*Segment, AnimInstance, MontageToPlay);
 			ClearPlannedAttackHandoff();
 		}
 	}

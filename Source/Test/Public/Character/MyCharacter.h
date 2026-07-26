@@ -34,6 +34,7 @@ class UPawnNoiseEmitterComponent;
 class UTestSaveGame;
 class UItemDefinitionDataAsset;
 enum class EItemEquipmentSlot : uint8;
+struct FComboSegment;
 struct FPlayerAttackMotionWarpingConfig;
 struct FCombatHitRequest;
 struct FCombatHitResult;
@@ -244,6 +245,8 @@ private:
 	void BindMontageEndDelegate(UAnimInstance* AnimInstance, UAnimMontage* Montage,
 	                            void (AMyCharacter::*Callback)(UAnimMontage*, bool));
 	bool StartComboSegment(int32 SegmentIndex, EComboPlaybackMode PlaybackMode);
+	// 仅在各分支已成功起播并建立当前攻击播放身份后提交本段运行时效果。
+	void ApplyComboSegmentStartEffects(const FComboSegment& Segment, UAnimInstance* AnimInstance, UAnimMontage* Montage);
 	/**
 	 * 为当前攻击写入玩家侧 Motion Warping 目标。
 	 * Config 来自轻击段、冲刺攻击或蓄力 Release；目标名固定为 AttackTarget。

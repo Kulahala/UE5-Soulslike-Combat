@@ -187,16 +187,14 @@ Completed roadmap work is retained here as a compact, durable record. Do not ret
 - [x] **Maintenance Cleanup v1**
   Removed the unused raw-`DefinitionId` non-ammo consumption chain and the legacy base attack-montage warning hook, corrected project identity and the stale server default-map path, and synchronized README/architecture wording with completed ranged combat and transient Gold rewards. User manually compiled `TestEditor` and PIE-validated MainMenu-to-TestMap plus basic sword, shield, and Bow interaction; main and independent adversarial review found no blocking defect.
 
+- [x] **TODO-05C1: Combo Start Effect Dedup v1**
+  Consolidated the three successful `StartComboSegment()` commit paths behind one private helper while preserving the preflight, playback-token, planned-handoff, resource, Motion Warping, Entry-section and cleanup order. User manually compiled and PIE-validated the existing combo/cancel/interruption route; main and independent adversarial review found no blocking defect.
+
 ## TODO Queue
 
 These TODOs are accepted future work, not permission to start implementation immediately. A queued item must be small enough to produce one independently verifiable result. Queue position follows prerequisites, validation dependencies, and the player-facing loop rather than numeric ID or append order. When an item becomes the next stage, move only that item out of this queue and write its complete implementation plan in `plan.md` first. On completion, record stable facts in `ARCHITECTURE.md` and move the compact result into `Done Milestones`; do not turn this roadmap into a stage log.
 
 **Encounter authoring decision:** reusable Controller behavior and Spline authoring were already proven by `TODO-02A1/A2`. The former standalone `TODO-02B` is deliberately not marked Done and is absorbed as a mandatory adoption condition of `TODO-06A`: do not place a permanent `TestMap` encounter solely to repeat core validation. `TODO-02C` waits until that first permanent map-owned Controller exists.
-
-### Player Melee Follow-Up
-
-- [ ] **TODO-05C1: Combo Start Effect Dedup v1**
-  Prerequisite: the completed three-Montage `TODO-05C` chain remains behaviorally stable. Converge the already-confirmed duplicated combo-start effect writes behind one local path without changing per-entry Montage ownership, planned handoff/token behavior, BranchWindow/CancelWindow semantics, timing, damage, stamina, Motion Warping, or authored assets. Validate that every segment and cross-Montage continuation still emits each intended start effect exactly once.
 
 ### Combat Punish And Criticals
 
