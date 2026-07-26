@@ -165,61 +165,6 @@ bool USoulslikeGameInstance::AddOwnedItemInstance(const FTestItemInstanceRecord&
 	return false;
 }
 
-bool USoulslikeGameInstance::ConsumeOwnedItemQuantity(FName DefinitionId, int32 Quantity)
-{
-	if (!EnsureCurrentSaveLoaded() || !CurrentSaveGame || !CurrentSaveGame->IsPersistable())
-	{
-		UE_LOG(LogTemp, Warning, TEXT("Consume owned item quantity failed: no usable current save."));
-		return false;
-	}
-
-	if (DefinitionId == NAME_None || Quantity <= 0)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("Consume owned item quantity rejected an empty DefinitionId or invalid quantity."));
-		return false;
-	}
-
-	const TArray<FTestItemInstanceRecord> PreviousItems = CurrentSaveGame->ItemInstances;
-	int32 RemainingQuantity = Quantity;
-	for (int32 Index = 0; Index < CurrentSaveGame->ItemInstances.Num() && RemainingQuantity > 0;)
-	{
-		FTestItemInstanceRecord& ItemRecord = CurrentSaveGame->ItemInstances[Index];
-		if (ItemRecord.DefinitionId != DefinitionId)
-		{
-			++Index;
-			continue;
-		}
-
-		const int32 ConsumedQuantity = FMath::Min(ItemRecord.Quantity, RemainingQuantity);
-		ItemRecord.Quantity -= ConsumedQuantity;
-		RemainingQuantity -= ConsumedQuantity;
-		if (ItemRecord.Quantity <= 0)
-		{
-			CurrentSaveGame->ItemInstances.RemoveAt(Index);
-		}
-		else
-		{
-			++Index;
-		}
-	}
-
-	if (RemainingQuantity > 0)
-	{
-		CurrentSaveGame->ItemInstances = PreviousItems;
-		UE_LOG(LogTemp, Warning, TEXT("Consume owned item quantity rejected: DefinitionId '%s' does not have enough quantity."),
-			*DefinitionId.ToString());
-		return false;
-	}
-
-	if (SaveNow())
-	{
-		return true;
-	}
-
-	CurrentSaveGame->ItemInstances = PreviousItems;
-	return false;
-}
-
 bool USoulslikeGameInstance::GrantAmmoReserve(FName DefinitionId, int32 Quantity, int32 ReserveStackLimit,
 	const TArray<FTestItemInstanceSelection>& ValidReserveInstances, FName& OutAffectedInstanceId)
 {

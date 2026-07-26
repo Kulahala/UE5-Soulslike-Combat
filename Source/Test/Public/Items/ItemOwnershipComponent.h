@@ -37,7 +37,6 @@ public:
 	                       bool bRequestAutoEquip, FName& OutInstanceId, bool& bOutAutoEquipped);
 	bool TryClaimWorldAmmoPickup(FName PersistentId, FName DefinitionId, int32 Quantity,
 	                             USoulslikeGameInstance* GameInstance, FName& OutAffectedInstanceId);
-	bool TryConsumeDefinitionQuantity(FName DefinitionId, int32 Quantity, USoulslikeGameInstance* GameInstance);
 	bool TryConsumeLoadedAmmo(FName DefinitionId, int32 Quantity, USoulslikeGameInstance* GameInstance);
 	bool TryRestockAmmoAtCheckpoint(FName GameplayMapName, FName CheckpointId, USoulslikeGameInstance* GameInstance);
 	bool VerifyAmmoRefillFixture(FName DefinitionId, USoulslikeGameInstance* GameInstance) const;

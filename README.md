@@ -22,6 +22,7 @@ https://github.com/user-attachments/assets/fdd9304c-a7ea-4185-bfa1-09df583fa784
 - **State-driven player combat**: light combos, sprint attack, charged attack, dodge, parry, block, potion use, stamina exhaustion, hit stun, and death all flow through explicit action-state guards.
 - **Bonfire services, loadout, and checkpoint flow**: New Game creates writable progress but no respawn anchor; before the first bonfire, death returns to `PlayerStart` while Gold and claimed fixed items persist. The first bonfire use rests and activates the anchor; later uses offer Rest, Equipment, or Leave without pausing the world. Owned sword and shield instances can be equipped or cleared there, take effect immediately, and restore through death, rest, and Continue. A newly claimed fixed sword or shield immediately fills only its empty compatible slot and plays its pickup sound; it never replaces an occupied slot, while manual changes remain bonfire-only.
 - **Data-driven attack setup**: `UAttackConfigDataAsset` owns player light combo, special attack, and charged attack data; `UEnemyAttackConfigDataAsset` owns enemy attack entries, including optional Motion Warping for leap attacks.
+- **Ranged combat and transient rewards**: the player Bow uses prepared arrows and `BowArrowSocket`-origin projectiles; configured ranged enemies use projectile attacks; defeated enemies can leave transient Gold treasures whose Gold is persisted only after a successful pickup.
 - **Precise weapon hit detection**: weapons use swept box traces between previous and current positions to reduce missed hits during fast animation frames.
 - **Shield block and parry**: block checks attack direction and stamina before damage is applied; successful parries deplete enemy poise and trigger stance break.
 - **Poise and stance break**: enemies have a hidden poise pool. Normal hits drain it over time, while parry can instantly break stance.
@@ -41,6 +42,7 @@ https://github.com/user-attachments/assets/fdd9304c-a7ea-4185-bfa1-09df583fa784
 | Player Character | Movement, lock-on, stamina, attacks, dodge, block, parry, potion, hit reaction, death |
 | Combat Data | Player combo/special/charged attack config, enemy attack entries, damage/block/poise multipliers, optional enemy Motion Warping |
 | Weapons | Box trace collision, same-team filtering, block interception, hit feedback dispatch |
+| Ranged & Rewards | Prepared player arrows, `BowArrowSocket` projectile origins, configured ranged attacks, transient Gold treasure pickup |
 | Enemies | Patrol, search, chase, combat local HFSM, cooldown spacing, attack coordination, motion-warped leap attacks |
 | Defense & Hyper Armor | Directional shield block, timed parry, stamina cost, stance break integration, uninterruptible attack hyper armor |
 | Feedback | Health bars, delayed buffer bars, hit knockback, camera shake, damage vignette |
@@ -116,6 +118,7 @@ https://github.com/user-attachments/assets/fdd9304c-a7ea-4185-bfa1-09df583fa784
 - **状态驱动的主角战斗**：轻攻击连招、冲刺攻击、蓄力攻击、翻滚、格挡、弹反、喝药、体力耗尽、受击硬直和死亡都通过明确的动作状态守卫组织。
 - **游戏流程与火堆服务**：独立主菜单提供 New Game、Continue、Settings 和 Quit；New Game 会先��立可写进度但不创建重生锚点，首次火堆前死亡回到 `PlayerStart`，Gold 与已领取固定物品仍即时保存。首次使用火堆会休息、激活锚点并重载地图；后续使用火堆打开不暂停世界的“休息 / 装备 / 离开”服务菜单。已拥有的剑盾可在这里立即装备或卸下，并会跨死亡、休息和 Continue 恢复。新领取的固定剑或盾只会立即填充对应的空槽并播放拾取音效，绝不替换已占用槽位；主动换装仍限定在火堆。
 - **数据驱动攻击配置**：`UAttackConfigDataAsset` 管理主角轻攻击连招、特殊攻击和蓄力攻击；`UEnemyAttackConfigDataAsset` 管理敌人招式条目，并支持为跳劈类攻击单独开启 Motion Warping。
+- **远程战斗与临时奖励**：玩家 Bow 通过待发箭与 `BowArrowSocket` 起点发射投射物；配置化远程敌人使用投射物攻击；敌人死亡可留下仅在成功拾取后持久化的临时 Gold 光团。
 - **精确武器命中检测**：武器使用前一帧到当前帧的盒体扫掠，降低高速动画中的漏判。
 - **盾牌格挡与弹反**：伤害结算前先检查防御角度和体力；弹反成功会清空敌人韧性并触发破防。
 - **韧性与破防**：敌人拥有隐藏韧性条，普通命中逐步削减韧性，弹反可瞬间触发大硬直。
@@ -136,6 +139,7 @@ https://github.com/user-attachments/assets/fdd9304c-a7ea-4185-bfa1-09df583fa784
 | 游戏流程 | 主菜单、单槽存档、火堆交互与装备、死亡 Overlay、地图重载、Continue |
 | 战斗数据 | 主角连招/特殊/蓄力攻击配置，敌人招式条目，伤害/格挡耗体/韧性倍率，可选敌人 Motion Warping |
 | 武器 | 盒体扫掠、同阵营过滤、格挡拦截、命中反馈派发 |
+| 远程与奖励 | 主角待发箭、`BowArrowSocket` 投射物起点、配置化远程攻击、临时 Gold 光团拾取 |
 | 敌人 | 巡逻、搜索、追击、战斗局部 HFSM、冷却拉扯、攻击协调、跳劈 Motion Warping |
 | 防御与霸体 | 方向性盾牌格挡、时机弹反、体力消耗、破防集成、动作防打断霸体 |
 | 反馈 | 血条、缓冲血条、受击后退、相机晃动、伤害红晕 |

@@ -241,13 +241,6 @@ void ABaseCharacter::PlayMontageSection(UAnimMontage* Montage, const FName& Sect
 	}
 }
 
-void ABaseCharacter::PlayAttackMontage(const FName& SectionName)
-{
-	UE_LOG(LogTemp, Warning, TEXT("%s: ABaseCharacter::PlayAttackMontage is deprecated. Use AttackConfig or EnemyAttackConfig DataAssets. Section: %s"),
-		*GetName(),
-		*SectionName.ToString());
-}
-
 void ABaseCharacter::PlayHitReactMontage(const FName& SectionName)
 {
 	UAnimMontage* MontageToPlay = GetHitReactMontage();

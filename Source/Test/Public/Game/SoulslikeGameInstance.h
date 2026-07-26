@@ -32,7 +32,6 @@ public:
 	bool SaveNow();
 	bool TryAddGold(int32 Amount, int32& OutNewGold);
 	bool AddOwnedItemInstance(const FTestItemInstanceRecord& ItemRecord);
-	bool ConsumeOwnedItemQuantity(FName DefinitionId, int32 Quantity);
 	bool GrantAmmoReserve(FName DefinitionId, int32 Quantity, int32 ReserveStackLimit,
 	                      const TArray<FTestItemInstanceSelection>& ValidReserveInstances,
 	                      FName& OutAffectedInstanceId);
