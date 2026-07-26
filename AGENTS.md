@@ -8,7 +8,11 @@ Guidance for coding agents working in this repository.
 - Read the real repository state before changing behavior or making architectural claims. Prefer the smallest change that satisfies the approved scope.
 - Before editing files, state the intended edit in one concise sentence. Preserve user and existing working-tree changes.
 - Ask before destructive, high-risk, or irreversible work. Do not broaden a task into a refactor or a new system without approval.
-- Delegate only user-authorized, low-risk, bounded work. The main agent owns architecture, behavior-sensitive implementation, and review conclusions.
+- Delegate only user-authorized, bounded work. The main agent owns architecture,
+  behavior-sensitive design decisions, accepted plans, validation interpretation,
+  and review conclusions. A child may implement an approved behavior-sensitive
+  C++ slice only under the active `ue-agent-orchestration` contract; it cannot
+  change policy, scope, ownership, or architecture.
 
 ## Project And Build
 
@@ -93,7 +97,14 @@ For this UE 5.7 project, use the standard MCP `initialize -> tools/list -> tools
 
 - Formal review prioritizes bugs, behavioral regressions, risks, and missing validation. Put findings first, ordered by severity, with file and line references.
 - For every blocker or finding that requires a user decision, explain the concrete player-facing impact alongside the technical cause: what the player will see, lose, be unable to do, or risk corrupting; the normal trigger; and whether save data, level progress, or only logs are affected. A severity label, source location, or abstract term such as "lifecycle race" is not sufficient by itself.
-- Strict or stage-end review has two passes: normal review, then adversarial review that defends only technically sound design choices and records weak points as risks. It is not a defense exercise.
+- Strict or stage-end review has two passes: the main agent performs the normal
+  review, then a fresh Reviewer performs the adversarial pass through
+  `ue-agent-orchestration` when that runtime is available. The main agent
+  verifies findings, owns the acceptance decision, and runs a labeled adversarial
+  fallback only when independent review is unavailable. Detailed child packets,
+  freshness, reuse, and time budgets live in `ue-agent-orchestration`. The
+  adversarial pass is not a defense exercise: defend only technically sound
+  design choices and record weak points as risks.
 - A review fix reopens the validation relevant to that changed behavior. State what was verified by tools, what the user manually verified, and what remains unverified.
 - Before asking the user to compile a non-trivial C++ change, perform a lightweight static review and a targeted server-memory MCP query using code-derived terms from the touched Unreal types, reflection surface, subsystem, or likely error family. Do not scan the full memory graph without a concrete query.
 - During a compile/runtime repair loop, query server-memory MCP before selecting a fix. Reusable compiler errors, runtime failures, repeated warnings, and tool failures belong there, not in `plan.md`; record the trigger, symptom, wrong approach, correct approach, and scope. If server-memory is unavailable, say so and provide the proposed memory entry in the closeout. Do not query memory during strict review unless a concrete recurring pattern appears.
