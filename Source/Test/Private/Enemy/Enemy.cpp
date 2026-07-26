@@ -288,6 +288,12 @@ void AEnemy::SetArchetypeCombatSpacingDefaults(float InTooCloseRadius, float InA
 
 void AEnemy::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	if (IsValid(SpawnPoint))
+	{
+		SpawnPoint->Destroy();
+		SpawnPoint = nullptr;
+	}
+
 	// 兜底：定时器全量清理，覆盖 Die() 未执行的路径（关卡切换、编辑器 Stop 等）
 	ClearStanceBreakMontagePresentation(true);
 	ClearAllTimers();
@@ -405,9 +411,10 @@ void AEnemy::Die()
 	GetMesh()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
 	// 清理附加物和UI
-	if (SpawnPoint)
+	if (IsValid(SpawnPoint))
 	{
 		SpawnPoint->Destroy();
+		SpawnPoint = nullptr;
 	}
 	HealthBarWidgetComp->SetVisibility(false);
 

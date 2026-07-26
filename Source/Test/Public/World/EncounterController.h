@@ -7,6 +7,7 @@
 
 class AEnemy;
 class AMyCharacter;
+class AEncounterSpawnPoint;
 class UBoxComponent;
 class UCapsuleComponent;
 class UMaterialInterface;
@@ -44,7 +45,7 @@ private:
 	void OnCommitVolumeEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
 	                             UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
 
-	bool ValidateConfiguration() const;
+	bool ValidateConfiguration();
 	bool ValidateSplineBoundary() const;
 	bool GetSplineBoundaryPoints(TArray<FVector2D>& OutPoints) const;
 	bool ConfigureCommitVolumes(AMyCharacter* Player);
@@ -52,6 +53,10 @@ private:
 	bool HasUsableSplineCommitRegion(const FVector2D& BoundsCenter, const FVector2D& BoundsSize) const;
 	bool TryInitializeForPlayer();
 	bool InitializeParticipants();
+	bool ResolveInitialSpawnTransforms(TArray<FTransform>& OutTransforms) const;
+	bool IsSpawnCapsuleInsideBoundary(const FVector& SpawnLocation, float CapsuleRadius) const;
+	bool SpawnInitialBatch(AMyCharacter* Player);
+	void RollbackSpawnedParticipants();
 	bool BuildRuntimeBoundaries();
 	bool BuildSplineBoundarySegments();
 	bool CreateBoundarySegment(const FVector& RelativeLocation, const FRotator& RelativeRotation,
@@ -68,7 +73,7 @@ private:
 	void BeginPendingCommit(AMyCharacter* Player);
 	void ClearPendingCommit();
 	void RefreshTickEnabled();
-	void ReleaseParticipants();
+	void ReleaseParticipants(bool bDestroySpawnedParticipants);
 	void DestroyRuntimeBoundaries();
 	void SetBoundariesClosed(bool bShouldClose);
 	void SetEncounterState(EEncounterState NewState);
@@ -92,8 +97,11 @@ private:
 	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Encounter", meta = (AllowPrivateAccess = "true", ToolTip = "存档和未来重载使用的稳定关卡作者 ID；同一地图内必须唯一。"))
 	FName EncounterId = NAME_None;
 
-	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Encounter", meta = (AllowPrivateAccess = "true", ToolTip = "本阶段仅支持预放置参与者；未来波次由 EncounterSpawnPoint 生成。"))
+	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Encounter", meta = (AllowPrivateAccess = "true", ToolTip = "预放置参与者路径。InitialSpawnBatch 非空时必须为空；两种参与者来源互斥。"))
 	TArray<AEnemy*> PreplacedParticipants;
+
+	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Encounter|Spawn", meta = (AllowPrivateAccess = "true", ToolTip = "Encounter 激活时执行一次的初始生成批次。配置成员后不可再混用 PreplacedParticipants。"))
+	FEncounterInitialSpawnBatch InitialSpawnBatch;
 
 	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Encounter", meta = (AllowPrivateAccess = "true", ToolTip = "边界与同心进入区的配置。Controller 原点必须摆在战斗区中心的地面。"))
 	FEncounterBoundaryConfig BoundaryConfig;
@@ -113,6 +121,12 @@ private:
 	UPROPERTY(Transient)
 	UStaticMesh* BoundaryVisualMesh = nullptr;
 
+	UPROPERTY(Transient)
+	TMap<FName, AEncounterSpawnPoint*> EncounterSpawnAnchors;
+
+	UPROPERTY(Transient)
+	TArray<AEnemy*> RuntimeSpawnedParticipants;
+
 	TSet<AEnemy*> RemainingParticipants;
 	TWeakObjectPtr<AMyCharacter> PendingCommitPlayer;
 	TWeakObjectPtr<AMyCharacter> InitialSafeRegionPlayer;
@@ -122,6 +136,7 @@ private:
 	float CommitSafetyInset = 0.f;
 	bool bStaticConfigurationValid = false;
 	bool bConfigurationValid = false;
+	bool bUsesInitialSpawnBatch = false;
 	bool bAwaitingPlayerSetup = false;
 	bool bHasObservedPlayerOutsideCommitRegion = false;
 };

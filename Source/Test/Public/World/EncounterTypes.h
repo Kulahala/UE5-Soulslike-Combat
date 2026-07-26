@@ -3,6 +3,8 @@
 #include "CoreMinimal.h"
 #include "EncounterTypes.generated.h"
 
+class AEnemy;
+
 /** 遭遇控制器的运行时生命周期。只表示当前地图实例，不直接持久化。 */
 UENUM(BlueprintType)
 enum class EEncounterState : uint8
@@ -19,6 +21,41 @@ enum class EEncounterBoundaryShape : uint8
 	Rectangle UMETA(DisplayName = "Rectangle"),
 	Radial UMETA(DisplayName = "Radial"),
 	Spline UMETA(DisplayName = "Spline")
+};
+
+/** 遭遇初始生成点的候选区域。候选只在激活时解析，不参与持久化。 */
+UENUM(BlueprintType)
+enum class EEncounterSpawnAreaShape : uint8
+{
+	Point UMETA(DisplayName = "Point"),
+	Circle UMETA(DisplayName = "Circle"),
+	Box UMETA(DisplayName = "Box")
+};
+
+/** 一类初始生成参与者及其可用关卡定位点。 */
+USTRUCT(BlueprintType)
+struct FEncounterSpawnMember
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Encounter|Spawn", meta = (ToolTip = "激活时 deferred-spawn 的敌人类。必须是有效的 AEnemy 子类。"))
+	TSubclassOf<AEnemy> EnemyClass = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Encounter|Spawn", meta = (ClampMin = "1", ToolTip = "该敌人类在本次初始批次中生成的数量。"))
+	int32 Count = 1;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Encounter|Spawn", meta = (ToolTip = "一个或多个稳定的 EncounterSpawnPoint ID；激活时从这些定位点中选择。"))
+	TArray<FName> SpawnPointIds;
+};
+
+/** Encounter 激活时只执行一次的初始生成批次；不包含奖励、持久化或波次调度数据。 */
+USTRUCT(BlueprintType)
+struct FEncounterInitialSpawnBatch
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Encounter|Spawn", meta = (ToolTip = "初始生成成员列表。非空时与 PreplacedParticipants 互斥。"))
+	TArray<FEncounterSpawnMember> Members;
 };
 
 /** 遇战空气墙的关卡作者配置。Controller 原点固定为战斗区中心的地面位置。 */

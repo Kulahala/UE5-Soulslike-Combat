@@ -8,13 +8,16 @@
 #include "Components/SplineComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Enemy/Enemy.h"
+#include "Engine/World.h"
 #include "EngineUtils.h"
 #include "GameFramework/Pawn.h"
 #include "Kismet/GameplayStatics.h"
 #include "Materials/MaterialInterface.h"
+#include "NavigationSystem.h"
 #include "Engine/StaticMesh.h"
 #include "UObject/ConstructorHelpers.h"
 #include "UObject/UObjectGlobals.h"
+#include "World/EncounterSpawnPoint.h"
 
 namespace
 {
@@ -25,6 +28,12 @@ namespace
 	constexpr float SplineSafeRegionProbeMinHalfExtent = 1.f;
 	constexpr int32 MaxSplineSafeRegionProbeCells = 16384;
 	constexpr float SqrtTwo = 1.41421356237f;
+	constexpr int32 MaxSpawnLocationAttempts = 8;
+	constexpr float SpawnGroundProbeUp = 500.f;
+	constexpr float SpawnGroundProbeDown = 1000.f;
+	constexpr float SpawnGroundClearance = 1.f;
+	constexpr float SpawnGroundHeightTolerance = 75.f;
+	constexpr float SpawnGroundNormalMinZ = 0.5f;
 
 	struct FSplineSafeRegionProbeCell
 	{
@@ -33,6 +42,29 @@ namespace
 		float SignedDistance = 0.f;
 		float MaximumSignedDistance = 0.f;
 	};
+
+	struct FEncounterSpawnReservation
+	{
+		FVector Location = FVector::ZeroVector;
+		float Radius = 0.f;
+		float HalfHeight = 0.f;
+	};
+
+	bool DoEncounterSpawnReservationsOverlap(const FEncounterSpawnReservation& First,
+		const FEncounterSpawnReservation& Second)
+	{
+		const float CombinedRadius = First.Radius + Second.Radius;
+		if (FVector::DistSquared2D(First.Location, Second.Location) > FMath::Square(CombinedRadius))
+		{
+			return false;
+		}
+
+		const float FirstBottom = First.Location.Z - First.HalfHeight;
+		const float FirstTop = First.Location.Z + First.HalfHeight;
+		const float SecondBottom = Second.Location.Z - Second.HalfHeight;
+		const float SecondTop = Second.Location.Z + Second.HalfHeight;
+		return FirstBottom < SecondTop && SecondBottom < FirstTop;
+	}
 
 	void PushSplineSafeRegionProbeCell(TArray<FSplineSafeRegionProbeCell>& Heap,
 		const FSplineSafeRegionProbeCell& NewCell)
@@ -298,7 +330,7 @@ void AEncounterController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	SetCommitVolumeEnabled(RadialCommitVolume, false);
 	SetCommitVolumeEnabled(SplineCommitCandidateVolume, false);
 	SetBoundariesClosed(false);
-	ReleaseParticipants();
+	ReleaseParticipants(true);
 	DestroyRuntimeBoundaries();
 
 	Super::EndPlay(EndPlayReason);
@@ -368,6 +400,11 @@ bool AEncounterController::TryActivate(AMyCharacter* Player)
 		!bHasObservedPlayerOutsideCommitRegion || !IsPlayerSafelyInsideCommitRegion(Player))
 	{
 		return false;
+	}
+
+	if (bUsesInitialSpawnBatch)
+	{
+		return SpawnInitialBatch(Player);
 	}
 
 	for (AEnemy* Participant : PreplacedParticipants)
@@ -452,8 +489,11 @@ void AEncounterController::OnCommitVolumeEndOverlap(UPrimitiveComponent* Overlap
 	}
 }
 
-bool AEncounterController::ValidateConfiguration() const
+bool AEncounterController::ValidateConfiguration()
 {
+	bUsesInitialSpawnBatch = false;
+	EncounterSpawnAnchors.Reset();
+
 	if (EncounterId == NAME_None)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("Encounter controller '%s' has no EncounterId and is disabled."), *GetName());
@@ -524,11 +564,61 @@ bool AEncounterController::ValidateConfiguration() const
 		}
 	}
 
-	if (PreplacedParticipants.IsEmpty())
+
+	const bool bHasPreplacedParticipants = !PreplacedParticipants.IsEmpty();
+	const bool bHasInitialSpawnBatch = !InitialSpawnBatch.Members.IsEmpty();
+	if (bHasPreplacedParticipants == bHasInitialSpawnBatch)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("Encounter '%s' has no preplaced participants. Wave-only encounters are not available until TODO-02C."),
+		UE_LOG(LogTemp, Warning, TEXT("Encounter '%s' requires exactly one participant source: nonempty PreplacedParticipants or nonempty InitialSpawnBatch, but not both."),
 			*EncounterId.ToString());
 		return false;
+	}
+
+	if (bHasInitialSpawnBatch)
+	{
+		TMap<FName, AEncounterSpawnPoint*> DiscoveredSpawnAnchors;
+		for (TActorIterator<AEncounterSpawnPoint> It(GetWorld()); It; ++It)
+		{
+			AEncounterSpawnPoint* SpawnPoint = *It;
+			const FName SpawnPointId = SpawnPoint ? SpawnPoint->GetSpawnPointId() : NAME_None;
+			if (SpawnPointId == NAME_None)
+			{
+				continue;
+			}
+
+			if (DiscoveredSpawnAnchors.Contains(SpawnPointId))
+			{
+				UE_LOG(LogTemp, Warning, TEXT("Encounter '%s' found duplicate EncounterSpawnPoint ID '%s' in the world."),
+					*EncounterId.ToString(), *SpawnPointId.ToString());
+				return false;
+			}
+
+			DiscoveredSpawnAnchors.Add(SpawnPointId, SpawnPoint);
+		}
+
+		for (const FEncounterSpawnMember& Member : InitialSpawnBatch.Members)
+		{
+			if (!Member.EnemyClass || Member.Count <= 0 || Member.SpawnPointIds.IsEmpty())
+			{
+				UE_LOG(LogTemp, Warning, TEXT("Encounter '%s' has an invalid initial spawn member: class, positive Count, and at least one SpawnPointId are required."),
+					*EncounterId.ToString());
+				return false;
+			}
+
+			for (const FName SpawnPointId : Member.SpawnPointIds)
+			{
+				if (SpawnPointId == NAME_None || !DiscoveredSpawnAnchors.Contains(SpawnPointId))
+				{
+					UE_LOG(LogTemp, Warning, TEXT("Encounter '%s' initial spawn member references missing or invalid SpawnPointId '%s'."),
+						*EncounterId.ToString(), *SpawnPointId.ToString());
+					return false;
+				}
+			}
+		}
+
+		EncounterSpawnAnchors = MoveTemp(DiscoveredSpawnAnchors);
+		bUsesInitialSpawnBatch = true;
+		return true;
 	}
 
 	TSet<AEnemy*> UniqueParticipants;
@@ -901,13 +991,19 @@ bool AEncounterController::TryInitializeForPlayer()
 	}
 
 	RefreshTickEnabled();
-	UE_LOG(LogTemp, Display, TEXT("Encounter '%s' initialized in Idle state with %d preplaced participant(s)."),
-		*EncounterId.ToString(), PreplacedParticipants.Num());
+	UE_LOG(LogTemp, Display, TEXT("Encounter '%s' initialized in Idle state with %d configured participant(s) from %s."),
+		*EncounterId.ToString(), bUsesInitialSpawnBatch ? InitialSpawnBatch.Members.Num() : PreplacedParticipants.Num(),
+		bUsesInitialSpawnBatch ? TEXT("InitialSpawnBatch") : TEXT("PreplacedParticipants"));
 	return true;
 }
 
 bool AEncounterController::InitializeParticipants()
 {
+	if (bUsesInitialSpawnBatch)
+	{
+		return true;
+	}
+
 	TArray<AEnemy*> ClaimedParticipants;
 	for (AEnemy* Participant : PreplacedParticipants)
 	{
@@ -934,6 +1030,305 @@ bool AEncounterController::InitializeParticipants()
 	}
 
 	return true;
+}
+
+bool AEncounterController::ResolveInitialSpawnTransforms(TArray<FTransform>& OutTransforms) const
+{
+	OutTransforms.Reset();
+
+	if (!bUsesInitialSpawnBatch || EncounterSpawnAnchors.IsEmpty())
+	{
+		return false;
+	}
+
+	UWorld* World = GetWorld();
+	UNavigationSystemV1* NavigationSystem = World
+		? FNavigationSystem::GetCurrent<UNavigationSystemV1>(World)
+		: nullptr;
+	if (!World || !NavigationSystem)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Encounter '%s' cannot resolve its initial spawn batch because World or NavigationSystem is unavailable."),
+			*EncounterId.ToString());
+		return false;
+	}
+
+	FRandomStream RandomStream(FMath::Rand());
+	TArray<FEncounterSpawnReservation> PlannedReservations;
+	for (const FEncounterSpawnMember& Member : InitialSpawnBatch.Members)
+	{
+		AEnemy* EnemyCDO = Member.EnemyClass ? Member.EnemyClass->GetDefaultObject<AEnemy>() : nullptr;
+		const UCapsuleComponent* Capsule = EnemyCDO ? EnemyCDO->GetCapsuleComponent() : nullptr;
+		if (!EnemyCDO || !Capsule)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("Encounter '%s' cannot resolve an initial spawn member with an invalid EnemyClass CDO or capsule."),
+				*EncounterId.ToString());
+			return false;
+		}
+
+		const float CapsuleRadius = Capsule->GetScaledCapsuleRadius();
+		const float CapsuleHalfHeight = Capsule->GetScaledCapsuleHalfHeight();
+		if (!FMath::IsFinite(CapsuleRadius) || !FMath::IsFinite(CapsuleHalfHeight) ||
+			CapsuleRadius <= 0.f || CapsuleHalfHeight < CapsuleRadius)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("Encounter '%s' cannot resolve EnemyClass '%s' because its CDO capsule dimensions are invalid."),
+				*EncounterId.ToString(), *GetNameSafe(Member.EnemyClass));
+			return false;
+		}
+
+		for (int32 SpawnIndex = 0; SpawnIndex < Member.Count; ++SpawnIndex)
+		{
+			bool bResolved = false;
+			for (int32 Attempt = 0; Attempt < MaxSpawnLocationAttempts; ++Attempt)
+			{
+				const int32 AnchorIndex = RandomStream.RandRange(0, Member.SpawnPointIds.Num() - 1);
+				AEncounterSpawnPoint* SpawnPoint = EncounterSpawnAnchors.FindRef(Member.SpawnPointIds[AnchorIndex]);
+				if (!IsValid(SpawnPoint))
+				{
+					continue;
+				}
+
+				FTransform CandidateTransform;
+				if (!SpawnPoint->TryGetCandidateSpawnTransform(RandomStream, CandidateTransform) ||
+					CandidateTransform.ContainsNaN())
+				{
+					continue;
+				}
+
+				FVector SpawnScale = CandidateTransform.GetScale3D();
+				SpawnScale.X = FMath::Abs(SpawnScale.X);
+				SpawnScale.Y = FMath::Abs(SpawnScale.Y);
+				SpawnScale.Z = FMath::Abs(SpawnScale.Z);
+				const float EffectiveRadius = CapsuleRadius * FMath::Max(SpawnScale.X, SpawnScale.Y);
+				const float EffectiveHalfHeight = CapsuleHalfHeight * SpawnScale.Z;
+				if (!FMath::IsFinite(EffectiveRadius) || !FMath::IsFinite(EffectiveHalfHeight) ||
+					EffectiveRadius <= 0.f || EffectiveHalfHeight < EffectiveRadius)
+				{
+					continue;
+				}
+
+				FNavLocation NavLocation;
+				const FVector NavigationExtent(
+					EffectiveRadius,
+					EffectiveRadius,
+					FMath::Max(EffectiveHalfHeight + 50.f, 200.f));
+				if (!NavigationSystem->ProjectPointToNavigation(CandidateTransform.GetLocation(), NavLocation, NavigationExtent) ||
+					NavLocation.Location.ContainsNaN())
+				{
+					continue;
+				}
+
+				FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(EncounterInitialSpawn), false, this);
+				FHitResult GroundHit;
+				const FVector GroundTraceStart = NavLocation.Location + FVector(0.f, 0.f, SpawnGroundProbeUp);
+				const FVector GroundTraceEnd = NavLocation.Location - FVector(0.f, 0.f, SpawnGroundProbeDown);
+				if (!World->LineTraceSingleByChannel(GroundHit, GroundTraceStart, GroundTraceEnd, ECC_Visibility, QueryParams) ||
+					GroundHit.ImpactNormal.Z < SpawnGroundNormalMinZ ||
+					FMath::Abs(GroundHit.ImpactPoint.Z - NavLocation.Location.Z) > SpawnGroundHeightTolerance)
+				{
+					continue;
+				}
+
+				const FVector SpawnLocation = GroundHit.ImpactPoint + FVector(0.f, 0.f,
+					EffectiveHalfHeight + SpawnGroundClearance);
+				if (!IsSpawnCapsuleInsideBoundary(SpawnLocation, EffectiveRadius))
+				{
+					continue;
+				}
+
+				const FCollisionShape CapsuleShape = FCollisionShape::MakeCapsule(EffectiveRadius, EffectiveHalfHeight);
+				if (World->OverlapBlockingTestByChannel(SpawnLocation, CandidateTransform.GetRotation(), ECC_Pawn,
+					CapsuleShape, QueryParams))
+				{
+					continue;
+				}
+
+				const FEncounterSpawnReservation CandidateReservation{SpawnLocation, EffectiveRadius, EffectiveHalfHeight};
+				bool bOverlapsPlannedReservation = false;
+				for (const FEncounterSpawnReservation& PlannedReservation : PlannedReservations)
+				{
+					if (DoEncounterSpawnReservationsOverlap(CandidateReservation, PlannedReservation))
+					{
+						bOverlapsPlannedReservation = true;
+						break;
+					}
+				}
+
+				if (bOverlapsPlannedReservation)
+				{
+					continue;
+				}
+
+				CandidateTransform.SetLocation(SpawnLocation);
+				OutTransforms.Add(CandidateTransform);
+				PlannedReservations.Add(CandidateReservation);
+				bResolved = true;
+				break;
+			}
+
+			if (!bResolved)
+			{
+				UE_LOG(LogTemp, Warning, TEXT("Encounter '%s' could not resolve a safe transform for initial spawn member '%s' after %d bounded attempts."),
+					*EncounterId.ToString(), *GetNameSafe(Member.EnemyClass), MaxSpawnLocationAttempts);
+				OutTransforms.Reset();
+				return false;
+			}
+		}
+	}
+
+	return !OutTransforms.IsEmpty();
+}
+
+bool AEncounterController::IsSpawnCapsuleInsideBoundary(const FVector& SpawnLocation, float CapsuleRadius) const
+{
+	if (!FMath::IsFinite(CapsuleRadius) || CapsuleRadius <= 0.f)
+	{
+		return false;
+	}
+
+	const FVector LocalSpawnLocation = GetActorTransform().InverseTransformPositionNoScale(SpawnLocation);
+	if (BoundaryConfig.Shape == EEncounterBoundaryShape::Rectangle)
+	{
+		return FMath::Abs(LocalSpawnLocation.X) + CapsuleRadius <= BoundaryConfig.InteriorHalfExtents.X &&
+			FMath::Abs(LocalSpawnLocation.Y) + CapsuleRadius <= BoundaryConfig.InteriorHalfExtents.Y;
+	}
+
+	if (BoundaryConfig.Shape == EEncounterBoundaryShape::Radial)
+	{
+		const float MaxCenterRadius = BoundaryConfig.InteriorRadius - CapsuleRadius;
+		return MaxCenterRadius >= 0.f && FVector2D(LocalSpawnLocation.X, LocalSpawnLocation.Y).SizeSquared() <=
+			FMath::Square(MaxCenterRadius);
+	}
+
+	if (BoundaryConfig.Shape == EEncounterBoundaryShape::Spline)
+	{
+		const FVector2D LocalSpawnPoint(LocalSpawnLocation.X, LocalSpawnLocation.Y);
+		return IsPointInsideSplineBoundary(LocalSpawnPoint) &&
+			GetMinSquaredDistanceToSplineBoundary(LocalSpawnPoint) >= FMath::Square(CapsuleRadius);
+	}
+
+	return false;
+}
+
+bool AEncounterController::SpawnInitialBatch(AMyCharacter* Player)
+{
+	if (!Player || !RuntimeSpawnedParticipants.IsEmpty() || !RemainingParticipants.IsEmpty())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Encounter '%s' rejected initial batch activation because runtime participant tracking was not empty."),
+			*EncounterId.ToString());
+		return false;
+	}
+
+	TArray<FTransform> SpawnTransforms;
+	if (!ResolveInitialSpawnTransforms(SpawnTransforms))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Encounter '%s' rejected initial batch activation before spawning any actor."),
+			*EncounterId.ToString());
+		return false;
+	}
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return false;
+	}
+
+	int32 TransformIndex = 0;
+	for (const FEncounterSpawnMember& Member : InitialSpawnBatch.Members)
+	{
+		for (int32 SpawnIndex = 0; SpawnIndex < Member.Count; ++SpawnIndex)
+		{
+			if (!SpawnTransforms.IsValidIndex(TransformIndex))
+			{
+				RollbackSpawnedParticipants();
+				return false;
+			}
+
+			const FTransform& SpawnTransform = SpawnTransforms[TransformIndex++];
+			AEnemy* SpawnedEnemy = World->SpawnActorDeferred<AEnemy>(Member.EnemyClass, SpawnTransform, nullptr, nullptr,
+				ESpawnActorCollisionHandlingMethod::DontSpawnIfColliding);
+			if (!IsValid(SpawnedEnemy))
+			{
+				UE_LOG(LogTemp, Warning, TEXT("Encounter '%s' failed to deferred-spawn initial enemy class '%s'; rolling back the batch."),
+					*EncounterId.ToString(), *GetNameSafe(Member.EnemyClass));
+				RollbackSpawnedParticipants();
+				return false;
+			}
+
+			RuntimeSpawnedParticipants.Add(SpawnedEnemy);
+		}
+	}
+
+	for (AEnemy* Participant : RuntimeSpawnedParticipants)
+	{
+		if (!IsValid(Participant) || !Participant->ClaimEncounterOwner(this))
+		{
+			UE_LOG(LogTemp, Warning, TEXT("Encounter '%s' could not claim a deferred spawned participant; rolling back the batch."),
+				*EncounterId.ToString());
+			RollbackSpawnedParticipants();
+			return false;
+		}
+
+		Participant->GetOnEnemyDied().AddUObject(this, &AEncounterController::HandleParticipantDied);
+		Participant->SetEncounterDormant(this);
+	}
+
+	int32 FinishedTransformIndex = 0;
+	for (AEnemy* Participant : RuntimeSpawnedParticipants)
+	{
+		if (!SpawnTransforms.IsValidIndex(FinishedTransformIndex))
+		{
+			RollbackSpawnedParticipants();
+			return false;
+		}
+
+		const FTransform& SpawnTransform = SpawnTransforms[FinishedTransformIndex++];
+		AActor* FinishedActor = UGameplayStatics::FinishSpawningActor(Participant, SpawnTransform);
+		if (!IsValid(FinishedActor) || FinishedActor != Participant)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("Encounter '%s' failed to finish-spawn a staged participant; rolling back the batch."),
+				*EncounterId.ToString());
+			RollbackSpawnedParticipants();
+			return false;
+		}
+	}
+
+	for (AEnemy* Participant : RuntimeSpawnedParticipants)
+	{
+		if (!IsValid(Participant) || !Participant->ActivateForEncounter(this, Player))
+		{
+			UE_LOG(LogTemp, Warning, TEXT("Encounter '%s' failed to activate a staged participant; rolling back the batch."),
+				*EncounterId.ToString());
+			RollbackSpawnedParticipants();
+			return false;
+		}
+	}
+
+	for (AEnemy* Participant : RuntimeSpawnedParticipants)
+	{
+		RemainingParticipants.Add(Participant);
+	}
+
+	SetEncounterState(EEncounterState::Active);
+	SetBoundariesClosed(true);
+	return true;
+}
+
+void AEncounterController::RollbackSpawnedParticipants()
+{
+	for (AEnemy* Participant : RuntimeSpawnedParticipants)
+	{
+		if (!IsValid(Participant))
+		{
+			continue;
+		}
+
+		Participant->GetOnEnemyDied().RemoveAll(this);
+		Participant->ReleaseEncounterOwner(this);
+		Participant->Destroy();
+	}
+
+	RuntimeSpawnedParticipants.Reset();
+	RemainingParticipants.Reset();
 }
 
 bool AEncounterController::BuildRuntimeBoundaries()
@@ -1252,7 +1647,7 @@ void AEncounterController::RefreshTickEnabled()
 	SetActorTickEnabled(bShouldTick);
 }
 
-void AEncounterController::ReleaseParticipants()
+void AEncounterController::ReleaseParticipants(bool bDestroySpawnedParticipants)
 {
 	for (AEnemy* Participant : PreplacedParticipants)
 	{
@@ -1265,7 +1660,23 @@ void AEncounterController::ReleaseParticipants()
 		Participant->ReleaseEncounterOwner(this);
 	}
 
+	for (AEnemy* Participant : RuntimeSpawnedParticipants)
+	{
+		if (!IsValid(Participant))
+		{
+			continue;
+		}
+
+		Participant->GetOnEnemyDied().RemoveAll(this);
+		Participant->ReleaseEncounterOwner(this);
+		if (bDestroySpawnedParticipants)
+		{
+			Participant->Destroy();
+		}
+	}
+
 	RemainingParticipants.Reset();
+	RuntimeSpawnedParticipants.Reset();
 }
 
 void AEncounterController::DestroyRuntimeBoundaries()
@@ -1345,5 +1756,5 @@ void AEncounterController::HandleParticipantDied(AEnemy* DefeatedEnemy)
 	SetBoundariesClosed(false);
 	SetCommitVolumeEnabled(GetActiveCommitVolume(), false);
 	ClearPendingCommit();
-	ReleaseParticipants();
+	ReleaseParticipants(false);
 }
