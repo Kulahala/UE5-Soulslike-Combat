@@ -1695,6 +1695,12 @@ bool AMyCharacter::CanInteractWithWorld() const
 		&& !GetCharacterMovement()->IsFalling();
 }
 
+bool AMyCharacter::CanAutoCollectWorldPickup() const
+{
+	// 自动掉落不占用输入，攻击、翻滚和滞空中物理接触也应立即领取。
+	return !bBonfireServiceProtected && Attributes && Attributes->IsAlive();
+}
+
 void AMyCharacter::SetBonfireServiceProtection(bool bEnabled)
 {
 	if (bBonfireServiceProtected == bEnabled)
@@ -1914,6 +1920,32 @@ bool AMyCharacter::TryClaimWorldItemPickup(FName PersistentId, FName ItemDefinit
 	OutPickupSound = Definition->GetPickupSound();
 	UpdateBowAmmoHUD();
 	RefreshBowPresentation();
+	return true;
+}
+
+bool AMyCharacter::TryAddGold(int32 Amount, int32& OutNewGold)
+{
+	OutNewGold = 0;
+	if (Amount <= 0)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("TryAddGold rejected a non-positive amount: %d."), Amount);
+		return false;
+	}
+
+	UAttributeComponent* AttributesComponent = GetAttributes();
+	USoulslikeGameInstance* GameInstance = GetGameInstance<USoulslikeGameInstance>();
+	if (!AttributesComponent || !GameInstance)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("TryAddGold failed: attributes or SoulslikeGameInstance is unavailable."));
+		return false;
+	}
+
+	if (!GameInstance->TryAddGold(Amount, OutNewGold))
+	{
+		return false;
+	}
+
+	AttributesComponent->SetGold(OutNewGold);
 	return true;
 }
 

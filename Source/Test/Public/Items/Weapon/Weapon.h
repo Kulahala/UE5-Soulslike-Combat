@@ -23,7 +23,6 @@ public:
 	FORCEINLINE FName GetDefaultEquipSocketName() const { return DefaultEquipSocketName; }
 
 	// IPickupInterface
-	virtual void OnPickup_Implementation(AActor* Picker) override;
 	virtual bool RequiresPersistentWorldClaim() const override { return true; }
 
 	// 武器碰撞检测
@@ -32,6 +31,7 @@ public:
 	void ClearIgnoreActors() { IgnoreActors.Empty(); }  // 清空黑名单（受控接口）
 
 protected:
+	virtual bool TryGrantPickup(AMyCharacter* Picker, USoundBase*& OutPickupSound) override;
 	void SetDefaultEquipSocketName(const FName InSocketName) { DefaultEquipSocketName = InSocketName; }
 
 	/* 拾取 */

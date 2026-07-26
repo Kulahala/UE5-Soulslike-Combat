@@ -11,8 +11,7 @@ class TEST_API AAmmoPickup : public Aitem
 	GENERATED_BODY()
 
 public:
-	virtual void OnPickup_Implementation(AActor* Picker) override;
-
 protected:
+	virtual bool TryGrantPickup(AMyCharacter* Picker, USoundBase*& OutPickupSound) override;
 	virtual bool RequiresPersistentWorldClaim() const override { return true; }
 };

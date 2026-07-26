@@ -9,7 +9,6 @@
 class ACharacterController;
 class ACheckpointActor;
 class AMyCharacter;
-class UAttributeComponent;
 
 /** 单人地图流程所有者：出生、资源恢复与地图重载，不持有 UMG 或具体世界进度规则。 */
 UCLASS()
@@ -39,17 +38,12 @@ private:
 	FName GetCurrentGameplayMapName() const;
 	void HandlePlayerSpawned(APlayerController* NewPlayer);
 	void RestorePlayerFromSave(AMyCharacter* Player);
-	void CapturePlayerGold();
 	void StartGameplayReload();
 	void FinishGameplayReload();
 
-	UFUNCTION()
-	void HandlePlayerGoldChanged(int32 NewGold);
 
-	TWeakObjectPtr<AMyCharacter> ManagedPlayer;
 	FTimerHandle DeathRespawnTimer;
 	FTimerHandle MapTransitionTimer;
-	bool bRestoringPlayerState = false;
 	bool bTransitionInProgress = false;
 	FName TransitionMapName = NAME_None;
 

@@ -2,10 +2,9 @@
 
 #include "Items/Treasures/Treasure.h"
 
-#include "AttributeComponent/AttributeComponent.h"
 #include "Character/MyCharacter.h"
+#include "Engine/Engine.h"
 #include "Items/Treasures/TreasureData.h"
-#include "Kismet/GameplayStatics.h"
 
 ATreasure::ATreasure()
 {
@@ -40,32 +39,26 @@ void ATreasure::InitializeFromData(UTreasureData* Data)
 	}
 }
 
-void ATreasure::SphereEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
-                                 UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
+bool ATreasure::TryGrantPickup(AMyCharacter* Picker, USoundBase*& OutPickupSound)
 {
-	Super::SphereEndOverlap(OverlappedComponent, OtherActor, OtherComp, OtherBodyIndex);
-}
-
-void ATreasure::SphereOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
-                              UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep,
-                              const FHitResult& SweepResult)
-{
-	if (AMyCharacter* SlashCharacter = Cast<AMyCharacter>(OtherActor))
+	OutPickupSound = nullptr;
+	if (!Picker || GoldValue <= 0)
 	{
-		if (UAttributeComponent* CharacterAttributes = SlashCharacter->GetAttributes())
-		{
-			CharacterAttributes->AddGold(GoldValue);
-			if (GEngine)
-			{
-				FString Message = FString::Printf(
-					TEXT("捡到%s,价值%d,总金币:%d"), *TreasureName, GoldValue, CharacterAttributes->GetGold());
-				GEngine->AddOnScreenDebugMessage(-1, 3.f, FColor::Green, Message);
-			}
-			if (PickSound)
-			{
-				UGameplayStatics::PlaySoundAtLocation(this, PickSound, OtherActor->GetActorLocation());
-			}
-			Destroy();
-		}
+		return false;
 	}
+
+	int32 NewGold = 0;
+	if (!Picker->TryAddGold(GoldValue, NewGold))
+	{
+		return false;
+	}
+
+	OutPickupSound = PickSound;
+	if (GEngine)
+	{
+		const FString Message = FString::Printf(TEXT("捡到%s,价值%d,总金币:%d"),
+			*TreasureName, GoldValue, NewGold);
+		GEngine->AddOnScreenDebugMessage(-1, 3.f, FColor::Green, Message);
+	}
+	return true;
 }

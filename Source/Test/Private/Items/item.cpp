@@ -23,9 +23,12 @@ Aitem::Aitem()
 	Mesh->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
 
 	Sphere = CreateDefaultSubobject<USphereComponent>(TEXT("Sphere"));
-	Sphere->SetGenerateOverlapEvents(true);
 	Sphere->SetupAttachment(RootComponent);
 	Sphere->InitSphereRadius(30.f);
+	Sphere->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	Sphere->SetCollisionResponseToAllChannels(ECR_Ignore);
+	Sphere->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
+	Sphere->SetGenerateOverlapEvents(true);
 	Sphere->SetHiddenInGame(true);
 
 	Effect = CreateDefaultSubobject<UNiagaraComponent>(TEXT("Effect"));
@@ -41,6 +44,19 @@ void Aitem::BeginPlay()
 	Sphere->OnComponentEndOverlap.AddDynamic(this, &Aitem::SphereEndOverlap);
 	Sphere->OnComponentBeginOverlap.AddDynamic(this, &Aitem::SphereOverlap);
 	InitializePersistentWorldPickup();
+	if (IsActorBeingDestroyed())
+	{
+		return;
+	}
+
+	if (ItemState == EItemState::EIS_Spawning)
+	{
+		DisablePickupCollision();
+	}
+	else
+	{
+		EnablePickupCollision();
+	}
 }
 
 void Aitem::Tick(float DeltaTime)
@@ -67,6 +83,7 @@ void Aitem::Tick(float DeltaTime)
 			ItemState = EItemState::EIS_Dropped;
 			StartLocation = TargetLocation; // 更新掉落后的浮动基准点
 			RunningTime = 0.f; // 重置浮动时间
+			EnablePickupCollision();
 		}
 	}
 	else if (ItemState == EItemState::EIS_Dropped)
@@ -76,6 +93,11 @@ void Aitem::Tick(float DeltaTime)
 
 		// 基于初始位置进行绝对位置更新
 		SetActorLocation(StartLocation + FVector(0.f, 0.f, ZOffset));
+		TryResolveTrackedAutoOverlap();
+		if (IsActorBeingDestroyed())
+		{
+			return;
+		}
 	}
 
 	// 无论是在抛物线中还是浮动中，都保持自转
@@ -90,9 +112,22 @@ void Aitem::Tick(float DeltaTime)
 void Aitem::SphereOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp,
                           int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
 {
-	if (AMyCharacter* SlashCharacter = Cast<AMyCharacter>(OtherActor))
+	if (bReconcilingOverlaps || ItemState == EItemState::EIS_Spawning)
 	{
-		SlashCharacter->RegisterInteractable(this);
+		return;
+	}
+
+	if (AMyCharacter* Character = Cast<AMyCharacter>(OtherActor))
+	{
+		if (PickupTriggerPolicy == EItemPickupTriggerPolicy::AutoOverlap)
+		{
+			TrackAutoOverlapPicker(Character);
+		}
+		else
+		{
+			// 交互物应先保留候选；角色恢复可交互后由候选刷新显示提示。
+			Character->RegisterInteractable(this);
+		}
 	}
 }
 
@@ -100,14 +135,30 @@ void Aitem::SphereEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* O
                              UPrimitiveComponent* OtherComp,
                              int32 OtherBodyIndex)
 {
-	if (AMyCharacter* SlashCharacter = Cast<AMyCharacter>(OtherActor))
+	if (AMyCharacter* Character = Cast<AMyCharacter>(OtherActor))
 	{
-		SlashCharacter->UnregisterInteractable(this);
+		// 一个角色的多个碰撞组件可能与同一拾取球重叠；只有完全离开后才清理领取状态。
+		if (Sphere && Sphere->IsOverlappingActor(Character))
+		{
+			return;
+		}
+
+		if (PickupTriggerPolicy == EItemPickupTriggerPolicy::AutoOverlap)
+		{
+			ClearAutoOverlapPicker(Character);
+		}
+		else
+		{
+			Character->UnregisterInteractable(this);
+		}
 	}
 }
 
 void Aitem::DisablePickupCollision()
 {
+	AutoOverlapPicker.Reset();
+	bAutoOverlapClaimAttempted = false;
+
 	if (Sphere)
 	{
 		Sphere->SetGenerateOverlapEvents(false);
@@ -115,11 +166,31 @@ void Aitem::DisablePickupCollision()
 	}
 }
 
+void Aitem::EnablePickupCollision()
+{
+	if (!Sphere || ItemState != EItemState::EIS_Dropped || IsActorBeingDestroyed())
+	{
+		return;
+	}
+
+	Sphere->SetGenerateOverlapEvents(false);
+	Sphere->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	Sphere->SetCollisionResponseToAllChannels(ECR_Ignore);
+	Sphere->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
+
+	bReconcilingOverlaps = true;
+	Sphere->SetGenerateOverlapEvents(true);
+	Sphere->UpdateOverlaps();
+	HandleCurrentOverlaps();
+	bReconcilingOverlaps = false;
+}
+
 // ==================== 生成 ====================
 
 void Aitem::StartSpawning(const FVector& Target)
 {
 	ItemState = EItemState::EIS_Spawning;
+	DisablePickupCollision();
 	TargetLocation = Target;
 	StartLocation = GetActorLocation(); // 重新记录起点为当前位置
 	SpawnRunningTime = 0.f;
@@ -129,12 +200,14 @@ void Aitem::StartSpawning(const FVector& Target)
 
 void Aitem::OnPickup_Implementation(AActor* Picker)
 {
-	// 默认空实现，由 Weapon/Treasure/Shield 等子类重写
+	ResolvePickup(Cast<AMyCharacter>(Picker));
 }
 
 bool Aitem::CanInteract_Implementation(AActor* Interactor) const
 {
-	return Interactor && !GetOwner() && ItemState == EItemState::EIS_Dropped
+	const AMyCharacter* Character = Cast<AMyCharacter>(Interactor);
+	return PickupTriggerPolicy == EItemPickupTriggerPolicy::Interact && Character && Character->CanInteractWithWorld()
+		&& !GetOwner() && ItemState == EItemState::EIS_Dropped
 		&& (!RequiresPersistentWorldClaim() || bPersistentWorldPickupAvailable);
 }
 
@@ -158,31 +231,79 @@ void Aitem::Interact_Implementation(AActor* Interactor)
 	IPickupInterface::Execute_OnPickup(this, Interactor);
 }
 
-bool Aitem::TryClaimPersistentWorldPickup(AMyCharacter* Picker)
+void Aitem::SetPickupTriggerPolicy(EItemPickupTriggerPolicy NewPolicy)
 {
+	if (PickupTriggerPolicy == NewPolicy)
+	{
+		return;
+	}
+
+	PickupTriggerPolicy = NewPolicy;
+	AutoOverlapPicker.Reset();
+	bAutoOverlapClaimAttempted = false;
+}
+
+bool Aitem::TryGrantPickup(AMyCharacter* Picker, USoundBase*& OutPickupSound)
+{
+	OutPickupSound = nullptr;
+	return TryClaimPersistentWorldPickup(Picker, OutPickupSound);
+}
+
+bool Aitem::TryClaimPersistentWorldPickup(AMyCharacter* Picker, USoundBase*& OutPickupSound)
+{
+	OutPickupSound = nullptr;
 	if (!Picker || !RequiresPersistentWorldClaim() || !bPersistentWorldPickupAvailable)
 	{
 		return false;
 	}
 
 	FName InstanceId = NAME_None;
-	USoundBase* PickupSound = nullptr;
-	if (!Picker->TryClaimWorldItemPickup(PersistentId, ItemDefinitionId, PickupQuantity, InstanceId, PickupSound))
+	if (!Picker->TryClaimWorldItemPickup(PersistentId, ItemDefinitionId, PickupQuantity, InstanceId, OutPickupSound))
 	{
 		return false;
 	}
 
-	if (PickupSound)
+	bPersistentWorldPickupAvailable = false;
+	return true;
+}
+
+bool Aitem::CanResolvePickup(const AMyCharacter* Picker) const
+{
+	if (!Picker || GetOwner() || ItemState != EItemState::EIS_Dropped
+		|| (RequiresPersistentWorldClaim() && !bPersistentWorldPickupAvailable))
 	{
-		UGameplayStatics::PlaySoundAtLocation(this, PickupSound, GetActorLocation());
-	}
-	else
-	{
-		UE_LOG(LogTemp, Warning, TEXT("World item pickup '%s' for DefinitionId '%s' completed without a PickupSound."),
-			*GetName(), *ItemDefinitionId.ToString());
+		return false;
 	}
 
-	Picker->UnregisterInteractable(this);
+	return PickupTriggerPolicy == EItemPickupTriggerPolicy::AutoOverlap
+		? Picker->CanAutoCollectWorldPickup()
+		: Picker->CanInteractWithWorld();
+}
+
+void Aitem::ResolvePickup(AMyCharacter* Picker)
+{
+	if (bPickupResolutionInProgress || !CanResolvePickup(Picker))
+	{
+		return;
+	}
+
+	bPickupResolutionInProgress = true;
+	USoundBase* PickupSound = nullptr;
+	const bool bGranted = TryGrantPickup(Picker, PickupSound);
+	if (bGranted)
+	{
+		FinalizePickup(Picker, PickupSound);
+	}
+	bPickupResolutionInProgress = false;
+}
+
+void Aitem::FinalizePickup(AMyCharacter* Picker, USoundBase* PickupSound)
+{
+	if (Picker)
+	{
+		Picker->UnregisterInteractable(this);
+	}
+
 	DisablePickupCollision();
 	SetActorEnableCollision(false);
 	SetActorHiddenInGame(true);
@@ -190,9 +311,94 @@ bool Aitem::TryClaimPersistentWorldPickup(AMyCharacter* Picker)
 	{
 		Effect->Deactivate();
 	}
+	if (PickupSound)
+	{
+		UGameplayStatics::PlaySoundAtLocation(this, PickupSound, GetActorLocation());
+	}
 
 	Destroy();
-	return true;
+}
+
+void Aitem::HandleCurrentOverlaps()
+{
+	if (!Sphere || ItemState != EItemState::EIS_Dropped || IsActorBeingDestroyed())
+	{
+		return;
+	}
+
+	TArray<AActor*> OverlappingActors;
+	Sphere->GetOverlappingActors(OverlappingActors, AMyCharacter::StaticClass());
+	for (AActor* OverlappingActor : OverlappingActors)
+	{
+		AMyCharacter* Character = Cast<AMyCharacter>(OverlappingActor);
+		if (!Character)
+		{
+			continue;
+		}
+
+		if (PickupTriggerPolicy == EItemPickupTriggerPolicy::AutoOverlap)
+		{
+			TrackAutoOverlapPicker(Character);
+			if (IsActorBeingDestroyed())
+			{
+				break;
+			}
+		}
+		else
+		{
+			// 与 BeginOverlap 保持一致：落地时即使玩家仍在动作中，也不能丢失候选。
+			Character->RegisterInteractable(this);
+		}
+	}
+}
+
+void Aitem::TrackAutoOverlapPicker(AMyCharacter* Picker)
+{
+	if (!Picker)
+	{
+		return;
+	}
+
+	if (AutoOverlapPicker.Get() != Picker)
+	{
+		AutoOverlapPicker = Picker;
+		bAutoOverlapClaimAttempted = false;
+	}
+
+	TryResolveTrackedAutoOverlap();
+}
+
+void Aitem::ClearAutoOverlapPicker(AMyCharacter* Picker)
+{
+	if (!Picker || AutoOverlapPicker.Get() == Picker)
+	{
+		AutoOverlapPicker.Reset();
+		bAutoOverlapClaimAttempted = false;
+	}
+}
+
+void Aitem::TryResolveTrackedAutoOverlap()
+{
+	if (PickupTriggerPolicy != EItemPickupTriggerPolicy::AutoOverlap || bAutoOverlapClaimAttempted
+		|| ItemState != EItemState::EIS_Dropped || IsActorBeingDestroyed())
+	{
+		return;
+	}
+
+	AMyCharacter* Picker = AutoOverlapPicker.Get();
+	if (!Picker)
+	{
+		return;
+	}
+
+	if (!Picker->CanAutoCollectWorldPickup())
+	{
+		return;
+	}
+
+	// 同一连续重叠只尝试一次；保存失败后保留物品，离开并重新进入才允许再次尝试。
+	bAutoOverlapClaimAttempted = true;
+	ResolvePickup(Picker);
 }
 
 void Aitem::InitializePersistentWorldPickup()

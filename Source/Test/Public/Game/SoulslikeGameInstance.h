@@ -30,7 +30,7 @@ public:
 	bool ContinueGame();
 
 	bool SaveNow();
-	void UpdateGold(int32 NewGold);
+	bool TryAddGold(int32 Amount, int32& OutNewGold);
 	bool AddOwnedItemInstance(const FTestItemInstanceRecord& ItemRecord);
 	bool ConsumeOwnedItemQuantity(FName DefinitionId, int32 Quantity);
 	bool GrantAmmoReserve(FName DefinitionId, int32 Quantity, int32 ReserveStackLimit,
@@ -51,6 +51,7 @@ public:
 	bool GetSavedLoadedAmmoContainers(TArray<FTestAmmoContainerRecord>& OutLoadedAmmoContainers) const;
 	bool GetSavedClaimedRewardIds(TSet<FName>& OutClaimedRewardIds) const;
 	bool ArmNextItemClaimSaveFailureForDebug();
+	bool ArmNextGoldClaimSaveFailureForDebug();
 	bool ArmNextLoadedAmmoConsumeSaveFailureForDebug();
 	bool ArmNextAmmoRefillSaveFailureForDebug();
 	bool ActivateCheckpointAndSetRespawn(FName GameplayMapName, FName CheckpointId);
@@ -92,9 +93,11 @@ private:
 	static FName GenerateUniqueItemInstanceId(const TArray<FTestItemInstanceRecord>& ItemInstances);
 	static bool IsSupportedEquipmentSlotId(FName SlotId);
 	bool ConsumeItemClaimSaveFailureForDebug(FName RewardId);
+	bool ConsumeGoldClaimSaveFailureForDebug(int32 Amount);
 	bool ConsumeLoadedAmmoSaveFailureForDebug(FName DefinitionId);
 	bool ConsumeAmmoRefillSaveFailureForDebug();
 	void ClearItemClaimSaveFailureForDebug();
+	void ClearGoldClaimSaveFailureForDebug();
 	void ClearLoadedAmmoConsumeSaveFailureForDebug();
 	void ClearAmmoRefillSaveFailureForDebug();
 	void OpenGameplayMap();
@@ -106,6 +109,7 @@ private:
 	FName PendingGameplayMapName = NAME_None;
 	bool bAttemptedSaveLoad = false;
 	bool bFailNextItemClaimSaveForDebug = false;
+	bool bFailNextGoldClaimSaveForDebug = false;
 	bool bFailNextLoadedAmmoConsumeSaveForDebug = false;
 	bool bFailNextAmmoRefillSaveForDebug = false;
 

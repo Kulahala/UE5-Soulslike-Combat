@@ -92,12 +92,9 @@ void AWeapon::PlayEquipSound() const
 	}
 }
 
-void AWeapon::OnPickup_Implementation(AActor* Picker)
+bool AWeapon::TryGrantPickup(AMyCharacter* Picker, USoundBase*& OutPickupSound)
 {
-	if (AMyCharacter* Character = Cast<AMyCharacter>(Picker))
-	{
-		TryClaimPersistentWorldPickup(Character);
-	}
+	return TryClaimPersistentWorldPickup(Picker, OutPickupSound);
 }
 
 // ==================== 武器碰撞检测 ====================

@@ -23,6 +23,7 @@
 #include "HUD/HealthBarComponent.h"
 #include "Items/Weapon/Weapon.h"
 #include "Items/Bow/BowBase.h"
+#include "Items/Treasures/Treasure.h"
 #include "Kismet/GameplayStatics.h"
 #include "MotionWarpingComponent.h"
 #include "Navigation/PathFollowingComponent.h"
@@ -411,6 +412,7 @@ void AEnemy::Die()
 	HealthBarWidgetComp->SetVisibility(false);
 
 	PlayDeathMontage();
+	SpawnDeathTreasure();
 
 	// 设定销毁时间
 	SetLifeSpan(CorpseLifespan);
@@ -419,6 +421,54 @@ void AEnemy::Die()
 	{
 		bDeathNotificationBroadcast = true;
 		EnemyDiedDelegate.Broadcast(this);
+	}
+}
+
+void AEnemy::SpawnDeathTreasure()
+{
+	if (bDeathTreasureSpawnAttempted)
+	{
+		return;
+	}
+	bDeathTreasureSpawnAttempted = true;
+
+	if (!DeathTreasureClass)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s: DeathTreasureClass is not configured; no death reward will spawn."), *GetName());
+		return;
+	}
+
+	if (DeathGoldValue <= 0)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s: DeathGoldValue must be positive; no death reward will spawn."), *GetName());
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s: cannot spawn death treasure because the world is unavailable."), *GetName());
+		return;
+	}
+
+	const FTransform SpawnTransform = GetActorTransform();
+	ATreasure* Treasure = World->SpawnActorDeferred<ATreasure>(DeathTreasureClass, SpawnTransform,
+		nullptr, nullptr, ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+	if (!Treasure)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s: failed to deferred-spawn death treasure class '%s'."),
+			*GetName(), *GetNameSafe(DeathTreasureClass.Get()));
+		return;
+	}
+
+	Treasure->SetGoldValue(DeathGoldValue);
+	Treasure->SetPickupTriggerPolicy(EItemPickupTriggerPolicy::Interact);
+
+	AActor* FinishedTreasure = UGameplayStatics::FinishSpawningActor(Treasure, SpawnTransform);
+	if (!IsValid(FinishedTreasure) || FinishedTreasure != Treasure)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s: death treasure class '%s' was invalid after FinishSpawningActor."),
+			*GetName(), *GetNameSafe(DeathTreasureClass.Get()));
 	}
 }
 

@@ -23,8 +23,7 @@ public:
 	int32 GetGoldValue() const { return GoldValue; }
 
 protected:
-	virtual void SphereEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex) override;
-	virtual void SphereOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult) override;
+	virtual bool TryGrantPickup(AMyCharacter* Picker, USoundBase*& OutPickupSound) override;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Treasure Properties", meta = (ToolTip = "宝物的金币价值。"))
 	int32 GoldValue = 10;

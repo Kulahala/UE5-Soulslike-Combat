@@ -33,6 +33,7 @@ bool USoulslikeGameInstance::StartNewGame(FName GameplayMapName)
 	}
 
 	ClearItemClaimSaveFailureForDebug();
+	ClearGoldClaimSaveFailureForDebug();
 	ClearLoadedAmmoConsumeSaveFailureForDebug();
 	ClearAmmoRefillSaveFailureForDebug();
 
@@ -93,15 +94,38 @@ bool USoulslikeGameInstance::SaveNow()
 	return true;
 }
 
-void USoulslikeGameInstance::UpdateGold(int32 NewGold)
+bool USoulslikeGameInstance::TryAddGold(int32 Amount, int32& OutNewGold)
 {
-	if (!EnsureCurrentSaveLoaded() || !CurrentSaveGame || !CurrentSaveGame->IsPersistable())
+	OutNewGold = 0;
+	if (Amount <= 0)
 	{
-		return;
+		UE_LOG(LogTemp, Warning, TEXT("TryAddGold rejected a non-positive amount: %d."), Amount);
+		return false;
 	}
 
-	CurrentSaveGame->Gold = FMath::Max(0, NewGold);
-	SaveNow();
+	if (!EnsureCurrentSaveLoaded() || !CurrentSaveGame || !CurrentSaveGame->IsPersistable())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("TryAddGold failed: no persistable current save."));
+		return false;
+	}
+
+	const int64 CandidateGold = static_cast<int64>(CurrentSaveGame->Gold) + static_cast<int64>(Amount);
+	if (CandidateGold > TNumericLimits<int32>::Max())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("TryAddGold rejected an int32 overflow for amount %d."), Amount);
+		return false;
+	}
+
+	const int32 PreviousGold = CurrentSaveGame->Gold;
+	CurrentSaveGame->Gold = static_cast<int32>(CandidateGold);
+	if (!ConsumeGoldClaimSaveFailureForDebug(Amount) && SaveNow())
+	{
+		OutNewGold = CurrentSaveGame->Gold;
+		return true;
+	}
+
+	CurrentSaveGame->Gold = PreviousGold;
+	return false;
 }
 
 bool USoulslikeGameInstance::AddOwnedItemInstance(const FTestItemInstanceRecord& ItemRecord)
@@ -609,6 +633,23 @@ bool USoulslikeGameInstance::ArmNextItemClaimSaveFailureForDebug()
 #endif
 }
 
+bool USoulslikeGameInstance::ArmNextGoldClaimSaveFailureForDebug()
+{
+#if UE_BUILD_SHIPPING
+	UE_LOG(LogTemp, Warning, TEXT("Gold claim save failure injection is unavailable in Shipping builds."));
+	return false;
+#else
+	if (!EnsureCurrentSaveLoaded() || !CurrentSaveGame || !CurrentSaveGame->IsPersistable())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Gold claim save failure injection failed: no usable current save."));
+		return false;
+	}
+
+	bFailNextGoldClaimSaveForDebug = true;
+	return true;
+#endif
+}
+
 bool USoulslikeGameInstance::ArmNextLoadedAmmoConsumeSaveFailureForDebug()
 {
 #if UE_BUILD_SHIPPING
@@ -782,6 +823,7 @@ bool USoulslikeGameInstance::HasActivatedCheckpoint(FName CheckpointId)
 void USoulslikeGameInstance::PrepareGameplayTransition(FName GameplayMapName, FName CheckpointId)
 {
 	ClearItemClaimSaveFailureForDebug();
+	ClearGoldClaimSaveFailureForDebug();
 	ClearLoadedAmmoConsumeSaveFailureForDebug();
 	ClearAmmoRefillSaveFailureForDebug();
 	PendingGameplayMapName = GameplayMapName;
@@ -810,6 +852,7 @@ void USoulslikeGameInstance::InvalidateCurrentSave(const FString& Reason)
 void USoulslikeGameInstance::ReturnToMainMenu()
 {
 	ClearItemClaimSaveFailureForDebug();
+	ClearGoldClaimSaveFailureForDebug();
 	ClearLoadedAmmoConsumeSaveFailureForDebug();
 	ClearAmmoRefillSaveFailureForDebug();
 	PendingGameplayMapName = NAME_None;
@@ -1122,6 +1165,22 @@ bool USoulslikeGameInstance::ConsumeItemClaimSaveFailureForDebug(FName RewardId)
 #endif
 }
 
+bool USoulslikeGameInstance::ConsumeGoldClaimSaveFailureForDebug(int32 Amount)
+{
+#if UE_BUILD_SHIPPING
+	return false;
+#else
+	if (!bFailNextGoldClaimSaveForDebug)
+	{
+		return false;
+	}
+
+	bFailNextGoldClaimSaveForDebug = false;
+	UE_LOG(LogTemp, Warning, TEXT("Injected gold claim save failure for amount %d."), Amount);
+	return true;
+#endif
+}
+
 bool USoulslikeGameInstance::ConsumeLoadedAmmoSaveFailureForDebug(FName DefinitionId)
 {
 #if UE_BUILD_SHIPPING
@@ -1157,6 +1216,11 @@ bool USoulslikeGameInstance::ConsumeAmmoRefillSaveFailureForDebug()
 void USoulslikeGameInstance::ClearItemClaimSaveFailureForDebug()
 {
 	bFailNextItemClaimSaveForDebug = false;
+}
+
+void USoulslikeGameInstance::ClearGoldClaimSaveFailureForDebug()
+{
+	bFailNextGoldClaimSaveForDebug = false;
 }
 
 void USoulslikeGameInstance::ClearLoadedAmmoConsumeSaveFailureForDebug()

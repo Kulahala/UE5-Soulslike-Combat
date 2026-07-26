@@ -2,7 +2,6 @@
 
 #include "Items/Shield/Shield.h"
 
-#include "Character/MyCharacter.h"
 #include "Kismet/GameplayStatics.h"
 #include "NiagaraComponent.h"
 
@@ -40,10 +39,7 @@ void AShield::PlayEquipSound() const
 	}
 }
 
-void AShield::OnPickup_Implementation(AActor* Picker)
+bool AShield::TryGrantPickup(AMyCharacter* Picker, USoundBase*& OutPickupSound)
 {
-	if (AMyCharacter* Character = Cast<AMyCharacter>(Picker))
-	{
-		TryClaimPersistentWorldPickup(Character);
-	}
+	return TryClaimPersistentWorldPickup(Picker, OutPickupSound);
 }

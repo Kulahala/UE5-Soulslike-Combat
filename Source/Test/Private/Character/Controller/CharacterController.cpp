@@ -941,6 +941,26 @@ void ACharacterController::ItemDebugFailNextClaimSave()
 #endif
 }
 
+void ACharacterController::GoldDebugFailNextClaimSave()
+{
+#if UE_BUILD_SHIPPING
+	UE_LOG(LogTemp, Warning, TEXT("GoldDebugFailNextClaimSave is unavailable in Shipping builds."));
+#else
+	USoulslikeGameInstance* GameInstance = GetGameInstance<USoulslikeGameInstance>();
+	if (!GameInstance)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("GoldDebugFailNextClaimSave failed: no SoulslikeGameInstance is available."));
+		return;
+	}
+
+	if (GameInstance->ArmNextGoldClaimSaveFailureForDebug())
+	{
+		UE_LOG(LogTemp, Display,
+			TEXT("GoldDebugFailNextClaimSave armed: the next valid gold claim will simulate a save failure."));
+	}
+#endif
+}
+
 void ACharacterController::BowDebugFailNextAmmoConsumeSave()
 {
 #if UE_BUILD_SHIPPING

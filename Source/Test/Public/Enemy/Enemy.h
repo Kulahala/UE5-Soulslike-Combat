@@ -26,6 +26,7 @@ class UWidgetComponent;
 class UEnemyAttackConfigDataAsset;
 class UMotionWarpingComponent;
 class UAnimMontage;
+class ATreasure;
 
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnEnemyDied, AEnemy*);
 
@@ -322,6 +323,12 @@ private:
 	UPROPERTY(EditAnywhere, Category = "Combat", meta = (ToolTip = "死亡后尸体销毁延迟（秒）。"))
 	float CorpseLifespan = 5.f;
 
+	UPROPERTY(EditDefaultsOnly, Category = "Death Drop", meta = (ToolTip = "敌人死亡时生成的宝物类。为空时不生成掉落。"))
+	TSubclassOf<ATreasure> DeathTreasureClass = nullptr;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Death Drop", meta = (ToolTip = "敌人死亡时掉落的金币数量。"))
+	int32 DeathGoldValue = 0;
+
 	UPROPERTY(EditDefaultsOnly, Category = "Combat|Attack", meta = (ToolTip = "敌人攻击配置。为空时不会攻击，并会输出配置警告。"))
 	UEnemyAttackConfigDataAsset* EnemyAttackConfig = nullptr;
 
@@ -548,6 +555,7 @@ private:
 	AEncounterController* EncounterOwner = nullptr;
 	bool bEncounterDormant = false;
 	bool bDeathNotificationBroadcast = false;
+	bool bDeathTreasureSpawnAttempted = false;
 	FOnEnemyDied EnemyDiedDelegate;
 
 	/* 韧性系统 */
@@ -565,6 +573,7 @@ private:
 	TObjectPtr<UHitReactionConfigDataAsset> HitReactionConfig = nullptr;
 
 	UAnimMontage* GetStanceBreakMontage() const;
+	void SpawnDeathTreasure();
 	bool PlayStanceBreakMontage();
 	void OnStanceBreakMontageEnded(UAnimMontage* Montage, bool bInterrupted);
 	void RecoverFromStanceBreak();

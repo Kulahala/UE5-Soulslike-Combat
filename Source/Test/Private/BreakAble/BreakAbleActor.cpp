@@ -1,9 +1,11 @@
 // ABreakAbleActor.cpp
 #include "BreakAble/BreakAbleActor.h"
+#include "Engine/World.h"
 #include "GeometryCollection/GeometryCollectionComponent.h"
-#include "NiagaraFunctionLibrary.h"
-#include "Items/Treasures/Treasure.h"
 #include "Kismet/GameplayStatics.h"
+#include "NiagaraFunctionLibrary.h"
+
+#include "Items/Treasures/Treasure.h"
 
 ABreakAbleActor::ABreakAbleActor()
 {
@@ -67,16 +69,22 @@ void ABreakAbleActor::SpawnSingleTreasure(UWorld* World)
 	{
 		int32 RandomIndex = FMath::RandRange(0, PossibleDrops.Num() - 1);
 		UTreasureData* SelectedData = PossibleDrops[RandomIndex];
-		if (ATreasure* SpawnedTreasure = World->SpawnActor<ATreasure>(BaseTreasureClass, GetActorLocation(),
-		                                                              GetActorRotation()))
+		const FTransform SpawnTransform(GetActorRotation(), GetActorLocation());
+		ATreasure* SpawnedTreasure = World->SpawnActorDeferred<ATreasure>(BaseTreasureClass, SpawnTransform,
+			nullptr, nullptr, ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+		if (!SpawnedTreasure)
 		{
-			SpawnedTreasure->InitializeFromData(SelectedData);
-			// 计算随机落点 (在距离中心 50 到 150 范围内)
-			FVector2D RandomCircle = FMath::RandPointInCircle(150.f);
-			FVector TargetLocation = GetActorLocation() + FVector(RandomCircle.X, RandomCircle.Y, 0.f);
-
-			SpawnedTreasure->StartSpawning(TargetLocation);
+			UE_LOG(LogTemp, Warning, TEXT("%s failed to deferred-spawn treasure class '%s'."),
+				*GetName(), *GetNameSafe(BaseTreasureClass.Get()));
+			return;
 		}
+
+		SpawnedTreasure->InitializeFromData(SelectedData);
+		// 在 BeginPlay 前写入生成状态，禁止 AutoOverlap 在抛物线起点抢先领取。
+		const FVector2D RandomCircle = FMath::RandPointInCircle(150.f);
+		const FVector TargetLocation = GetActorLocation() + FVector(RandomCircle.X, RandomCircle.Y, 0.f);
+		SpawnedTreasure->StartSpawning(TargetLocation);
+		UGameplayStatics::FinishSpawningActor(SpawnedTreasure, SpawnTransform);
 	}
 }
 

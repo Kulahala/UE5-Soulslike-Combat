@@ -94,6 +94,7 @@ public:
 	virtual void Equip() override;
 	void TryInteract();
 	bool CanInteractWithWorld() const;
+	bool CanAutoCollectWorldPickup() const;
 	void RegisterInteractable(AActor* InteractableActor);
 	void UnregisterInteractable(AActor* InteractableActor);
 	void SetBonfireServiceProtection(bool bEnabled);
@@ -108,6 +109,7 @@ public:
 	bool VerifyAmmoRefillFixture(FName DefinitionId);
 	bool TryClaimWorldItemPickup(FName PersistentId, FName ItemDefinitionId, int32 PickupQuantity, FName& OutInstanceId,
 	                             USoundBase*& OutPickupSound);
+	bool TryAddGold(int32 Amount, int32& OutNewGold);
 	bool TryEquipOwnedItem(FName InstanceId);
 	bool TryApplyBonfireLoadoutSelection(EItemEquipmentSlot EquipmentSlot, FName InstanceId);
 	void MaterializeEquippedLoadout();

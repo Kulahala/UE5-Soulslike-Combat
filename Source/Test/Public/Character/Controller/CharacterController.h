@@ -208,6 +208,9 @@ public:
 	void ItemDebugFailNextClaimSave();
 
 	UFUNCTION(Exec)
+	void GoldDebugFailNextClaimSave();
+
+	UFUNCTION(Exec)
 	void BowDebugFailNextAmmoConsumeSave();
 
 	UFUNCTION(Exec)

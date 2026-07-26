@@ -10,9 +10,17 @@
 
 class AMyCharacter;
 class USphereComponent;
+class USoundBase;
 
 UENUM()
 enum class EItemState : int8 { EIS_Spawning, EIS_Dropped, EIS_Equipped };
+
+UENUM(BlueprintType)
+enum class EItemPickupTriggerPolicy : uint8
+{
+	Interact,
+	AutoOverlap
+};
 
 UCLASS()
 class TEST_API Aitem : public AActor, public IPickupInterface, public IInteractableInterface
@@ -24,6 +32,8 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Spawning", meta = (ToolTip = "从当前位置沿抛物线移动到目标位置，结束后进入可拾取状态。"))
 	void StartSpawning(const FVector& Target);
+
+	void SetPickupTriggerPolicy(EItemPickupTriggerPolicy NewPolicy);
 
 	virtual void OnPickup_Implementation(AActor* Picker) override;
 	virtual bool CanInteract_Implementation(AActor* Interactor) const override;
@@ -44,8 +54,10 @@ protected:
 	virtual void SphereOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
 
 	void DisablePickupCollision();
+	void EnablePickupCollision();
+	virtual bool TryGrantPickup(AMyCharacter* Picker, USoundBase*& OutPickupSound);
 	virtual bool RequiresPersistentWorldClaim() const { return false; }
-	bool TryClaimPersistentWorldPickup(AMyCharacter* Picker);
+	bool TryClaimPersistentWorldPickup(AMyCharacter* Picker, USoundBase*& OutPickupSound);
 
 	/* 抛物线参数 */
 	// 抛物线持续时间
@@ -72,6 +84,9 @@ protected:
 	/* 状态 */
 	UPROPERTY(BlueprintReadOnly, Category = "State", meta = (ToolTip = "当前物品状态：生成抛物线中、掉落待拾取或已装备。"))
 	EItemState ItemState = EItemState::EIS_Dropped;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Pickup", meta = (AllowPrivateAccess = "true", ToolTip = "物品通过交互键领取，或在玩家进入拾取范围时自动领取。"))
+	EItemPickupTriggerPolicy PickupTriggerPolicy = EItemPickupTriggerPolicy::Interact;
 
 private:
 	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Persistent Pickup", meta = (AllowPrivateAccess = "true", ToolTip = "固定世界拾取物的稳定关卡作者 ID；不可使用 Actor 名称或运行时 GUID。"))
@@ -105,9 +120,20 @@ private:
 	float RunningTime = 0.f;
 	FVector StartLocation; // 记录初始位置，作为浮动的基准点
 	bool bPersistentWorldPickupAvailable = true;
+	bool bPickupResolutionInProgress = false;
+	bool bReconcilingOverlaps = false;
+	TWeakObjectPtr<AMyCharacter> AutoOverlapPicker;
+	bool bAutoOverlapClaimAttempted = false;
 
 	void InitializePersistentWorldPickup();
 	bool HasDuplicatePersistentWorldPickupId() const;
+	bool CanResolvePickup(const AMyCharacter* Picker) const;
+	void ResolvePickup(AMyCharacter* Picker);
+	void FinalizePickup(AMyCharacter* Picker, USoundBase* PickupSound);
+	void HandleCurrentOverlaps();
+	void TrackAutoOverlapPicker(AMyCharacter* Picker);
+	void ClearAutoOverlapPicker(AMyCharacter* Picker);
+	void TryResolveTrackedAutoOverlap();
 
 public:
 	FORCEINLINE UStaticMeshComponent* GetMesh() const { return Mesh; }

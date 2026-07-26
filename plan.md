@@ -14,10 +14,10 @@
 
 ## 反馈意见 (Feedback)
 
-<!-- 当前无待处理反馈。 -->
+- 已清理：`TODO-03C0` 已通过主线程与独立对抗性 review；稳定结果见 `ARCHITECTURE.md` 和 `ROADMAP.md`。
 
 ---
 
 ## 计划 (Plan)
 
-<!-- 当前无活动计划。TODO-05C 已通过用户编译、PIE 与严格 review；稳定合同见 ARCHITECTURE.md，阶段摘要与非阻塞 Montage 边界验证债务见 ROADMAP.md。 -->
+✅ `TODO-03C0: Enemy Gold Drop And Pickup v1` 已执行并通过 review。下个阶段开始前按本文件顶部规则清空此短记录。

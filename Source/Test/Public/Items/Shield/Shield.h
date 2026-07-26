@@ -18,7 +18,6 @@ public:
 	bool EquipToOffhand(USceneComponent* Parent, const FName& SocketName, AActor* NewOwner,
 	                    bool bPlayEquipSound = true);
 	void PlayEquipSound() const;
-	virtual void OnPickup_Implementation(AActor* Picker) override;
 	virtual bool RequiresPersistentWorldClaim() const override { return true; }
 
 	/* Getters */
@@ -33,6 +32,9 @@ public:
 	FORCEINLINE USoundBase* GetParrySound() const { return ParrySound; }
 	FORCEINLINE UNiagaraSystem* GetParryParticle() const { return ParryParticle; }
 	FORCEINLINE FName GetOffhandSocketName() const { return OffhandSocketName; }
+
+protected:
+	virtual bool TryGrantPickup(AMyCharacter* Picker, USoundBase*& OutPickupSound) override;
 
 private:
 

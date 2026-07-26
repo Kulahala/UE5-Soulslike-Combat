@@ -90,21 +90,7 @@ void ATestGameMode::HandlePlayerSpawned(APlayerController* NewPlayer)
 		return;
 	}
 
-	if (ManagedPlayer.IsValid())
-	{
-		if (UAttributeComponent* PreviousAttributes = ManagedPlayer->GetAttributes())
-		{
-			PreviousAttributes->OnGoldChanged.RemoveDynamic(this, &ATestGameMode::HandlePlayerGoldChanged);
-		}
-	}
-
-	ManagedPlayer = Player;
 	RestorePlayerFromSave(Player);
-
-	if (UAttributeComponent* Attributes = Player->GetAttributes())
-	{
-		Attributes->OnGoldChanged.AddDynamic(this, &ATestGameMode::HandlePlayerGoldChanged);
-	}
 
 	if (USoulslikeGameInstance* GameInstance = GetGameInstance<USoulslikeGameInstance>())
 	{
@@ -161,7 +147,6 @@ bool ATestGameMode::RequestRestAtCheckpoint(ACheckpointActor* Checkpoint, AMyCha
 		return false;
 	}
 
-	CapturePlayerGold();
 	if (!Player->TryRestockAmmoAtCheckpoint(GetCurrentGameplayMapName(), Checkpoint->GetPersistentId()))
 	{
 		return false;
@@ -198,8 +183,6 @@ void ATestGameMode::HandlePlayerDeath(AMyCharacter* Player)
 	GameInstance->PrepareGameplayTransition(GetCurrentGameplayMapName(), RespawnCheckpointId);
 
 	bTransitionInProgress = true;
-	CapturePlayerGold();
-
 	if (ACharacterController* Controller = Cast<ACharacterController>(Player->GetController()))
 	{
 		Controller->ShowDeathOverlay();
@@ -217,8 +200,6 @@ void ATestGameMode::RequestReturnToMainMenu(ACharacterController* RequestingCont
 	}
 
 	bTransitionInProgress = true;
-	CapturePlayerGold();
-
 	if (RequestingController)
 	{
 		RequestingController->PrepareForMapTransition();
@@ -279,10 +260,8 @@ void ATestGameMode::RestorePlayerFromSave(AMyCharacter* Player)
 		return;
 	}
 
-	bRestoringPlayerState = true;
 	Attributes->RestoreCheckpointResources();
 	Attributes->SetGold(SaveGame->Gold);
-	bRestoringPlayerState = false;
 
 	Player->RestoreItemOwnershipFromSave(SaveGame);
 }
@@ -309,22 +288,6 @@ bool ATestGameMode::IsPlayerEngagedByEnemy(const AMyCharacter* Player) const
 	}
 
 	return false;
-}
-
-void ATestGameMode::CapturePlayerGold()
-{
-	if (!ManagedPlayer.IsValid())
-	{
-		return;
-	}
-
-	if (UAttributeComponent* Attributes = ManagedPlayer->GetAttributes())
-	{
-		if (USoulslikeGameInstance* GameInstance = GetGameInstance<USoulslikeGameInstance>())
-		{
-			GameInstance->UpdateGold(Attributes->GetGold());
-		}
-	}
 }
 
 void ATestGameMode::StartGameplayReload()
@@ -361,17 +324,4 @@ void ATestGameMode::FinishGameplayReload()
 	}
 
 	UGameplayStatics::OpenLevel(this, TransitionMapName);
-}
-
-void ATestGameMode::HandlePlayerGoldChanged(int32 NewGold)
-{
-	if (bRestoringPlayerState)
-	{
-		return;
-	}
-
-	if (USoulslikeGameInstance* GameInstance = GetGameInstance<USoulslikeGameInstance>())
-	{
-		GameInstance->UpdateGold(NewGold);
-	}
 }
