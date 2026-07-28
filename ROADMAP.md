@@ -48,8 +48,8 @@ The player must be able to die, restart from the last checkpoint, quit, and cont
 
 - Normal patrol and ambient combat enemies are hand-placed. Their reset behavior is driven by rest/death, not by the encounter system.
 - Sealed encounters, ambushes, waves, and Boss fights are owned by `AEncounterController`. The player cannot leave an active sealed encounter.
-- On safe inner-region entry, the controller activates one configured participant source: existing pre-placed enemies or one transient initial batch resolved from placed `AEncounterSpawnPoint` actors. It closes its own temporary encounter boundaries only after every required participant is ready. Defeating every participant reopens those boundaries; fixed clear rewards and persistence remain later stages.
-- Encounter failure currently means player death before `Cleared`; the existing world reload returns the transient encounter to `Idle` with boundaries open. Durable cleared-state restoration is deferred to `TODO-02C1` after a permanent authored encounter exists.
+- On safe inner-region entry, the controller activates one configured participant source: existing pre-placed enemies or one transient initial batch resolved from placed `AEncounterSpawnPoint` actors. It closes its own temporary encounter boundaries only after every required participant is ready. Defeating every participant reopens those boundaries; clear persistence is rollback-safe through `TODO-02C1`, while fixed clear rewards remain later work.
+- Encounter failure before `Cleared` still lets world reload return the transient encounter to `Idle` with boundaries open. A successfully cleared Controller-managed group now restores empty across Rest, death reload and Continue; a failed clear save opens the boundary for the current session but restores the group on the next world reload.
 - Spawn strategy is per encounter: the current runtime supports either pre-placed activation or one initial batch whose members choose enemy class, count and `Point`/`Circle`/`Box` Anchor candidates. Later timed/multi-wave scheduling remains out of scope.
 
 ### Target Architecture For The Demo
@@ -58,7 +58,7 @@ The player must be able to die, restart from the last checkpoint, quit, and cont
 - `ATestGameMode`: single-player game flow, save loading, checkpoint respawn, and level completion.
 - `UTestSaveGame`: versioned persistent state containing level ID, checkpoint ID, gold, owned item instances, equipped slots, opened shortcuts, cleared encounter IDs, opened chest/reward IDs, and Boss completion state.
 - `ACheckpointActor`: placed visual/interactable checkpoint that writes a respawn anchor; it does not become a second save manager.
-- `AEncounterController`: 当前负责安全内区激活、预放置或一次性 Initial Spawn Batch 的互斥参与者来源、`Idle -> Active -> Cleared` 和 Controller-owned 临时碰撞/材质边界段。它先原子解析/生成/接线全部动态参与者，再关闭边界；后续多波调度、奖励、持久化恢复和最终 Boss 表现仍属于后续阶段。
+- `AEncounterController`: 当前负责安全内区激活、预放置或一次性 Initial Spawn Batch 的互斥参与者来源、`Idle -> Active -> Cleared` 和 Controller-owned 临时碰撞/材质边界段。它先原子解析/生成/接线全部动态参与者，再关闭边界；清场状态由 `USoulslikeGameInstance` 的 rollback-safe `ClearedEncounterIds` 事务持久化和恢复。后续多波调度、奖励和最终 Boss 表现仍属于后续阶段。
 - `AEncounterSpawnPoint`: 当前提供稳定 `SpawnPointId`、Arrow 和 `Point`/`Circle`/`Box` 候选区域。它不选择敌人类、不实际 Spawn，也不拥有 Controller。
 - Future fog-wall Mesh, Niagara, audio, and opening presentation extend Controller-owned boundary segments. They are used for Bosses and explicit sealed encounters, never as generic level decoration.
 
@@ -90,6 +90,9 @@ Completed roadmap work is retained here as a compact, durable record. Do not ret
 
 - [x] **TODO-02C0: Encounter Wave Spawn Core v1**
   Delivered one transient, configured Initial Spawn Batch as the mutually exclusive alternative to pre-placed participants. `AEncounterSpawnPoint` now authors stable IDs plus Point/Circle/Box candidate areas; `AEncounterController` atomically resolves NavMesh, ground, Capsule, in-boundary and reservation-safe transforms before deferred spawning, owner/delegate wiring and activation. Any failure rolls the batch back without closing the boundary; dynamic enemy teardown also removes the enemy-owned patrol TargetPoint without turning a direct Destroy into a clear event. User compile/PIE validation covered normal activation, outside-boundary rejection and TargetPoint teardown; normal review and a fresh delta adversarial review found no blocker. Completed in commit `0efb7ad`.
+
+- [x] **TODO-02C1: Encounter Clear Persistence And Restore v1**
+  Delivered the single `EncounterId -> ClearedEncounterIds` transaction through `USoulslikeGameInstance`: add, save or controlled failure injection, commit or rollback. Cleared Controllers restore before boundaries, participant claims or dynamic spawning; preplaced participants are directly destroyed without a fake death or extra drop, while save failure opens the current boundary but restores the group on the next reload. User compiled `TestEditor` and PIE-validated Rest/Continue persistence plus the controlled failure rollback; normal review and a fresh adversarial review, followed by a tooltip-only delta review, found no remaining blocker. Completed in this commit.
 
 - [x] **TODO-03A: Item Definition And Ownership v1**
   Delivered static item definitions, per-Pawn owned-instance and equipment-slot caches, GameInstance-mediated transactional SaveGame writes, and semantic restore on every spawned Pawn. User validation covered Grant/Equip, rest reload, death reload, `Continue`, a fresh PIE session, and New Game reset. This data-only stage intentionally does not materialize, attach, or remove weapon/shield Actors.
@@ -197,7 +200,7 @@ Completed roadmap work is retained here as a compact, durable record. Do not ret
 
 These TODOs are accepted future work, not permission to start implementation immediately. A queued item must be small enough to produce one independently verifiable result. Queue position follows prerequisites, validation dependencies, and the player-facing loop rather than numeric ID or append order. When an item becomes the next stage, move only that item out of this queue and write its complete implementation plan in `plan.md` first. On completion, record stable facts in `ARCHITECTURE.md` and move the compact result into `Done Milestones`; do not turn this roadmap into a stage log.
 
-**Encounter sequencing decision:** reusable Controller behavior, Spline authoring and transient Initial Spawn Batch behavior were proven by `TODO-02A1/A2/C0`. The user has deferred permanent dungeon/route authoring, fog-gate placement, Boss placement and end-to-end level validation until the relevant runtime features are ready. The former standalone `TODO-02B` remains absorbed by the later `TODO-06A`; do not place a permanent `TestMap` encounter solely to repeat core validation. Durable clear-state restoration remains gated on the later permanent Controller-owned encounter.
+**Encounter sequencing decision:** reusable Controller behavior, Spline authoring, transient Initial Spawn Batch behavior and one narrow `TestMap` clear-persistence fixture were proven by `TODO-02A1/A2/C0/C1`. The user has deferred permanent dungeon/route authoring, fog-gate placement, Boss placement and end-to-end level validation until the relevant runtime features are ready. The completed fixture is not a substitute for the later `TODO-06A` dungeon route. The former standalone `TODO-02B` remains absorbed by `TODO-06A`.
 
 ### Combat Punish And Criticals
 
@@ -211,8 +214,6 @@ These TODOs are accepted future work, not permission to start implementation imm
 
 ### Encounter Persistence And Rewards
 
-- [ ] **TODO-02C1: Encounter Clear Persistence And Restore v1**
-  Prerequisite: `TODO-02C0` has proven transient wave spawning and `TODO-06A` has a stable permanent `EncounterId` in the authored dungeon route. Add only `EncounterId -> ClearedEncounterIds` write-through and reload/Continue restoration. Verify uncleared death reset to `Idle` with boundaries open, cleared reload/Continue restoration, and that the persisted result never replays its rewards. Fixed rewards remain an equipment-loot stage concern.
 
 `TODO-02C0` owns only transient spawn configuration and runtime participants. `TODO-02C1` owns only Controller-managed encounter persistence. Neither is a final catch-all migration for pickups, equipment, shortcuts, rewards or Boss state. Each durable feature must add its own read/write path when its stable ID and reset contract are implemented, so that feature can be validated in the player loop that introduces it. `TODO-07B` is the final cross-system Demo regression route; it verifies completed persistence paths together and fixes regressions, but does not defer their original implementation.
 
@@ -236,8 +237,6 @@ These TODOs are accepted future work, not permission to start implementation imm
 ## Known Risks And Validation Debt
 
 This is a small durable register for non-blocking review findings that can affect a later stage or release decision. Each entry states the affected boundary, current evidence, and the condition that requires resolution. It is not a second TODO queue: a blocker must be fixed in its current stage, transient working notes stay in `plan.md`, and an entry becomes a TODO only when its resolution has a defined implementation or validation stage.
-
-- **Generic persistent-marker writers do not yet expose write failure as a failed operation.** `AddPersistentId()` adds its `FName` then returns success without checking the save result. The completed `TODO-03C0` Gold claim has its own rollback-safe `TryAddGold()` transaction and is not part of this debt; fixed world-pickup, equipment-slot, and checkpoint transactions also retain dedicated rollback paths. **Resolution condition:** before `TODO-02C1` or `TODO-03C` makes a `MarkShortcutOpened()` / `MarkEncounterCleared()` / `MarkBossCompleted()` result gate a world Actor removal, boundary opening, reward, or other irreversible presentation, standardize those APIs on explicit failure results and defined rollback/retry behavior, then cover the branch with controlled save-write failure injection.
 
 - **World-pickup invalid-authoring downgrade is source-reviewed, not fixture-validated.** Missing/duplicate `PersistentId` and unknown `ItemDefinitionId` paths warn and prevent an invalid reward from being granted; the valid sword/shield path is user-validated. **Resolution condition:** before `TODO-03C` adds another persistent fixed reward or drop source, create an unsaved temporary fixture for missing ID, duplicate ID, and unknown definition cases, then verify warnings, no duplicate item record, and no erroneous Actor removal.
 

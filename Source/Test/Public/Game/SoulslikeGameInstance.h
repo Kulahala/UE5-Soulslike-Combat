@@ -51,6 +51,7 @@ public:
 	bool GetSavedClaimedRewardIds(TSet<FName>& OutClaimedRewardIds) const;
 	bool ArmNextItemClaimSaveFailureForDebug();
 	bool ArmNextGoldClaimSaveFailureForDebug();
+	bool ArmNextEncounterClearSaveFailureForDebug();
 	bool ArmNextLoadedAmmoConsumeSaveFailureForDebug();
 	bool ArmNextAmmoRefillSaveFailureForDebug();
 	bool ActivateCheckpointAndSetRespawn(FName GameplayMapName, FName CheckpointId);
@@ -65,7 +66,8 @@ public:
 	void MarkShortcutOpened(FName PersistentId);
 	void MarkRewardClaimed(FName PersistentId);
 	bool HasClaimedReward(FName PersistentId);
-	void MarkEncounterCleared(FName PersistentId);
+	bool HasEncounterCleared(FName EncounterId);
+	bool TryMarkEncounterCleared(FName EncounterId);
 	void MarkBossCompleted(FName PersistentId);
 
 	FORCEINLINE const UTestSaveGame* GetCurrentSaveGame() const { return CurrentSaveGame; }
@@ -93,10 +95,12 @@ private:
 	static bool IsSupportedEquipmentSlotId(FName SlotId);
 	bool ConsumeItemClaimSaveFailureForDebug(FName RewardId);
 	bool ConsumeGoldClaimSaveFailureForDebug(int32 Amount);
+	bool ConsumeEncounterClearSaveFailureForDebug(FName EncounterId);
 	bool ConsumeLoadedAmmoSaveFailureForDebug(FName DefinitionId);
 	bool ConsumeAmmoRefillSaveFailureForDebug();
 	void ClearItemClaimSaveFailureForDebug();
 	void ClearGoldClaimSaveFailureForDebug();
+	void ClearEncounterClearSaveFailureForDebug();
 	void ClearLoadedAmmoConsumeSaveFailureForDebug();
 	void ClearAmmoRefillSaveFailureForDebug();
 	void OpenGameplayMap();
@@ -109,6 +113,7 @@ private:
 	bool bAttemptedSaveLoad = false;
 	bool bFailNextItemClaimSaveForDebug = false;
 	bool bFailNextGoldClaimSaveForDebug = false;
+	bool bFailNextEncounterClearSaveForDebug = false;
 	bool bFailNextLoadedAmmoConsumeSaveForDebug = false;
 	bool bFailNextAmmoRefillSaveForDebug = false;
 

@@ -34,6 +34,7 @@ bool USoulslikeGameInstance::StartNewGame(FName GameplayMapName)
 
 	ClearItemClaimSaveFailureForDebug();
 	ClearGoldClaimSaveFailureForDebug();
+	ClearEncounterClearSaveFailureForDebug();
 	ClearLoadedAmmoConsumeSaveFailureForDebug();
 	ClearAmmoRefillSaveFailureForDebug();
 
@@ -595,6 +596,23 @@ bool USoulslikeGameInstance::ArmNextGoldClaimSaveFailureForDebug()
 #endif
 }
 
+bool USoulslikeGameInstance::ArmNextEncounterClearSaveFailureForDebug()
+{
+#if UE_BUILD_SHIPPING
+	UE_LOG(LogTemp, Warning, TEXT("Encounter clear save failure injection is unavailable in Shipping builds."));
+	return false;
+#else
+	if (!EnsureCurrentSaveLoaded() || !CurrentSaveGame || !CurrentSaveGame->IsPersistable())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Encounter clear save failure injection failed: no usable current save."));
+		return false;
+	}
+
+	bFailNextEncounterClearSaveForDebug = true;
+	return true;
+#endif
+}
+
 bool USoulslikeGameInstance::ArmNextLoadedAmmoConsumeSaveFailureForDebug()
 {
 #if UE_BUILD_SHIPPING
@@ -769,6 +787,7 @@ void USoulslikeGameInstance::PrepareGameplayTransition(FName GameplayMapName, FN
 {
 	ClearItemClaimSaveFailureForDebug();
 	ClearGoldClaimSaveFailureForDebug();
+	ClearEncounterClearSaveFailureForDebug();
 	ClearLoadedAmmoConsumeSaveFailureForDebug();
 	ClearAmmoRefillSaveFailureForDebug();
 	PendingGameplayMapName = GameplayMapName;
@@ -798,6 +817,7 @@ void USoulslikeGameInstance::ReturnToMainMenu()
 {
 	ClearItemClaimSaveFailureForDebug();
 	ClearGoldClaimSaveFailureForDebug();
+	ClearEncounterClearSaveFailureForDebug();
 	ClearLoadedAmmoConsumeSaveFailureForDebug();
 	ClearAmmoRefillSaveFailureForDebug();
 	PendingGameplayMapName = NAME_None;
@@ -831,12 +851,36 @@ bool USoulslikeGameInstance::HasClaimedReward(FName PersistentId)
 	return CurrentSaveGame->ClaimedRewardIds.Contains(PersistentId);
 }
 
-void USoulslikeGameInstance::MarkEncounterCleared(FName PersistentId)
+bool USoulslikeGameInstance::HasEncounterCleared(FName EncounterId)
 {
-	if (EnsureCurrentSaveLoaded() && CurrentSaveGame)
+	if (EncounterId == NAME_None || !EnsureCurrentSaveLoaded() || !CurrentSaveGame || !CurrentSaveGame->IsPersistable())
 	{
-		AddPersistentId(CurrentSaveGame->ClearedEncounterIds, PersistentId, TEXT("encounter"));
+		return false;
 	}
+
+	return CurrentSaveGame->ClearedEncounterIds.Contains(EncounterId);
+}
+
+bool USoulslikeGameInstance::TryMarkEncounterCleared(FName EncounterId)
+{
+	if (EncounterId == NAME_None || !EnsureCurrentSaveLoaded() || !CurrentSaveGame || !CurrentSaveGame->IsPersistable())
+	{
+		return false;
+	}
+
+	if (CurrentSaveGame->ClearedEncounterIds.Contains(EncounterId))
+	{
+		return true;
+	}
+
+	CurrentSaveGame->ClearedEncounterIds.Add(EncounterId);
+	if (!ConsumeEncounterClearSaveFailureForDebug(EncounterId) && SaveNow())
+	{
+		return true;
+	}
+
+	CurrentSaveGame->ClearedEncounterIds.Remove(EncounterId);
+	return false;
 }
 
 void USoulslikeGameInstance::MarkBossCompleted(FName PersistentId)
@@ -1126,6 +1170,22 @@ bool USoulslikeGameInstance::ConsumeGoldClaimSaveFailureForDebug(int32 Amount)
 #endif
 }
 
+bool USoulslikeGameInstance::ConsumeEncounterClearSaveFailureForDebug(FName EncounterId)
+{
+#if UE_BUILD_SHIPPING
+	return false;
+#else
+	if (!bFailNextEncounterClearSaveForDebug)
+	{
+		return false;
+	}
+
+	bFailNextEncounterClearSaveForDebug = false;
+	UE_LOG(LogTemp, Warning, TEXT("Injected encounter-clear save failure for EncounterId '%s'."), *EncounterId.ToString());
+	return true;
+#endif
+}
+
 bool USoulslikeGameInstance::ConsumeLoadedAmmoSaveFailureForDebug(FName DefinitionId)
 {
 #if UE_BUILD_SHIPPING
@@ -1166,6 +1226,11 @@ void USoulslikeGameInstance::ClearItemClaimSaveFailureForDebug()
 void USoulslikeGameInstance::ClearGoldClaimSaveFailureForDebug()
 {
 	bFailNextGoldClaimSaveForDebug = false;
+}
+
+void USoulslikeGameInstance::ClearEncounterClearSaveFailureForDebug()
+{
+	bFailNextEncounterClearSaveForDebug = false;
 }
 
 void USoulslikeGameInstance::ClearLoadedAmmoConsumeSaveFailureForDebug()

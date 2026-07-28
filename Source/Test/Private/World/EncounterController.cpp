@@ -10,6 +10,7 @@
 #include "Enemy/Enemy.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
+#include "Game/SoulslikeGameInstance.h"
 #include "GameFramework/Pawn.h"
 #include "Kismet/GameplayStatics.h"
 #include "Materials/MaterialInterface.h"
@@ -278,6 +279,15 @@ void AEncounterController::BeginPlay()
 		SetCommitVolumeEnabled(SplineCommitCandidateVolume, false);
 		SetBoundariesClosed(false);
 		return;
+	}
+
+	if (USoulslikeGameInstance* GameInstance = GetGameInstance<USoulslikeGameInstance>())
+	{
+		if (GameInstance->HasEncounterCleared(EncounterId))
+		{
+			RestoreClearedStateFromSave();
+			return;
+		}
 	}
 
 	if (!BuildRuntimeBoundaries())
@@ -1647,6 +1657,38 @@ void AEncounterController::RefreshTickEnabled()
 	SetActorTickEnabled(bShouldTick);
 }
 
+void AEncounterController::RestoreClearedStateFromSave()
+{
+	SetEncounterState(EEncounterState::Cleared);
+	SetCommitVolumeEnabled(RectangularCommitVolume, false);
+	SetCommitVolumeEnabled(RadialCommitVolume, false);
+	SetCommitVolumeEnabled(SplineCommitCandidateVolume, false);
+	SetBoundariesClosed(false);
+
+	bAwaitingPlayerSetup = false;
+	bConfigurationValid = false;
+	bHasObservedPlayerOutsideCommitRegion = false;
+	PendingCommitPlayer.Reset();
+	InitialSafeRegionPlayer.Reset();
+	RemainingParticipants.Reset();
+	RuntimeSpawnedParticipants.Reset();
+	SetActorTickEnabled(false);
+
+	DestroyPreplacedParticipantsForClearedState();
+	UE_LOG(LogTemp, Display, TEXT("Encounter '%s' restored as Cleared from the current save."), *EncounterId.ToString());
+}
+
+void AEncounterController::DestroyPreplacedParticipantsForClearedState()
+{
+	for (AEnemy* Participant : PreplacedParticipants)
+	{
+		if (IsValid(Participant))
+		{
+			Participant->Destroy();
+		}
+	}
+}
+
 void AEncounterController::ReleaseParticipants(bool bDestroySpawnedParticipants)
 {
 	for (AEnemy* Participant : PreplacedParticipants)
@@ -1750,6 +1792,19 @@ void AEncounterController::HandleParticipantDied(AEnemy* DefeatedEnemy)
 	if (!RemainingParticipants.IsEmpty())
 	{
 		return;
+	}
+
+	bool bPersistedClear = false;
+	if (USoulslikeGameInstance* GameInstance = GetGameInstance<USoulslikeGameInstance>())
+	{
+		bPersistedClear = GameInstance->TryMarkEncounterCleared(EncounterId);
+	}
+
+	if (!bPersistedClear)
+	{
+		UE_LOG(LogTemp, Warning,
+			TEXT("Encounter '%s' could not persist its cleared state; continuing with current-session clear only."),
+			*EncounterId.ToString());
 	}
 
 	SetEncounterState(EEncounterState::Cleared);

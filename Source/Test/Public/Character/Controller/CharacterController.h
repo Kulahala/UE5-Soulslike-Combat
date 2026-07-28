@@ -211,6 +211,9 @@ public:
 	void GoldDebugFailNextClaimSave();
 
 	UFUNCTION(Exec)
+	void EncounterDebugFailNextClearSave();
+
+	UFUNCTION(Exec)
 	void BowDebugFailNextAmmoConsumeSave();
 
 	UFUNCTION(Exec)

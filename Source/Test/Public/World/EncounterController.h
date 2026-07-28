@@ -17,7 +17,7 @@ class USplineComponent;
 class UStaticMesh;
 class UStaticMeshComponent;
 
-/** 只管理当前地图的遭遇生命周期。奖励、波次和持久化恢复由后续阶段负责。 */
+/** 只管理当前地图的遭遇生命周期。奖励和波次由后续阶段负责。 */
 UCLASS()
 class TEST_API AEncounterController : public AActor
 {
@@ -73,6 +73,8 @@ private:
 	void BeginPendingCommit(AMyCharacter* Player);
 	void ClearPendingCommit();
 	void RefreshTickEnabled();
+	void RestoreClearedStateFromSave();
+	void DestroyPreplacedParticipantsForClearedState();
 	void ReleaseParticipants(bool bDestroySpawnedParticipants);
 	void DestroyRuntimeBoundaries();
 	void SetBoundariesClosed(bool bShouldClose);
@@ -94,7 +96,7 @@ private:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true", ToolTip = "在关卡视口拖点编辑的闭合边界。仅支持本地 Z=0、Linear 点和无自交简单闭环。"))
 	USplineComponent* BoundarySpline = nullptr;
 
-	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Encounter", meta = (AllowPrivateAccess = "true", ToolTip = "存档和未来重载使用的稳定关卡作者 ID；同一地图内必须唯一。"))
+	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Encounter", meta = (AllowPrivateAccess = "true", ToolTip = "存档和未来重载使用的稳定作者 ID；同一 SaveGame 中必须全局唯一。当前运行时只验证当前地图内的重复 ID。"))
 	FName EncounterId = NAME_None;
 
 	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Encounter", meta = (AllowPrivateAccess = "true", ToolTip = "预放置参与者路径。InitialSpawnBatch 非空时必须为空；两种参与者来源互斥。"))

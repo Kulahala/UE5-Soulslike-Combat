@@ -96,14 +96,16 @@ Language policy: keep stable section titles and HTML anchors in English; use Chi
 <a name="encounter-system"></a>
 ## Encounter System
 
-- `AEncounterController` 是当前地图内一场封闭遭遇的原生摆放 Owner。它拥有 `EncounterId`、激活条件、`Idle -> Active -> Cleared` 生命周期、运行时边界碰撞/视觉段和参与者死亡订阅。每个 Controller 必须二选一使用预放置 `PreplacedParticipants` 或一次性的 `InitialSpawnBatch`；它不拥有后续多波调度、奖励/掉落、SaveGame 读写、可互动门或地图重载。
+- `AEncounterController` 是当前地图内一场封闭遭遇的原生摆放 Owner。它拥有 `EncounterId`、激活条件、`Idle -> Active -> Cleared` 生命周期、运行时边界碰撞/视觉段和参与者死亡订阅。每个 Controller 必须二选一使用预放置 `PreplacedParticipants` 或一次性的 `InitialSpawnBatch`；它不拥有后续多波调度、奖励/掉落、SaveGame schema 或写入事务、可互动门或地图重载。
 - Controller 在领取参与者前验证配置。空或同地图重复的 `EncounterId`、两个或零个参与者来源、无效预放置列表、无效 Spawn Member（类、正数量、Anchor ID）、重复/缺失 Anchor ID、无效边界参数或不可用的 Spline 安全区域都会输出 warning，保持边界开放，并保留所有敌人的普通 AI 行为。
 - `Idle` 会领取有效预放置参与者并使其进入遭遇待命；Initial Spawn Batch 在此时不创建 Actor。有效玩家必须先被观察到离开安全内区，再走入该内区才可激活，因此 PIE 出生在安全内区不会立即封锁场地。批次激活会先为所有成员解析候选点、NavMesh、地面、胶囊碰撞、批内预约和边界内缩，再 deferred-spawn、领取 owner、绑定死亡委托、Dormant、FinishSpawn 和激活；任一失败都会销毁本批 Actor、解绑/释放 owner，保持 `Idle` 且不关闭边界。预放置路径继续直接激活既有参与者。最后一名已登记的 Active 参与者真实死亡后只会一次性进入 `Cleared`，打开边界并释放所有权。
 - `Rectangle`、`Radial` 和 `Spline` 都是 Controller 内部的边界作者模式。Rectangle 与 Radial 使用各自配置的内部尺寸；Spline 是可编辑、平面、Linear、无自交的简单闭环。所有模式都要求玩家胶囊中心位于作者区域内，且到每一面未来墙体的距离大于 `PlayerCapsuleRadius + SealClearance`，避免边界在玩家贴边时穿过角色封锁。Initial Spawn Batch 以最终地面位置和敌人有效 Capsule 半径做同一内侧边界检查：边界外或胶囊跨界候选只会重试或使整个批次保持 `Idle`，绝不在关闭边界后生成。
 - 每条作者边界都会生成一对运行时段：`UBoxComponent` 只在 `Active` 时阻挡 `Pawn`，无碰撞 Engine Cube 视觉段与其保持同一变换。`Idle`、`Cleared`、无效配置和 `EndPlay` 时视觉隐藏且碰撞为 `NoCollision`。`M_EncounterBoundary` 是当前灰白雾幕材质原型，不是最终 Boss 雾墙美术、开关动画、音频或 Niagara 行为。
 - `AEnemy::ClaimEncounterOwner()` / `ReleaseEncounterOwner()` 防止同一参与者被多个 Controller 管理。`SetEncounterDormant()` 是遭遇层的状态屏障，不是第二套 AI：它停止移动、Montage/Timer 驱动的后续路径、战斗瞬态和陈旧导航路径。`ActivateForEncounter()` 以触发玩家为目标恢复既有 `EES_Chasing -> EES_Combating` 路径。`Die()` 只广播一次原生死亡通知；Controller 只在 `Active` 消费该通知。预放置参与者在 teardown 时只解绑/释放，动态批次参与者在 rollback 或 Controller `EndPlay` 时销毁；`AEnemy::EndPlay()` 会幂等清理其运行时巡逻 `SpawnPoint`，但直接 Destroy 不伪造死亡通知或 Encounter Clear。
 - `AEncounterSpawnPoint` 提供作者填写的稳定 `SpawnPointId`、编辑器 Arrow，以及 `Point`、`Circle` 或 `Box` 的局部候选区域。它只计算候选 Transform；不持有敌人类、Controller、批次数据或实际生成逻辑。`AEncounterController` 是唯一的批次解析和 Spawn Owner。
-- `EncounterId` 是作者填写的 `FName` 持久化契约，绝不能使用 Actor object name/label、指针、运行时 GUID 或 External Actor package path。Controller 目前不会读写 `UTestSaveGame::ClearedEncounterIds` 或调用 `USoulslikeGameInstance::MarkEncounterCleared()`。该存档集合目前是全局集合，因此当持久化真正接入时，首个 Demo 要采用全局命名空间 ID，例如 `TestMap_CryptEliteEncounter`；多地图迁移决策记录在 `ROADMAP.md`。
+- `EncounterId` 是作者填写的 `FName` 持久化契约，绝不能使用 Actor object name/label、指针、运行时 GUID 或 External Actor package path。同一 `SaveGame` 中它必须全局唯一；Details 只承诺当前 `UWorld` 内的重复检测，因此首个 Demo 采用 `TestMap_CryptEliteEncounter` 这类全局命名空间 ID。第二张 gameplay map 前必须按 `ROADMAP.md` 决定并版本化 map-scoped identity 迁移。
+- `USoulslikeGameInstance` 是 `ClearedEncounterIds` 的唯一读写事务 Owner：`HasEncounterCleared()` 只查询可持久化当前存档；`TryMarkEncounterCleared()` 固定执行 ID 加入、debug-failure 或 `SaveNow()`、成功提交或失败回滚。Controller 不直接改集合；最后一名已登记 Active 参与者死亡后先请求该事务，再无论结果都完成本局 `Cleared` 收束。写入失败时边界仍打开、参与者仍解绑，但 ID 已回滚，所以后续世界重载恢复为 `Idle`。
+- `BeginPlay()` 在静态配置验证之后、运行时边界、Commit overlap、玩家初始化、参与者 owner/delegate 领取和 `InitialSpawnBatch` 生成之前读取清场标记。已清场时 Controller 直接进入 `Cleared`，关闭所有 Commit Volume 和 Tick，不创建运行时边界；预放置参与者仅 `Destroy()` 而不调用 `Die()`，动态批次完全跳过，因此不会伪造死亡通知、Gold 掉落或第二次清场。
 
 <a name="state-machine-system"></a>
 ## State Machine System (`CharacterTypes.h`)

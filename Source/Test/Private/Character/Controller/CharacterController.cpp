@@ -961,6 +961,26 @@ void ACharacterController::GoldDebugFailNextClaimSave()
 #endif
 }
 
+void ACharacterController::EncounterDebugFailNextClearSave()
+{
+#if UE_BUILD_SHIPPING
+	UE_LOG(LogTemp, Warning, TEXT("EncounterDebugFailNextClearSave is unavailable in Shipping builds."));
+#else
+	USoulslikeGameInstance* GameInstance = GetGameInstance<USoulslikeGameInstance>();
+	if (!GameInstance)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("EncounterDebugFailNextClearSave failed: no SoulslikeGameInstance is available."));
+		return;
+	}
+
+	if (GameInstance->ArmNextEncounterClearSaveFailureForDebug())
+	{
+		UE_LOG(LogTemp, Display,
+			TEXT("EncounterDebugFailNextClearSave armed: the next encounter clear will simulate a save failure."));
+	}
+#endif
+}
+
 void ACharacterController::BowDebugFailNextAmmoConsumeSave()
 {
 #if UE_BUILD_SHIPPING
