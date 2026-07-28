@@ -20,13 +20,4 @@
 
 ## 计划 (Plan)
 
-✅已执行并通过 review
-
-# TODO-02C0: Encounter Wave Spawn Core v1
-
-## 结果
-
-- 实现互斥的预放置参与者或一次性 `InitialSpawnBatch`，其 Anchor 使用稳定 ID 与 `Point`/`Circle`/`Box` 候选区域；Controller 在任何 Actor 生成前原子解析 NavMesh、地面、Capsule、边界内缩与批内预约安全落点。
-- 动态批次通过既有 owner、death delegate、Dormant 与 Activate 合同接线；失败会回滚动态 Actor 且保持 `Idle`、边界开放。`AEnemy::EndPlay` 也清理其巡逻 `TargetPoint`，不把直接 Destroy 伪造成死亡清场。
-- 用户已完成当前 `TestEditor`/PIE 验收：正常批次、边界外 Anchor 拒绝和动态 TargetPoint 清理均符合合同；主线程正常 review、fresh 对抗性 review 与 fresh delta review 均无未修复 blocker。
-- 提交仍须等待用户明确批准。下一阶段开始前按本文件顶部规则清空本阶段记录。
+<!-- 当前无活动计划。 -->

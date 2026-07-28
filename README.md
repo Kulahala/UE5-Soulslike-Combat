@@ -22,7 +22,7 @@ https://github.com/user-attachments/assets/fdd9304c-a7ea-4185-bfa1-09df583fa784
 - **State-driven player combat**: light combos, sprint attack, charged attack, dodge, parry, block, potion use, stamina exhaustion, hit stun, and death all flow through explicit action-state guards.
 - **Bonfire services, loadout, and checkpoint flow**: New Game creates writable progress but no respawn anchor; before the first bonfire, death returns to `PlayerStart` while Gold and claimed fixed items persist. The first bonfire use rests and activates the anchor; later uses offer Rest, Equipment, or Leave without pausing the world. Owned sword and shield instances can be equipped or cleared there, take effect immediately, and restore through death, rest, and Continue. A newly claimed fixed sword or shield immediately fills only its empty compatible slot and plays its pickup sound; it never replaces an occupied slot, while manual changes remain bonfire-only.
 - **Data-driven attack setup**: `UAttackConfigDataAsset` owns player light combo, special attack, and charged attack data; `UEnemyAttackConfigDataAsset` owns enemy attack entries, including optional Motion Warping for leap attacks.
-- **Ranged combat and transient rewards**: the player Bow uses prepared arrows and `BowArrowSocket`-origin projectiles; configured ranged enemies use projectile attacks; defeated enemies can leave transient Gold treasures whose Gold is persisted only after a successful pickup.
+- **Ranged combat and transient rewards**: the player Bow uses prepared arrows and `BowArrowSocket`-origin projectiles; configured ranged enemies use projectile attacks; defeated enemies can leave transient, interactable Gold light orbs whose Gold is persisted only after a successful pickup.
 - **Precise weapon hit detection**: weapons use swept box traces between previous and current positions to reduce missed hits during fast animation frames.
 - **Shield block and parry**: block checks attack direction and stamina before damage is applied; successful parries deplete enemy poise and trigger stance break.
 - **Poise and stance break**: enemies have a hidden poise pool. Normal hits drain it over time, while parry can instantly break stance.
@@ -42,7 +42,7 @@ https://github.com/user-attachments/assets/fdd9304c-a7ea-4185-bfa1-09df583fa784
 | Player Character | Movement, lock-on, stamina, attacks, dodge, block, parry, potion, hit reaction, death |
 | Combat Data | Player combo/special/charged attack config, enemy attack entries, damage/block/poise multipliers, optional enemy Motion Warping |
 | Weapons | Box trace collision, same-team filtering, block interception, hit feedback dispatch |
-| Ranged & Rewards | Prepared player arrows, `BowArrowSocket` projectile origins, configured ranged attacks, transient Gold treasure pickup |
+| Ranged & Rewards | Prepared player arrows, `BowArrowSocket` projectile origins, configured ranged attacks, transient interactable Gold light-orb pickup |
 | Enemies | Patrol, search, chase, combat local HFSM, cooldown spacing, attack coordination, motion-warped leap attacks |
 | Defense & Hyper Armor | Directional shield block, timed parry, stamina cost, stance break integration, uninterruptible attack hyper armor |
 | Feedback | Health bars, delayed buffer bars, hit knockback, camera shake, damage vignette |
