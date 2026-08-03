@@ -82,7 +82,7 @@ class TEST_API UTestSaveGame : public USaveGame
 	GENERATED_BODY()
 
 public:
-	static constexpr int32 CurrentSaveVersion = 2;
+	static constexpr int32 CurrentSaveVersion = 3;
 
 	UPROPERTY(SaveGame, VisibleAnywhere, BlueprintReadOnly, Category = "Save")
 	int32 SaveVersion = CurrentSaveVersion;
@@ -117,6 +117,12 @@ public:
 
 	UPROPERTY(SaveGame, VisibleAnywhere, BlueprintReadOnly, Category = "Progress")
 	TSet<FName> ClaimedRewardIds;
+
+	UPROPERTY(SaveGame, VisibleAnywhere, BlueprintReadOnly, Category = "Progress")
+	TSet<FName> DefeatedOneTimeEnemyIds;
+
+	UPROPERTY(SaveGame, VisibleAnywhere, BlueprintReadOnly, Category = "Progress")
+	TSet<FName> PendingOneTimeRewardIds;
 
 	UPROPERTY(SaveGame, VisibleAnywhere, BlueprintReadOnly, Category = "Progress")
 	TSet<FName> ClearedEncounterIds;

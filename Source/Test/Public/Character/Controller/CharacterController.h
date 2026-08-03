@@ -214,6 +214,9 @@ public:
 	void EncounterDebugFailNextClearSave();
 
 	UFUNCTION(Exec)
+	void OneTimeEnemyDebugFailNextDefeatSave();
+
+	UFUNCTION(Exec)
 	void BowDebugFailNextAmmoConsumeSave();
 
 	UFUNCTION(Exec)

@@ -27,6 +27,7 @@ class UEnemyAttackConfigDataAsset;
 class UMotionWarpingComponent;
 class UAnimMontage;
 class ATreasure;
+class Aitem;
 
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnEnemyDied, AEnemy*);
 
@@ -60,6 +61,7 @@ public:
 
 	/* 遭遇接线 */
 	bool ClaimEncounterOwner(AEncounterController* NewOwner);
+	bool HasValidOneTimeDefeatContract() const;
 	void ReleaseEncounterOwner(AEncounterController* CurrentOwner);
 	void SetEncounterDormant(AEncounterController* CurrentOwner);
 	bool ActivateForEncounter(AEncounterController* CurrentOwner, AActor* InitialTarget);
@@ -329,6 +331,22 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category = "Death Drop", meta = (ToolTip = "敌人死亡时掉落的金币数量。"))
 	int32 DeathGoldValue = 0;
 
+	/* 一次性敌人固定掉落 */
+	UPROPERTY(EditInstanceOnly, Category = "One-Time Defeat", meta = (ToolTip = "当前敌人实例的稳定一次性击败 ID；为空时不启用一次性击败。"))
+	FName DefeatId = NAME_None;
+
+	UPROPERTY(EditInstanceOnly, Category = "One-Time Defeat", meta = (ToolTip = "一次性固定奖励的稳定 ID；为空表示该敌人没有固定物品奖励。"))
+	FName RewardId = NAME_None;
+
+	UPROPERTY(EditInstanceOnly, Category = "One-Time Defeat", meta = (ToolTip = "一次性固定奖励生成的 Aitem 类。"))
+	TSubclassOf<Aitem> RewardPickupClass = nullptr;
+
+	UPROPERTY(EditInstanceOnly, Category = "One-Time Defeat", meta = (ToolTip = "一次性固定奖励授予的 Item Definition ID。"))
+	FName RewardItemDefinitionId = NAME_None;
+
+	UPROPERTY(EditInstanceOnly, Category = "One-Time Defeat", meta = (ToolTip = "一次性固定奖励授予的数量。"))
+	int32 RewardQuantity = 0;
+
 	UPROPERTY(EditDefaultsOnly, Category = "Combat|Attack", meta = (ToolTip = "敌人攻击配置。为空时不会攻击，并会输出配置警告。"))
 	UEnemyAttackConfigDataAsset* EnemyAttackConfig = nullptr;
 
@@ -556,6 +574,7 @@ private:
 	bool bEncounterDormant = false;
 	bool bDeathNotificationBroadcast = false;
 	bool bDeathTreasureSpawnAttempted = false;
+	bool bOneTimeDefeatCommitAttempted = false;
 	FOnEnemyDied EnemyDiedDelegate;
 
 	/* 韧性系统 */
@@ -574,6 +593,12 @@ private:
 
 	UAnimMontage* GetStanceBreakMontage() const;
 	void SpawnDeathTreasure();
+	bool IsOneTimeDefeatConfigured() const;
+	bool ValidateOneTimeDefeatContract(FString& OutFailureReason) const;
+	bool ValidateOneTimeDefeatConfiguration() const;
+	bool ValidateOneTimeRewardSemantics(FString& OutFailureReason) const;
+	bool HandleRestoredOneTimeDefeat();
+	bool CommitOneTimeDefeatAndSpawnReward();
 	bool PlayStanceBreakMontage();
 	void OnStanceBreakMontageEnded(UAnimMontage* Montage, bool bInterrupted);
 	void RecoverFromStanceBreak();

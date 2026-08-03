@@ -61,10 +61,13 @@ namespace
 	FString BuildSavedItemOwnershipDebugSummary(const TArray<FTestItemInstanceRecord>& ItemRecords,
 	                                           const TArray<FTestEquipmentSlotRecord>& SlotRecords,
 	                                           const TArray<FTestAmmoContainerRecord>& LoadedAmmoContainers,
-	                                           const TSet<FName>& ClaimedRewardIds)
+	                                           const TSet<FName>& ClaimedRewardIds,
+	                                           const TSet<FName>& DefeatedEnemyIds,
+	                                           const TSet<FName>& PendingRewardIds)
 	{
-		FString Result = FString::Printf(TEXT("Saved item ownership: %d instance(s), %d equipped slot(s), %d loaded ammo container(s), %d claimed reward(s)."),
-			ItemRecords.Num(), SlotRecords.Num(), LoadedAmmoContainers.Num(), ClaimedRewardIds.Num());
+		FString Result = FString::Printf(TEXT("Saved item ownership: %d instance(s), %d equipped slot(s), %d loaded ammo container(s), %d claimed reward(s), %d defeated one-time enemy(ies), %d pending one-time reward(s)."),
+			ItemRecords.Num(), SlotRecords.Num(), LoadedAmmoContainers.Num(), ClaimedRewardIds.Num(), DefeatedEnemyIds.Num(),
+			PendingRewardIds.Num());
 
 		for (const FTestItemInstanceRecord& ItemRecord : ItemRecords)
 		{
@@ -95,6 +98,28 @@ namespace
 		for (const FString& ClaimedRewardId : SortedClaimedRewardIds)
 		{
 			Result += FString::Printf(TEXT("\n  Claimed Reward=%s"), *ClaimedRewardId);
+		}
+
+		TArray<FString> SortedDefeatedEnemyIds;
+		for (const FName DefeatedEnemyId : DefeatedEnemyIds)
+		{
+			SortedDefeatedEnemyIds.Add(DefeatedEnemyId.ToString());
+		}
+		SortedDefeatedEnemyIds.Sort();
+		for (const FString& DefeatedEnemyId : SortedDefeatedEnemyIds)
+		{
+			Result += FString::Printf(TEXT("\n  Defeated One-Time Enemy=%s"), *DefeatedEnemyId);
+		}
+
+		TArray<FString> SortedPendingRewardIds;
+		for (const FName PendingRewardId : PendingRewardIds)
+		{
+			SortedPendingRewardIds.Add(PendingRewardId.ToString());
+		}
+		SortedPendingRewardIds.Sort();
+		for (const FString& PendingRewardId : SortedPendingRewardIds)
+		{
+			Result += FString::Printf(TEXT("\n  Pending One-Time Reward=%s"), *PendingRewardId);
 		}
 
 		return Result;
@@ -907,9 +932,12 @@ void ACharacterController::ItemDebugDump()
 	TArray<FTestEquipmentSlotRecord> SavedSlotRecords;
 	TArray<FTestAmmoContainerRecord> SavedLoadedAmmoContainers;
 	TSet<FName> SavedClaimedRewardIds;
+	TSet<FName> SavedDefeatedEnemyIds;
+	TSet<FName> SavedPendingRewardIds;
 	if (!GameInstance || !GameInstance->GetSavedItemOwnership(SavedItemRecords, SavedSlotRecords)
 		|| !GameInstance->GetSavedLoadedAmmoContainers(SavedLoadedAmmoContainers)
-		|| !GameInstance->GetSavedClaimedRewardIds(SavedClaimedRewardIds))
+		|| !GameInstance->GetSavedClaimedRewardIds(SavedClaimedRewardIds)
+		|| !GameInstance->GetSavedOneTimeEnemyProgress(SavedDefeatedEnemyIds, SavedPendingRewardIds))
 	{
 		UE_LOG(LogTemp, Warning, TEXT("ItemDebugDump: no usable saved item ownership is available."));
 		return;
@@ -917,7 +945,7 @@ void ACharacterController::ItemDebugDump()
 
 	UE_LOG(LogTemp, Display, TEXT("%s"),
 		*BuildSavedItemOwnershipDebugSummary(SavedItemRecords, SavedSlotRecords, SavedLoadedAmmoContainers,
-			SavedClaimedRewardIds));
+			SavedClaimedRewardIds, SavedDefeatedEnemyIds, SavedPendingRewardIds));
 #endif
 }
 
@@ -977,6 +1005,26 @@ void ACharacterController::EncounterDebugFailNextClearSave()
 	{
 		UE_LOG(LogTemp, Display,
 			TEXT("EncounterDebugFailNextClearSave armed: the next encounter clear will simulate a save failure."));
+	}
+#endif
+}
+
+void ACharacterController::OneTimeEnemyDebugFailNextDefeatSave()
+{
+#if UE_BUILD_SHIPPING
+	UE_LOG(LogTemp, Warning, TEXT("OneTimeEnemyDebugFailNextDefeatSave is unavailable in Shipping builds."));
+#else
+	USoulslikeGameInstance* GameInstance = GetGameInstance<USoulslikeGameInstance>();
+	if (!GameInstance)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("OneTimeEnemyDebugFailNextDefeatSave failed: no SoulslikeGameInstance is available."));
+		return;
+	}
+
+	if (GameInstance->ArmNextOneTimeEnemyDefeatSaveFailureForDebug())
+	{
+		UE_LOG(LogTemp, Display,
+			TEXT("OneTimeEnemyDebugFailNextDefeatSave armed: the next valid one-time enemy defeat will simulate a save failure."));
 	}
 #endif
 }

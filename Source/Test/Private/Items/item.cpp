@@ -208,7 +208,7 @@ bool Aitem::CanInteract_Implementation(AActor* Interactor) const
 	const AMyCharacter* Character = Cast<AMyCharacter>(Interactor);
 	return PickupTriggerPolicy == EItemPickupTriggerPolicy::Interact && Character && Character->CanInteractWithWorld()
 		&& !GetOwner() && ItemState == EItemState::EIS_Dropped
-		&& (!RequiresPersistentWorldClaim() || bPersistentWorldPickupAvailable);
+		&& ((!RequiresPersistentWorldClaim() && PendingOneTimeRewardId == NAME_None) || bPersistentWorldPickupAvailable);
 }
 
 FText Aitem::GetInteractionPrompt_Implementation() const
@@ -243,6 +243,25 @@ void Aitem::SetPickupTriggerPolicy(EItemPickupTriggerPolicy NewPolicy)
 	bAutoOverlapClaimAttempted = false;
 }
 
+void Aitem::InitializePendingOneTimeReward(FName RewardId, FName DefinitionId, int32 Quantity)
+{
+	if (RewardId == NAME_None || DefinitionId == NAME_None || Quantity <= 0)
+	{
+		PendingOneTimeRewardId = NAME_None;
+		bPersistentWorldPickupAvailable = false;
+		UE_LOG(LogTemp, Warning, TEXT("Pending one-time reward initialization rejected invalid reward, definition, or quantity on '%s'."),
+			*GetName());
+		return;
+	}
+
+	PersistentId = RewardId;
+	ItemDefinitionId = DefinitionId;
+	PickupQuantity = Quantity;
+	PendingOneTimeRewardId = RewardId;
+	bPersistentWorldPickupAvailable = true;
+	ItemState = EItemState::EIS_Dropped;
+}
+
 bool Aitem::TryGrantPickup(AMyCharacter* Picker, USoundBase*& OutPickupSound)
 {
 	OutPickupSound = nullptr;
@@ -252,13 +271,15 @@ bool Aitem::TryGrantPickup(AMyCharacter* Picker, USoundBase*& OutPickupSound)
 bool Aitem::TryClaimPersistentWorldPickup(AMyCharacter* Picker, USoundBase*& OutPickupSound)
 {
 	OutPickupSound = nullptr;
-	if (!Picker || !RequiresPersistentWorldClaim() || !bPersistentWorldPickupAvailable)
+	if (!Picker || ((!RequiresPersistentWorldClaim() && PendingOneTimeRewardId == NAME_None)
+		|| !bPersistentWorldPickupAvailable))
 	{
 		return false;
 	}
 
 	FName InstanceId = NAME_None;
-	if (!Picker->TryClaimWorldItemPickup(PersistentId, ItemDefinitionId, PickupQuantity, InstanceId, OutPickupSound))
+	if (!Picker->TryClaimWorldItemPickup(PersistentId, ItemDefinitionId, PickupQuantity, InstanceId, OutPickupSound,
+		PendingOneTimeRewardId))
 	{
 		return false;
 	}
@@ -270,7 +291,7 @@ bool Aitem::TryClaimPersistentWorldPickup(AMyCharacter* Picker, USoundBase*& Out
 bool Aitem::CanResolvePickup(const AMyCharacter* Picker) const
 {
 	if (!Picker || GetOwner() || ItemState != EItemState::EIS_Dropped
-		|| (RequiresPersistentWorldClaim() && !bPersistentWorldPickupAvailable))
+		|| ((RequiresPersistentWorldClaim() || PendingOneTimeRewardId != NAME_None) && !bPersistentWorldPickupAvailable))
 	{
 		return false;
 	}
@@ -289,7 +310,9 @@ void Aitem::ResolvePickup(AMyCharacter* Picker)
 
 	bPickupResolutionInProgress = true;
 	USoundBase* PickupSound = nullptr;
-	const bool bGranted = TryGrantPickup(Picker, PickupSound);
+	const bool bGranted = PendingOneTimeRewardId != NAME_None
+		? Aitem::TryGrantPickup(Picker, PickupSound)
+		: TryGrantPickup(Picker, PickupSound);
 	if (bGranted)
 	{
 		FinalizePickup(Picker, PickupSound);
@@ -403,6 +426,19 @@ void Aitem::TryResolveTrackedAutoOverlap()
 
 void Aitem::InitializePersistentWorldPickup()
 {
+	if (PendingOneTimeRewardId != NAME_None)
+	{
+		if (USoulslikeGameInstance* GameInstance = GetGameInstance<USoulslikeGameInstance>())
+		{
+			if (GameInstance->HasClaimedReward(PendingOneTimeRewardId)
+				|| !GameInstance->HasPendingOneTimeReward(PendingOneTimeRewardId))
+			{
+				Destroy();
+			}
+		}
+		return;
+	}
+
 	if (!RequiresPersistentWorldClaim() || GetOwner())
 	{
 		return;

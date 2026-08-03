@@ -1812,8 +1812,48 @@ bool AMyCharacter::VerifyAmmoRefillFixture(FName DefinitionId)
 	return ItemOwnershipComponent->VerifyAmmoRefillFixture(DefinitionId, GameInstance);
 }
 
+bool AMyCharacter::ValidateOneTimeRewardDefinition(FName DefinitionId, int32 Quantity, FString& OutFailureReason) const
+{
+	OutFailureReason.Reset();
+	if (DefinitionId == NAME_None)
+	{
+		OutFailureReason = TEXT("ItemDefinitionId is empty.");
+		return false;
+	}
+
+	if (Quantity <= 0)
+	{
+		OutFailureReason = TEXT("RewardQuantity must be positive.");
+		return false;
+	}
+
+	if (!ItemOwnershipComponent)
+	{
+		OutFailureReason = TEXT("the currently possessed player's ItemOwnershipComponent catalog is unavailable.");
+		return false;
+	}
+
+	const UItemDefinitionDataAsset* Definition = ItemOwnershipComponent->GetDefinition(DefinitionId);
+	if (!Definition)
+	{
+		OutFailureReason = FString::Printf(
+			TEXT("ItemDefinitionId '%s' does not resolve in the currently possessed player's ItemOwnershipComponent catalog."),
+			*DefinitionId.ToString());
+		return false;
+	}
+
+	if (!Definition->UsesAmmoContainer() && Quantity != 1)
+	{
+		OutFailureReason = FString::Printf(TEXT("non-ammo ItemDefinitionId '%s' must use quantity 1."),
+			*DefinitionId.ToString());
+		return false;
+	}
+
+	return true;
+}
+
 bool AMyCharacter::TryClaimWorldItemPickup(FName PersistentId, FName ItemDefinitionId, int32 PickupQuantity, FName& OutInstanceId,
-	USoundBase*& OutPickupSound)
+	USoundBase*& OutPickupSound, FName PendingRewardId)
 {
 	OutInstanceId = NAME_None;
 	OutPickupSound = nullptr;
@@ -1841,7 +1881,7 @@ bool AMyCharacter::TryClaimWorldItemPickup(FName PersistentId, FName ItemDefinit
 	{
 		USoulslikeGameInstance* GameInstance = GetGameInstance<USoulslikeGameInstance>();
 		if (!ItemOwnershipComponent->TryClaimWorldAmmoPickup(PersistentId, ItemDefinitionId, PickupQuantity,
-			GameInstance, OutInstanceId))
+			GameInstance, OutInstanceId, PendingRewardId))
 		{
 			return false;
 		}
@@ -1874,7 +1914,7 @@ bool AMyCharacter::TryClaimWorldItemPickup(FName PersistentId, FName ItemDefinit
 	USoulslikeGameInstance* GameInstance = GetGameInstance<USoulslikeGameInstance>();
 	bool bAutoEquipped = false;
 	if (!ItemOwnershipComponent->TryClaimWorldItem(PersistentId, ItemDefinitionId, GameInstance, bCanAutoEquip,
-		OutInstanceId, bAutoEquipped))
+		OutInstanceId, bAutoEquipped, PendingRewardId))
 	{
 		if (CandidateItem)
 		{

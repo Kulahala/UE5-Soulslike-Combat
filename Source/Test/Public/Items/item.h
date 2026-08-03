@@ -35,6 +35,9 @@ public:
 
 	void SetPickupTriggerPolicy(EItemPickupTriggerPolicy NewPolicy);
 
+	/** 在 FinishSpawningActor 前配置一次性待领取奖励的通用持久化字段。 */
+	void InitializePendingOneTimeReward(FName RewardId, FName DefinitionId, int32 Quantity);
+
 	virtual void OnPickup_Implementation(AActor* Picker) override;
 	virtual bool CanInteract_Implementation(AActor* Interactor) const override;
 	virtual FText GetInteractionPrompt_Implementation() const override;
@@ -120,6 +123,7 @@ private:
 	float RunningTime = 0.f;
 	FVector StartLocation; // 记录初始位置，作为浮动的基准点
 	bool bPersistentWorldPickupAvailable = true;
+	FName PendingOneTimeRewardId = NAME_None;
 	bool bPickupResolutionInProgress = false;
 	bool bReconcilingOverlaps = false;
 	TWeakObjectPtr<AMyCharacter> AutoOverlapPicker;
@@ -136,6 +140,7 @@ private:
 	void TryResolveTrackedAutoOverlap();
 
 public:
+	FORCEINLINE FName GetPersistentId() const { return PersistentId; }
 	FORCEINLINE UStaticMeshComponent* GetMesh() const { return Mesh; }
 	FORCEINLINE class UNiagaraComponent* GetEffect() const { return Effect; }
 	FORCEINLINE USphereComponent* GetSphere() const { return Sphere; }

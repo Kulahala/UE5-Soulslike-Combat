@@ -37,6 +37,7 @@ bool USoulslikeGameInstance::StartNewGame(FName GameplayMapName)
 	ClearEncounterClearSaveFailureForDebug();
 	ClearLoadedAmmoConsumeSaveFailureForDebug();
 	ClearAmmoRefillSaveFailureForDebug();
+	ClearOneTimeEnemyDefeatSaveFailureForDebug();
 
 	UTestSaveGame* PreviousSaveGame = CurrentSaveGame;
 	const FName PreviousPendingCheckpointId = PendingCheckpointId;
@@ -170,12 +171,13 @@ bool USoulslikeGameInstance::GrantAmmoReserve(FName DefinitionId, int32 Quantity
 	const TArray<FTestItemInstanceSelection>& ValidReserveInstances, FName& OutAffectedInstanceId)
 {
 	return GrantAmmoReserveInternal(DefinitionId, Quantity, ReserveStackLimit, NAME_None,
-		ValidReserveInstances, OutAffectedInstanceId);
+		ValidReserveInstances, OutAffectedInstanceId, NAME_None);
 }
 
 bool USoulslikeGameInstance::GrantAmmoReserveAndClaimReward(FName DefinitionId, int32 Quantity,
 	int32 ReserveStackLimit, FName RewardId,
-	const TArray<FTestItemInstanceSelection>& ValidReserveInstances, FName& OutAffectedInstanceId)
+	const TArray<FTestItemInstanceSelection>& ValidReserveInstances, FName& OutAffectedInstanceId,
+	FName PendingRewardId)
 {
 	if (RewardId == NAME_None)
 	{
@@ -185,11 +187,12 @@ bool USoulslikeGameInstance::GrantAmmoReserveAndClaimReward(FName DefinitionId, 
 	}
 
 	return GrantAmmoReserveInternal(DefinitionId, Quantity, ReserveStackLimit, RewardId,
-		ValidReserveInstances, OutAffectedInstanceId);
+		ValidReserveInstances, OutAffectedInstanceId, PendingRewardId);
 }
 
 bool USoulslikeGameInstance::GrantAmmoReserveInternal(FName DefinitionId, int32 Quantity, int32 ReserveStackLimit,
-	FName RewardId, const TArray<FTestItemInstanceSelection>& ValidReserveInstances, FName& OutAffectedInstanceId)
+	FName RewardId, const TArray<FTestItemInstanceSelection>& ValidReserveInstances, FName& OutAffectedInstanceId,
+	FName PendingRewardId)
 {
 	OutAffectedInstanceId = NAME_None;
 	if (!EnsureCurrentSaveLoaded() || !CurrentSaveGame || !CurrentSaveGame->IsPersistable())
@@ -202,6 +205,14 @@ bool USoulslikeGameInstance::GrantAmmoReserveInternal(FName DefinitionId, int32 
 	{
 		UE_LOG(LogTemp, Warning, TEXT("Fixed world ammo claim rejected already claimed reward '%s'."),
 			*RewardId.ToString());
+		return false;
+	}
+
+	if (PendingRewardId != NAME_None && (!CurrentSaveGame->PendingOneTimeRewardIds.Contains(PendingRewardId)
+		|| CurrentSaveGame->ClaimedRewardIds.Contains(PendingRewardId)))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Fixed world ammo claim rejected invalid or already consumed pending reward '%s'."),
+			*PendingRewardId.ToString());
 		return false;
 	}
 
@@ -244,6 +255,7 @@ bool USoulslikeGameInstance::GrantAmmoReserveInternal(FName DefinitionId, int32 
 
 	const TArray<FTestItemInstanceRecord> PreviousItems = CurrentSaveGame->ItemInstances;
 	const TSet<FName> PreviousClaimedRewards = CurrentSaveGame->ClaimedRewardIds;
+	const TSet<FName> PreviousPendingRewards = CurrentSaveGame->PendingOneTimeRewardIds;
 	int32 RemainingQuantity = Quantity;
 	for (const FTestItemInstanceSelection& Selection : ValidReserveInstances)
 	{
@@ -285,6 +297,11 @@ bool USoulslikeGameInstance::GrantAmmoReserveInternal(FName DefinitionId, int32 
 	{
 		CurrentSaveGame->ClaimedRewardIds.Add(RewardId);
 	}
+	if (PendingRewardId != NAME_None)
+	{
+		CurrentSaveGame->ClaimedRewardIds.Add(PendingRewardId);
+		CurrentSaveGame->PendingOneTimeRewardIds.Remove(PendingRewardId);
+	}
 
 	const bool bCanSave = RewardId == NAME_None || !ConsumeItemClaimSaveFailureForDebug(RewardId);
 	if (bCanSave && SaveNow())
@@ -294,6 +311,7 @@ bool USoulslikeGameInstance::GrantAmmoReserveInternal(FName DefinitionId, int32 
 
 	CurrentSaveGame->ItemInstances = PreviousItems;
 	CurrentSaveGame->ClaimedRewardIds = PreviousClaimedRewards;
+	CurrentSaveGame->PendingOneTimeRewardIds = PreviousPendingRewards;
 	OutAffectedInstanceId = NAME_None;
 	return false;
 }
@@ -347,14 +365,16 @@ bool USoulslikeGameInstance::ConsumeLoadedAmmo(const FTestAmmoContainerSelection
 }
 
 bool USoulslikeGameInstance::AddOwnedItemInstanceAndClaimReward(const FTestItemInstanceRecord& ItemRecord,
-	                                                                FName RewardId)
+	                                                                FName RewardId, FName PendingRewardId)
 {
 	bool bIgnoredAutoEquipped = false;
-	return AddOwnedItemInstanceAndClaimRewardInternal(ItemRecord, RewardId, NAME_None, bIgnoredAutoEquipped);
+	return AddOwnedItemInstanceAndClaimRewardInternal(ItemRecord, RewardId, NAME_None, bIgnoredAutoEquipped,
+		PendingRewardId);
 }
 
 bool USoulslikeGameInstance::AddOwnedItemInstanceAndClaimRewardWithOptionalEmptySlot(
-	const FTestItemInstanceRecord& ItemRecord, FName RewardId, FName RequestedEmptySlotId, bool& bOutAutoEquipped)
+	const FTestItemInstanceRecord& ItemRecord, FName RewardId, FName RequestedEmptySlotId, bool& bOutAutoEquipped,
+	FName PendingRewardId)
 {
 	bOutAutoEquipped = false;
 	if (RequestedEmptySlotId != NAME_None && !IsSupportedEquipmentSlotId(RequestedEmptySlotId))
@@ -364,11 +384,13 @@ bool USoulslikeGameInstance::AddOwnedItemInstanceAndClaimRewardWithOptionalEmpty
 		return false;
 	}
 
-	return AddOwnedItemInstanceAndClaimRewardInternal(ItemRecord, RewardId, RequestedEmptySlotId, bOutAutoEquipped);
+	return AddOwnedItemInstanceAndClaimRewardInternal(ItemRecord, RewardId, RequestedEmptySlotId, bOutAutoEquipped,
+		PendingRewardId);
 }
 
 bool USoulslikeGameInstance::AddOwnedItemInstanceAndClaimRewardInternal(
-	const FTestItemInstanceRecord& ItemRecord, FName RewardId, FName RequestedEmptySlotId, bool& bOutAutoEquipped)
+	const FTestItemInstanceRecord& ItemRecord, FName RewardId, FName RequestedEmptySlotId, bool& bOutAutoEquipped,
+	FName PendingRewardId)
 {
 	bOutAutoEquipped = false;
 	if (!EnsureCurrentSaveLoaded() || !CurrentSaveGame || !CurrentSaveGame->IsPersistable())
@@ -397,6 +419,14 @@ bool USoulslikeGameInstance::AddOwnedItemInstanceAndClaimRewardInternal(
 		return false;
 	}
 
+	if (PendingRewardId != NAME_None && (!CurrentSaveGame->PendingOneTimeRewardIds.Contains(PendingRewardId)
+		|| CurrentSaveGame->ClaimedRewardIds.Contains(PendingRewardId)))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Fixed world item claim rejected invalid or already consumed pending reward '%s'."),
+			*PendingRewardId.ToString());
+		return false;
+	}
+
 	const bool bDuplicateInstanceId = CurrentSaveGame->ItemInstances.ContainsByPredicate(
 		[&ItemRecord](const FTestItemInstanceRecord& ExistingRecord)
 		{
@@ -411,6 +441,7 @@ bool USoulslikeGameInstance::AddOwnedItemInstanceAndClaimRewardInternal(
 
 	const TArray<FTestItemInstanceRecord> PreviousItems = CurrentSaveGame->ItemInstances;
 	const TSet<FName> PreviousClaimedRewards = CurrentSaveGame->ClaimedRewardIds;
+	const TSet<FName> PreviousPendingRewards = CurrentSaveGame->PendingOneTimeRewardIds;
 	const TArray<FTestEquipmentSlotRecord> PreviousEquippedSlots = CurrentSaveGame->EquippedSlots;
 	const bool bRequestedSlotIsEmpty = RequestedEmptySlotId != NAME_None
 		&& !CurrentSaveGame->EquippedSlots.ContainsByPredicate([RequestedEmptySlotId](const FTestEquipmentSlotRecord& SlotRecord)
@@ -420,6 +451,11 @@ bool USoulslikeGameInstance::AddOwnedItemInstanceAndClaimRewardInternal(
 
 	CurrentSaveGame->ItemInstances.Add(ItemRecord);
 	CurrentSaveGame->ClaimedRewardIds.Add(RewardId);
+	if (PendingRewardId != NAME_None)
+	{
+		CurrentSaveGame->ClaimedRewardIds.Add(PendingRewardId);
+		CurrentSaveGame->PendingOneTimeRewardIds.Remove(PendingRewardId);
+	}
 	if (bRequestedSlotIsEmpty)
 	{
 		FTestEquipmentSlotRecord NewSlotRecord;
@@ -436,6 +472,7 @@ bool USoulslikeGameInstance::AddOwnedItemInstanceAndClaimRewardInternal(
 
 	CurrentSaveGame->ItemInstances = PreviousItems;
 	CurrentSaveGame->ClaimedRewardIds = PreviousClaimedRewards;
+	CurrentSaveGame->PendingOneTimeRewardIds = PreviousPendingRewards;
 	CurrentSaveGame->EquippedSlots = PreviousEquippedSlots;
 	return false;
 }
@@ -562,6 +599,88 @@ bool USoulslikeGameInstance::GetSavedClaimedRewardIds(TSet<FName>& OutClaimedRew
 	return true;
 }
 
+bool USoulslikeGameInstance::GetSavedOneTimeEnemyProgress(TSet<FName>& OutDefeatedEnemyIds,
+	TSet<FName>& OutPendingRewardIds) const
+{
+	OutDefeatedEnemyIds.Reset();
+	OutPendingRewardIds.Reset();
+	if (!CurrentSaveGame || !CurrentSaveGame->IsPersistable())
+	{
+		return false;
+	}
+
+	OutDefeatedEnemyIds = CurrentSaveGame->DefeatedOneTimeEnemyIds;
+	OutPendingRewardIds = CurrentSaveGame->PendingOneTimeRewardIds;
+	return true;
+}
+
+bool USoulslikeGameInstance::HasOneTimeEnemyDefeated(FName DefeatId)
+{
+	return DefeatId != NAME_None && EnsureCurrentSaveLoaded() && CurrentSaveGame
+		&& CurrentSaveGame->IsPersistable() && CurrentSaveGame->DefeatedOneTimeEnemyIds.Contains(DefeatId);
+}
+
+bool USoulslikeGameInstance::HasPendingOneTimeReward(FName RewardId)
+{
+	return RewardId != NAME_None && EnsureCurrentSaveLoaded() && CurrentSaveGame
+		&& CurrentSaveGame->IsPersistable() && CurrentSaveGame->PendingOneTimeRewardIds.Contains(RewardId)
+		&& !CurrentSaveGame->ClaimedRewardIds.Contains(RewardId);
+}
+
+bool USoulslikeGameInstance::TryCommitOneTimeEnemyDefeat(FName DefeatId, FName RewardId)
+{
+	if (DefeatId == NAME_None)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("One-time enemy defeat rejected an empty DefeatId."));
+		return false;
+	}
+
+	if (!EnsureCurrentSaveLoaded() || !CurrentSaveGame || !CurrentSaveGame->IsPersistable())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("One-time enemy defeat failed: no persistable current save."));
+		return false;
+	}
+
+	if (CurrentSaveGame->DefeatedOneTimeEnemyIds.Contains(DefeatId))
+	{
+		if (RewardId == NAME_None || (CurrentSaveGame->PendingOneTimeRewardIds.Contains(RewardId)
+			&& !CurrentSaveGame->ClaimedRewardIds.Contains(RewardId)))
+		{
+			return true;
+		}
+
+		UE_LOG(LogTemp, Warning,
+			TEXT("One-time enemy defeat '%s' is already persisted but its requested reward relationship is inconsistent."),
+			*DefeatId.ToString());
+		return false;
+	}
+
+	if (RewardId != NAME_None && (CurrentSaveGame->ClaimedRewardIds.Contains(RewardId)
+		|| CurrentSaveGame->PendingOneTimeRewardIds.Contains(RewardId)))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("One-time enemy defeat rejected reward '%s' because it is already claimed or pending."),
+			*RewardId.ToString());
+		return false;
+	}
+
+	const TSet<FName> PreviousDefeatedEnemyIds = CurrentSaveGame->DefeatedOneTimeEnemyIds;
+	const TSet<FName> PreviousPendingRewardIds = CurrentSaveGame->PendingOneTimeRewardIds;
+	CurrentSaveGame->DefeatedOneTimeEnemyIds.Add(DefeatId);
+	if (RewardId != NAME_None)
+	{
+		CurrentSaveGame->PendingOneTimeRewardIds.Add(RewardId);
+	}
+
+	if (!ConsumeOneTimeEnemyDefeatSaveFailureForDebug(DefeatId) && SaveNow())
+	{
+		return true;
+	}
+
+	CurrentSaveGame->DefeatedOneTimeEnemyIds = PreviousDefeatedEnemyIds;
+	CurrentSaveGame->PendingOneTimeRewardIds = PreviousPendingRewardIds;
+	return false;
+}
+
 bool USoulslikeGameInstance::ArmNextItemClaimSaveFailureForDebug()
 {
 #if UE_BUILD_SHIPPING
@@ -643,6 +762,23 @@ bool USoulslikeGameInstance::ArmNextAmmoRefillSaveFailureForDebug()
 	}
 
 	bFailNextAmmoRefillSaveForDebug = true;
+	return true;
+#endif
+}
+
+bool USoulslikeGameInstance::ArmNextOneTimeEnemyDefeatSaveFailureForDebug()
+{
+#if UE_BUILD_SHIPPING
+	UE_LOG(LogTemp, Warning, TEXT("One-time enemy defeat save failure injection is unavailable in Shipping builds."));
+	return false;
+#else
+	if (!EnsureCurrentSaveLoaded() || !CurrentSaveGame || !CurrentSaveGame->IsPersistable())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("One-time enemy defeat save failure injection failed: no usable current save."));
+		return false;
+	}
+
+	bFailNextOneTimeEnemyDefeatSaveForDebug = true;
 	return true;
 #endif
 }
@@ -790,6 +926,7 @@ void USoulslikeGameInstance::PrepareGameplayTransition(FName GameplayMapName, FN
 	ClearEncounterClearSaveFailureForDebug();
 	ClearLoadedAmmoConsumeSaveFailureForDebug();
 	ClearAmmoRefillSaveFailureForDebug();
+	ClearOneTimeEnemyDefeatSaveFailureForDebug();
 	PendingGameplayMapName = GameplayMapName;
 	PendingCheckpointId = CheckpointId;
 
@@ -820,6 +957,7 @@ void USoulslikeGameInstance::ReturnToMainMenu()
 	ClearEncounterClearSaveFailureForDebug();
 	ClearLoadedAmmoConsumeSaveFailureForDebug();
 	ClearAmmoRefillSaveFailureForDebug();
+	ClearOneTimeEnemyDefeatSaveFailureForDebug();
 	PendingGameplayMapName = NAME_None;
 	PendingCheckpointId = NAME_None;
 	UGameplayStatics::OpenLevel(this, MainMenuMapName);
@@ -1218,6 +1356,23 @@ bool USoulslikeGameInstance::ConsumeAmmoRefillSaveFailureForDebug()
 #endif
 }
 
+bool USoulslikeGameInstance::ConsumeOneTimeEnemyDefeatSaveFailureForDebug(FName DefeatId)
+{
+#if UE_BUILD_SHIPPING
+	return false;
+#else
+	if (!bFailNextOneTimeEnemyDefeatSaveForDebug)
+	{
+		return false;
+	}
+
+	bFailNextOneTimeEnemyDefeatSaveForDebug = false;
+	UE_LOG(LogTemp, Warning, TEXT("Injected one-time enemy defeat save failure for DefeatId '%s'."),
+		*DefeatId.ToString());
+	return true;
+#endif
+}
+
 void USoulslikeGameInstance::ClearItemClaimSaveFailureForDebug()
 {
 	bFailNextItemClaimSaveForDebug = false;
@@ -1241,6 +1396,11 @@ void USoulslikeGameInstance::ClearLoadedAmmoConsumeSaveFailureForDebug()
 void USoulslikeGameInstance::ClearAmmoRefillSaveFailureForDebug()
 {
 	bFailNextAmmoRefillSaveForDebug = false;
+}
+
+void USoulslikeGameInstance::ClearOneTimeEnemyDefeatSaveFailureForDebug()
+{
+	bFailNextOneTimeEnemyDefeatSaveForDebug = false;
 }
 
 void USoulslikeGameInstance::OpenGameplayMap()

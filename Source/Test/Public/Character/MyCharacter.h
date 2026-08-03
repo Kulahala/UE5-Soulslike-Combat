@@ -108,8 +108,9 @@ public:
 	bool TryGrantOwnedItemQuantity(FName DefinitionId, int32 Quantity, FName& OutInstanceId);
 	bool TryRestockAmmoAtCheckpoint(FName GameplayMapName, FName CheckpointId);
 	bool VerifyAmmoRefillFixture(FName DefinitionId);
+	bool ValidateOneTimeRewardDefinition(FName DefinitionId, int32 Quantity, FString& OutFailureReason) const;
 	bool TryClaimWorldItemPickup(FName PersistentId, FName ItemDefinitionId, int32 PickupQuantity, FName& OutInstanceId,
-	                             USoundBase*& OutPickupSound);
+	                             USoundBase*& OutPickupSound, FName PendingRewardId);
 	bool TryAddGold(int32 Amount, int32& OutNewGold);
 	bool TryEquipOwnedItem(FName InstanceId);
 	bool TryApplyBonfireLoadoutSelection(EItemEquipmentSlot EquipmentSlot, FName InstanceId);

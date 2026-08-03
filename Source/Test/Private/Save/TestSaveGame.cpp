@@ -15,6 +15,8 @@ void UTestSaveGame::InitializeNewSave(FName InitialMapName, FName InitialCheckpo
 	EquippedSlots.Reset();
 	OpenedShortcutIds.Reset();
 	ClaimedRewardIds.Reset();
+	DefeatedOneTimeEnemyIds.Reset();
+	PendingOneTimeRewardIds.Reset();
 	ClearedEncounterIds.Reset();
 	CompletedBossIds.Reset();
 }

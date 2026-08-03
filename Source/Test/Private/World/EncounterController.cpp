@@ -647,6 +647,14 @@ bool AEncounterController::ValidateConfiguration()
 			return false;
 		}
 
+		if (Participant->HasValidOneTimeDefeatContract())
+		{
+			UE_LOG(LogTemp, Warning,
+				TEXT("Encounter '%s' cannot use preplaced participant '%s' because it has a one-time defeat contract."),
+				*EncounterId.ToString(), *Participant->GetName());
+			return false;
+		}
+
 		UniqueParticipants.Add(Participant);
 	}
 

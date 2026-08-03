@@ -8,6 +8,7 @@
 #include "AIController.h"
 #include "Animation/AnimInstance.h"
 #include "AttributeComponent/AttributeComponent.h"
+#include "Character/MyCharacter.h"
 #include "Combat/CombatTeamHelper.h"
 #include "Combat/CombatProjectile.h"
 #include "Combat/EnemyAttackConfigDataAsset.h"
@@ -18,9 +19,13 @@
 #include "DrawDebugHelpers.h"
 #include "Engine/TargetPoint.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "GameFramework/PlayerController.h"
+#include "Game/SoulslikeGameInstance.h"
 #include "HUD/BaseHealthBarWidget.h"
 #include "HUD/HealthBarComponent.h"
+#include "Items/item.h"
 #include "Items/Weapon/Weapon.h"
 #include "Items/Bow/BowBase.h"
 #include "Items/Treasures/Treasure.h"
@@ -151,6 +156,11 @@ void AEnemy::WeaponInit()
 void AEnemy::BeginPlay()
 {
 	Super::BeginPlay();
+	if (HandleRestoredOneTimeDefeat())
+	{
+		return;
+	}
+
 	Tags.Add(FName("Enemy"));
 	ApplyAuthoredPerceptionConfig();
 
@@ -196,6 +206,184 @@ void AEnemy::BeginPlay()
 		       *GetName());
 	}
 	ValidateStanceBreakConfig();
+}
+
+bool AEnemy::IsOneTimeDefeatConfigured() const
+{
+	return DefeatId != NAME_None || RewardId != NAME_None || RewardPickupClass != nullptr
+		|| RewardItemDefinitionId != NAME_None || RewardQuantity != 0;
+}
+
+bool AEnemy::ValidateOneTimeDefeatContract(FString& OutFailureReason) const
+{
+	OutFailureReason.Reset();
+	if (DefeatId == NAME_None)
+	{
+		OutFailureReason = TEXT("DefeatId is empty.");
+		return false;
+	}
+
+	const bool bHasAnyRewardField = RewardId != NAME_None || RewardPickupClass != nullptr
+		|| RewardItemDefinitionId != NAME_None || RewardQuantity != 0;
+	if (!bHasAnyRewardField)
+	{
+		return true;
+	}
+
+	if (RewardId == NAME_None)
+	{
+		OutFailureReason = TEXT("RewardId is required when any reward field is configured.");
+		return false;
+	}
+
+	if (!RewardPickupClass || RewardItemDefinitionId == NAME_None || RewardQuantity <= 0)
+	{
+		OutFailureReason = TEXT("RewardPickupClass, RewardItemDefinitionId, and a positive RewardQuantity are required for a reward.");
+		return false;
+	}
+
+	return true;
+}
+
+bool AEnemy::HasValidOneTimeDefeatContract() const
+{
+	FString FailureReason;
+	return ValidateOneTimeDefeatContract(FailureReason);
+}
+
+bool AEnemy::ValidateOneTimeDefeatConfiguration() const
+{
+	if (!IsOneTimeDefeatConfigured())
+	{
+		return false;
+	}
+
+	FString FailureReason;
+	if (!ValidateOneTimeDefeatContract(FailureReason))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s: invalid one-time defeat configuration: %s. Falling back to ordinary reload behavior."),
+			*GetName(), *FailureReason);
+		return false;
+	}
+
+	if (!GetWorld())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s: cannot validate one-time defeat configuration because the world is unavailable."),
+			*GetName());
+		return false;
+	}
+
+	for (TActorIterator<AEnemy> It(GetWorld()); It; ++It)
+	{
+		const AEnemy* Candidate = *It;
+		if (!Candidate || Candidate == this)
+		{
+			continue;
+		}
+
+		if (Candidate->DefeatId != NAME_None && Candidate->DefeatId == DefeatId)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("%s: one-time DefeatId '%s' is duplicated by '%s'. Falling back to ordinary reload behavior."),
+				*GetName(), *DefeatId.ToString(), *Candidate->GetName());
+			return false;
+		}
+
+		if (RewardId != NAME_None && Candidate->RewardId == RewardId)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("%s: one-time RewardId '%s' is duplicated by enemy '%s'. Falling back to ordinary reload behavior."),
+				*GetName(), *RewardId.ToString(), *Candidate->GetName());
+			return false;
+		}
+	}
+
+	if (RewardId != NAME_None)
+	{
+		for (TActorIterator<Aitem> It(GetWorld()); It; ++It)
+		{
+			const Aitem* Candidate = *It;
+			if (Candidate && Candidate->GetPersistentId() == RewardId)
+			{
+				UE_LOG(LogTemp, Warning,
+					TEXT("%s: one-time RewardId '%s' collides with Aitem PersistentId on '%s'. Falling back to ordinary reload behavior."),
+					*GetName(), *RewardId.ToString(), *Candidate->GetName());
+				return false;
+			}
+		}
+	}
+
+	return true;
+}
+
+bool AEnemy::ValidateOneTimeRewardSemantics(FString& OutFailureReason) const
+{
+	OutFailureReason.Reset();
+	if (RewardId == NAME_None)
+	{
+		return true;
+	}
+
+	APlayerController* PlayerController = GetWorld() ? GetWorld()->GetFirstPlayerController() : nullptr;
+	AMyCharacter* PlayerCharacter = PlayerController ? Cast<AMyCharacter>(PlayerController->GetPawn()) : nullptr;
+	if (!PlayerCharacter)
+	{
+		OutFailureReason = TEXT("the currently possessed AMyCharacter is unavailable.");
+		return false;
+	}
+
+	return PlayerCharacter->ValidateOneTimeRewardDefinition(RewardItemDefinitionId, RewardQuantity, OutFailureReason);
+}
+
+bool AEnemy::HandleRestoredOneTimeDefeat()
+{
+	if (!ValidateOneTimeDefeatConfiguration())
+	{
+		return false;
+	}
+
+	USoulslikeGameInstance* GameInstance = GetGameInstance<USoulslikeGameInstance>();
+	if (!GameInstance || !GameInstance->HasOneTimeEnemyDefeated(DefeatId))
+	{
+		return false;
+	}
+
+	if (RewardId != NAME_None && GameInstance->HasPendingOneTimeReward(RewardId)
+		&& !GameInstance->HasClaimedReward(RewardId))
+	{
+		UWorld* World = GetWorld();
+		if (World && RewardPickupClass)
+		{
+			const FTransform RewardTransform = GetActorTransform();
+			Aitem* RewardPickup = World->SpawnActorDeferred<Aitem>(RewardPickupClass, RewardTransform, nullptr, nullptr,
+				ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+			if (RewardPickup)
+			{
+				RewardPickup->InitializePendingOneTimeReward(RewardId, RewardItemDefinitionId, RewardQuantity);
+				AActor* FinishedActor = UGameplayStatics::FinishSpawningActor(RewardPickup, RewardTransform);
+				if (!IsValid(FinishedActor) || FinishedActor != RewardPickup)
+				{
+					UE_LOG(LogTemp, Warning, TEXT("%s: failed to finish-spawn restored pending reward '%s'; it will be reconstructed on the next reload."),
+						*GetName(), *RewardId.ToString());
+					if (IsValid(RewardPickup))
+					{
+						RewardPickup->Destroy();
+					}
+				}
+			}
+			else
+			{
+				UE_LOG(LogTemp, Warning, TEXT("%s: failed to spawn restored pending reward class '%s'."),
+					*GetName(), *GetNameSafe(RewardPickupClass.Get()));
+			}
+		}
+		else
+		{
+			UE_LOG(LogTemp, Warning, TEXT("%s: cannot reconstruct pending reward '%s' because the world or reward class is unavailable."),
+				*GetName(), *RewardId.ToString());
+		}
+	}
+
+	Destroy();
+	return true;
 }
 
 #if WITH_EDITOR
@@ -421,6 +609,15 @@ void AEnemy::Die()
 	PlayDeathMontage();
 	SpawnDeathTreasure();
 
+	if (!bOneTimeDefeatCommitAttempted && IsOneTimeDefeatConfigured())
+	{
+		bOneTimeDefeatCommitAttempted = true;
+		if (ValidateOneTimeDefeatConfiguration())
+		{
+			CommitOneTimeDefeatAndSpawnReward();
+		}
+	}
+
 	// 设定销毁时间
 	SetLifeSpan(CorpseLifespan);
 
@@ -479,6 +676,74 @@ void AEnemy::SpawnDeathTreasure()
 	}
 }
 
+bool AEnemy::CommitOneTimeDefeatAndSpawnReward()
+{
+	FString FailureReason;
+	if (!ValidateOneTimeRewardSemantics(FailureReason))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s: one-time defeat cannot commit because reward semantics failed: %s. Defeat remains transient."),
+			*GetName(), *FailureReason);
+		return false;
+	}
+
+	USoulslikeGameInstance* GameInstance = GetGameInstance<USoulslikeGameInstance>();
+	if (!GameInstance)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s: one-time defeat cannot commit because SoulslikeGameInstance is unavailable."),
+			*GetName());
+		return false;
+	}
+
+	Aitem* RewardPickup = nullptr;
+	const FTransform RewardTransform = GetActorTransform();
+	if (RewardId != NAME_None)
+	{
+		UWorld* World = GetWorld();
+		if (!World || !RewardPickupClass)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("%s: one-time defeat reward '%s' cannot spawn because its world or class is unavailable."),
+				*GetName(), *RewardId.ToString());
+			return false;
+		}
+
+		RewardPickup = World->SpawnActorDeferred<Aitem>(RewardPickupClass, RewardTransform, nullptr, nullptr,
+			ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+		if (!RewardPickup)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("%s: failed to deferred-spawn one-time reward class '%s'; defeat remains transient."),
+				*GetName(), *GetNameSafe(RewardPickupClass.Get()));
+			return false;
+		}
+
+		RewardPickup->InitializePendingOneTimeReward(RewardId, RewardItemDefinitionId, RewardQuantity);
+	}
+
+	if (!GameInstance->TryCommitOneTimeEnemyDefeat(DefeatId, RewardId))
+	{
+		if (RewardPickup)
+		{
+			RewardPickup->Destroy();
+		}
+		return false;
+	}
+
+	if (RewardPickup)
+	{
+		AActor* FinishedActor = UGameplayStatics::FinishSpawningActor(RewardPickup, RewardTransform);
+		if (!IsValid(FinishedActor) || FinishedActor != RewardPickup)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("%s: one-time reward '%s' committed but FinishSpawningActor did not complete; reload reconstruction remains authoritative."),
+				*GetName(), *RewardId.ToString());
+			if (IsValid(RewardPickup))
+			{
+				RewardPickup->Destroy();
+			}
+		}
+	}
+
+	return true;
+}
+
 void AEnemy::PossessedBy(AController* NewController)
 {
 	Super::PossessedBy(NewController);
@@ -496,6 +761,13 @@ bool AEnemy::ClaimEncounterOwner(AEncounterController* NewOwner)
 	if (!NewOwner)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("%s rejected a null encounter owner."), *GetName());
+		return false;
+	}
+
+	if (HasValidOneTimeDefeatContract())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s cannot be claimed by encounter controller '%s' because it has a one-time defeat contract."),
+			*GetName(), *GetNameSafe(NewOwner));
 		return false;
 	}
 

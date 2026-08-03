@@ -305,7 +305,8 @@ bool UItemOwnershipComponent::VerifyAmmoRefillFixture(FName DefinitionId, USouls
 
 bool UItemOwnershipComponent::TryClaimWorldItem(FName PersistentId, FName DefinitionId,
 	                                                USoulslikeGameInstance* GameInstance, bool bRequestAutoEquip,
-	                                                FName& OutInstanceId, bool& bOutAutoEquipped)
+	                                                FName& OutInstanceId, bool& bOutAutoEquipped,
+	                                                FName PendingRewardId)
 {
 	OutInstanceId = NAME_None;
 	bOutAutoEquipped = false;
@@ -349,7 +350,7 @@ bool UItemOwnershipComponent::TryClaimWorldItem(FName PersistentId, FName Defini
 	NewRecord.UpgradeLevel = 0;
 
 	if (!GameInstance->AddOwnedItemInstanceAndClaimRewardWithOptionalEmptySlot(NewRecord, PersistentId,
-		bRequestAutoEquip ? RequestedSlotId : NAME_None, bOutAutoEquipped))
+		bRequestAutoEquip ? RequestedSlotId : NAME_None, bOutAutoEquipped, PendingRewardId))
 	{
 		return false;
 	}
@@ -364,7 +365,7 @@ bool UItemOwnershipComponent::TryClaimWorldItem(FName PersistentId, FName Defini
 }
 
 bool UItemOwnershipComponent::TryClaimWorldAmmoPickup(FName PersistentId, FName DefinitionId, int32 Quantity,
-	USoulslikeGameInstance* GameInstance, FName& OutAffectedInstanceId)
+	USoulslikeGameInstance* GameInstance, FName& OutAffectedInstanceId, FName PendingRewardId)
 {
 	OutAffectedInstanceId = NAME_None;
 	BuildDefinitionCatalog();
@@ -386,7 +387,7 @@ bool UItemOwnershipComponent::TryClaimWorldAmmoPickup(FName PersistentId, FName 
 	TArray<FTestItemInstanceSelection> ValidReserveInstances;
 	GetValidReserveInstances(DefinitionId, ValidReserveInstances);
 	if (!GameInstance->GrantAmmoReserveAndClaimReward(DefinitionId, Quantity, Definition->GetReserveAmmoStackLimit(),
-		PersistentId, ValidReserveInstances, OutAffectedInstanceId))
+		PersistentId, ValidReserveInstances, OutAffectedInstanceId, PendingRewardId))
 	{
 		return false;
 	}
