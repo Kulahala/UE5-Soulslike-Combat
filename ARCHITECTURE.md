@@ -145,65 +145,7 @@ Core character/combat state-machine enums and small shared combat-flow enums are
 | `EAS_Dead` | Death state. Collision and movement are disabled. |
 | `EAS_Aiming` | Bow aim hold. Right-click held intent may transition to a ranged release; a hit, Guard Break, death, or explicit cancel clears the aim state. |
 
-```mermaid
-stateDiagram-v2
-    classDef neutral fill:#2d5a27,stroke:#52c41a,color:#fff,stroke-width:2px;
-    classDef combat fill:#1d39c4,stroke:#597ef7,color:#fff,stroke-width:2px;
-    classDef control fill:#d4380d,stroke:#ff7875,color:#fff,stroke-width:2px;
-    classDef terminal fill:#434343,stroke:#8c8c8c,color:#fff,stroke-width:2px;
-
-    state "空闲常态 (EAS_UnOccupied)" as UnOccupied :::neutral
-    
-    state "主动动作区 (Combat & Actions)" as Actions {
-        state "攻击 (EAS_Attacking)" as Attacking :::combat
-        state "闪避 (EAS_Dodging)" as Dodging :::combat
-        state "弹反 (EAS_Parrying)" as Parrying :::combat
-        state "喝药 (EAS_UsingPotion)" as Potion :::combat
-        state "弓箭瞄准 (EAS_Aiming)" as Aiming :::combat
-    }
-
-    state "受控与异常区 (Disruptions & Recovery)" as Disruptions {
-        state "受击硬直 (EAS_Stunning)" as Stunning :::control
-        state "破防虚弱 (EAS_GuardBroken)" as GuardBroken :::control
-        state "体力透支 (EAS_Exhausted)" as Exhausted :::control
-    }
-
-    state "死亡终态 (EAS_Dead)" as Dead :::terminal
-
-    [*] --> UnOccupied
-
-    %% 主动出招流
-    UnOccupied --> Attacking : LMB 出刀 (Light / Sprint / Charge)
-    UnOccupied --> Dodging : Space 翻滚
-    UnOccupied --> Parrying : F 弹反
-    UnOccupied --> Potion : R 喝药
-    UnOccupied --> Aiming : 持弓按住 RMB
-
-    %% 动作取消与连招
-    Attacking --> Attacking : 连招分支跳转 (ComboBranchWindow)
-    Attacking --> Dodging : 后摇取消打断 (ActionCancelWindow)
-    Aiming --> UnOccupied : 松开 / 射出 / 取消
-
-    %% 动作自然收敛
-    Actions --> UnOccupied : 蒙太奇自然结束 (体力充足)
-    Actions --> Exhausted : 蒙太奇结束时体力透支 (延迟 3s 恢复)
-
-    %% 受击与破防流
-    UnOccupied --> Stunning : 受到未防御命中
-    Actions --> Stunning : 动作中受到强力重击打断
-    UnOccupied --> GuardBroken : 举盾受击导致体力耗尽
-    Exhausted --> GuardBroken : 疲惫中受到未格挡重击
-
-    %% 状态恢复
-    Stunning --> UnOccupied : 硬直蒙太奇结束
-    GuardBroken --> UnOccupied : 破防硬直结束 (保底恢复 1 点耐力)
-    Exhausted --> UnOccupied : 3秒恢复计时器超时
-
-    %% 死亡流
-    UnOccupied --> Dead : 致命伤害 (Health <= 0)
-    Actions --> Dead : 致命伤害
-    Disruptions --> Dead : 致命伤害
-```
+![主角动作状态机流转图 (Player Action FSM)](docs/images/player_fsm.svg)
 
 ### Stamina / Exhaustion Flow
 
@@ -264,67 +206,7 @@ stateDiagram-v2
 | `EES_StanceBreak` | Dedicated full-body poise-break stun from parry or poise depletion. |
 | `EES_Dead` | Death state. Timers, movement, collision, and combat state are cleared. |
 
-```mermaid
-stateDiagram-v2
-    classDef patrol fill:#237804,stroke:#73d13d,color:#fff,stroke-width:2px;
-    classDef combat fill:#10239e,stroke:#2f54eb,color:#fff,stroke-width:2px;
-    classDef react fill:#ad2102,stroke:#ff4d4f,color:#fff,stroke-width:2px;
-    classDef finish fill:#262626,stroke:#595959,color:#fff,stroke-width:2px;
-
-    state "巡逻探索区 (Exploration Layer)" as AreaPatrol {
-        state "巡逻 (EES_Patrolling)" as Patrolling :::patrol
-        state "警戒搜索 (EES_Searching)" as Searching :::patrol
-    }
-
-    state "交战核心区 (Combat Engagement Layer)" as AreaCombat {
-        state "追击接近 (EES_Chasing)" as Chasing :::combat
-        state "战斗拉扯 (EES_Combating)" as Combating :::combat
-        state "出招攻击 (EES_Attacking)" as Attacking :::combat
-    }
-
-    state "受击破防区 (Hit & Stance Break Layer)" as AreaReact {
-        state "受击硬直 (EES_Stunned)" as Stunned :::react
-        state "失衡处决硬直 (EES_StanceBreak)" as StanceBreak :::react
-    }
-
-    state "目标重检路由 (CheckCombatTarget)" as Router
-    state "死亡终态 (EES_Dead)" as Dead :::finish
-
-    [*] --> Patrolling
-
-    %% 巡逻与发现
-    Patrolling --> Searching : 到达巡逻点
-    Searching --> Patrolling : 搜索计时结束 (无目标)
-    Patrolling --> Chasing : 感知到玩家 (Visual / Audio)
-    Searching --> Chasing : 重新感知到玩家
-
-    %% 战斗主干流
-    Chasing --> Combating : 进入战斗半径 (CombatRadius)
-    Combating --> Chasing : 超出战斗半径 + 退出缓冲区 (Buffer)
-    Chasing --> Searching : 目标丢失 / 超出追击半径 (ChaseRadius)
-    Combating --> Attacking : 局部 HFSM 决策允许出刀
-
-    %% 受击与破防分流
-    AreaPatrol --> Stunned : 受击 (普通伤害)
-    AreaCombat --> Stunned : 受击 (普通伤害)
-    AreaPatrol --> StanceBreak : 韧性归零 (Poise Depleted)
-    AreaCombat --> StanceBreak : 弹反成功 / 韧性归零
-
-    %% 动作与受击恢复流 (统一接入重检路由)
-    Attacking --> Router : 攻击蒙太奇播放完毕
-    Stunned --> Router : 受击硬直结束
-    StanceBreak --> Router : 失衡蒙太奇结束
-
-    %% 路由分流
-    Router --> Combating : 玩家仍在战斗半径内
-    Router --> Chasing : 玩家在追击半径内 (拉开距离)
-    Router --> Patrolling : 玩家死亡或丢失
-
-    %% 死亡流
-    AreaPatrol --> Dead : 致命伤害 (Health <= 0)
-    AreaCombat --> Dead : 致命伤害
-    AreaReact --> Dead : 致命伤害
-```
+![敌人战斗 AI 分层状态机流转图 (Enemy AI Hierarchical FSM)](docs/images/enemy_fsm.svg)
 
 <a name="enemy-tick-flow"></a>
 ### Enemy Tick Flow
