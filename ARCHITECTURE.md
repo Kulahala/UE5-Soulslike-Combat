@@ -67,9 +67,7 @@ Language policy: keep stable section titles and HTML anchors in English; use Chi
 - The first one-time fixture is the non-Encounter TestMap Paladin `TestMap_OneTimePaladinElite`, whose `TestMap_OneTimePaladinElite_Arrows` reward deferred-spawns the existing `BP_DarkKnightArrowBundle` with `Item_DarkKnightArrow x20`. Gold remains a separate transient death reward. Before the defeat transaction, the current controlled `AMyCharacter` validates that the player catalog resolves the Definition, the quantity is positive, and non-ammo rewards use quantity `1`; invalid authoring warns and cannot create durable Defeat/Pending state.
 - `AEnemy::BeginPlay()` checks the defeated marker before patrol points, weapon setup, AI binding, perception or Encounter ownership. A defeated enemy directly recreates only a still-Pending reward at its own authored initial transform, then destroys itself without `Die()`, Gold, a death delegate or an Encounter side effect. A pending reward is forced through base `Aitem` item/ammo claim logic, so subclass presentation such as `ATreasure` cannot bypass the one-save item grant, `ClaimedRewardIds` write and Pending removal. If a deferred reward cannot finish spawning, the staged Actor is destroyed and the committed Pending state remains authoritative for reload reconstruction.
 - `AEncounterController::ValidateConfiguration()` and `AEnemy::ClaimEncounterOwner()` reject a preplaced enemy with a valid one-time defeat contract. This keeps an independently persistent elite from becoming a partially cleared Controller participant. One-time IDs are currently checked for uniqueness in the loaded map; author future persistent gameplay maps with globally namespaced IDs until the save identity contract is deliberately expanded.
-- `ATestGameMode::RestorePlayerFromSave()` restores resources and Gold first, then asks `AMyCharacter` to rebuild its item-ownership cache. This makes rest reload, death reload, and `Continue` independent of a previous Pawn instance.
-- `TODO-03A` established data-only ownership, `TODO-03B-A` converts the two fixed world pickups into owned records, `TODO-03B-B1` establishes the activation/rest/menu boundary, and `TODO-03B-B2` completes the fire-only loadout loop: `UItemOwnershipComponent` exposes compatible owned instances by semantic slot, `UBonfireMenuWidget` maps UI labels back to stable `InstanceId` values, and `ACharacterController` only coordinates the request. `TODO-03B-C2` adds the narrow first-equip exception: a fixed pickup may fill only an empty compatible persistent slot.
-- `AMyCharacter` owns transient visual/combat materialization, not durable item data. For a bonfire selection it validates an owned instance, spawns and silently attaches a hidden candidate, commits the equipment-slot transaction through `UItemOwnershipComponent` and `USoulslikeGameInstance`, then replaces the old visible Actor only after persistence succeeds. For an empty-slot fixed world pickup it prepares the same Definition-based candidate before the three-array claim transaction; a candidate, class, socket, attach, or save failure aborts the full pickup. An occupied slot produces no candidate and never replaces the current visible equipment. Restored loadouts and automatic first-equips are silent; only active fire-menu changes play the existing actor-owned equip sound. Empty-slot selection writes first, then destroys the matching transient Actor. `EndPlay` destroys both materialized slots.
+- **装备所有权与火堆换装架构**：`UItemOwnershipComponent` 按语义槽位管理已拥有的物品实例，`UBonfireMenuWidget` 将 UI 选项映射为稳定的 `InstanceId`，`ACharacterController` 负责协调换装请求；已拥有的剑盾在火堆服务菜单中支持即时切换并跨死亡持久化；世界固定拾取物仅在对应槽位为空时自动填充，已有装备时不覆盖。
 - The B-B `TestMap` fixtures are `TestMap_DarkKnightBowPickup -> Item_DarkKnightBow` and `TestMap_DarkKnightArrowBundlePickup -> Item_DarkKnightArrow x20`. Bow follows the existing candidate-first fixed-item path and may auto-equip only into an empty MainHand; the arrow bundle only grants Reserve. A real Rest is still the sole Reserve-to-Loaded transfer, so a newly claimed `20`-arrow bundle displays `0 / 20` until Rest fills the loaded container.
 - `ItemDebugGrant`, `ItemDebugEquip`, `ItemDebugGrantQuantity`, and `ItemDebugDump` are non-Shipping console validation commands. Ammo quantity grants add reserve only; the Dump reports both runtime and saved loaded-container data. `BowDebugFailNextProjectilePrepare`, `BowDebugFailNextAmmoConsumeSave`, `BowDebugFailNextAmmoRefillSave`, and `ItemDebugVerifyAmmoRefillFixture` are scoped development evidence hooks, not player-facing inventory UI.
 
@@ -84,15 +82,14 @@ Language policy: keep stable section titles and HTML anchors in English; use Chi
 - `AMyCharacter` is the sole player input-decision boundary. Private, non-reflected `EPlayerActionIntent` values resolve to `StartNow` / `BufferOnce` / `Reject` / `EndHeld` before the resolved-action executor `TryStartAction(EPlayerActionType)` may run. When a live MainHand `ABow` is present, right-click maps to `EAS_Aiming` / `RangedAim`; left-click press starts a Bow charge and left-click release can enter `RangedRelease` only after the required Draw Montage has ended naturally. Normal sword attack, charged attack, and shield block gates remain unavailable while that Bow is equipped. There is no numeric action-priority source.
 - Aiming uses `WalkSpeed * ABow::AimMoveSpeedMultiplier` as its base speed, then retains the existing lock-on forward/strafe/back directional multiplier. It neither re-enables sprint nor enters the sprint-stamina debit path. Normal right-button release exits aiming and cancels a pending draw. Focus-loss cancellation, death, bonfire protection, main-hand replacement, map teardown, a dodge/parry interruption, and receiving a hit all clear the pending draw; forced interruptions also clear the held right-button intent, so recovery cannot silently re-enter aim until the player releases and presses right-click again.
 - `BP_DarkKnightBow` is the player presentation child of `ABow`: it assigns `DA_BowPhysical_Archer` and authors only player delivery, Montage and audio configuration. Its collision-free `LoadedArrowVisual` is an inherited, locked diagnostic component; Profile application supplies its Mesh and local pivot, and it attaches directly to `BowArrowSocket`. It is only an Aim-ready fallback: it exists while the player has valid Loaded ammo, no prepared candidate is nocked and no Release/Load presentation is active. `USlashAnimInstance::bIsBowAiming` reads only `AMyCharacter::IsBowAiming()`; the authored non-Aim and Aim Bow locomotion BlendSpaces are therefore presentation consumers, not a second action-state source.
-- Successful `EAS_Aiming` has facing priority: `AMyCharacter` caches the pre-Aim movement rotation mode, disables movement-facing and enables controller-yaw facing so the body follows the reticle. A locked Aim keeps the lock target, marker, validity checks, death retargeting and screen-side switching, but suspends only Lock-On's ControlRotation and ActorFacing writes; mouse Look remains free. Aim and Lock-On use separate caches, so entering or clearing Lock-On during Aim cannot restore the temporary Aim rotation mode as the player's normal state. Aim entry also stops a stale failed-lock camera recenter, and normal Aim cancellation restores the retained Lock-On mode before its existing smooth target recenter resumes.
+- `AWeapon -> ABowBase (abstract) -> ABow` is the Bow class hierarchy. `ABowBase` owns the shared physical Bow runtime: default left-hand attachment, collision-free `BowSkeletalVisual`, fixed `BowArrowSocket` contract, transient Bow presentation state, prepared-projectile nocking, and the only launch-transform query.
+- **弓箭网格与唯一物理发射点契约**：主角与敌人弓箭统一继承自 `ABowBase`，共享无碰撞的 SkeletalMesh 渲染与统一 Socket 查询接口；所有待发箭生成、物理发射与视线检测均严格以 `BowSkeletalVisual.BowArrowSocket` 作为唯一物理源点，缺失 Socket 时做严格 Fail-Closed 拦截，不静默回退到 CharacterMesh 或 Actor 原点。
 - Bow Aim owns one absolute right-shoulder SpringArm target and its existing `VInterpTo` / `FInterpTo` interpolation. It never adds to a Lock-On offset, so a locked Aim cannot double-shift the camera; cancellation interpolates back to the retained Lock-On target or normal free-camera target. `USlashAnimInstance` exposes read-only `bIsBowAiming`, local `BowAimYaw` and `BowAimPitch`; the authored DarkKnight Aim Offset layers the upper body over Bow Aim locomotion and remains a presentation consumer of those native values.
 - `UPlayerHUDWidget` owns presentation-only `Loaded / Capacity`, a viewport-centered hollow-cross reticle, the Bow-charge reticle scalar, and a short confirmed-hit marker. `AMyCharacter` pushes the effective `IsBowAiming()`, arrow quantity and charge scalar after relevant lifecycle changes; only the resolved result of a player arrow may request the marker. The HUD does not infer or mutate aim state, projectile trajectory, target selection, ammo, damage, input, or SaveGame state.
 - LMB press first validates the equipped Bow, Loaded ammo, physical Release/Load gate, Socket, AnimInstance and Draw Montage, then creates exactly one collision-disabled prepared `ACombatProjectile` and lets `ABowBase::NockPreparedProjectile()` Snap its native collision root to `BowArrowSocket`. That Actor owns the nocked-arrow visual while attached; the static `LoadedArrowVisual` hides. `DrawMontage` natural end is the only full-draw condition. Early LMB release, missing Draw/Release/Load configuration, prepare failure, Socket failure, hit, Guard Break, death, equipment replacement and teardown all destroy the uncommitted candidate, restore the valid Aim-ready visual and never consume Loaded ammo.
 - Full-draw LMB release resolves the current `ECC_Visibility` camera aim point, obtains the world origin from `ABowBase::TryGetLaunchTransform()`, and refreshes that prepared Actor's launch context before it must start `ReleaseMontage`. Only a successful `UItemOwnershipComponent` loaded-ammo consume detaches that same Actor, places it at the same shared Bow Socket origin, calls `CommitPreparedLaunch()` and plays the shot sound. A durable consume failure destroys the candidate, stops only the active Release Montage with the short blend-out, restores the nocked-arrow visual and preserves `EAS_Aiming`.
 - The actual `ReleaseMontage` and, after a successful shot while RMB remains held, `LoadMontage` are the sole re-fire gate: either Montage's physical playback or cancellation blend-out reported by `Montage_IsPlaying()` blocks a new candidate. Natural Load completion returns Bow presentation to Aim but does not create a projectile or consume ammo. There is no numeric `ShotCooldown`, field reload, backpack UI, AnimNotify-driven fire timing, or second gameplay firing route. Reserve remains in `FTestItemInstanceRecord.Quantity`; only a real bonfire Rest transfers reserve into `FTestAmmoContainerRecord` up to the authored capacity.
 - `ItemDebugGrantQuantity <DefinitionId> <Quantity>` grants reserve arrows only. `BowDebugFailNextProjectilePrepare`, `BowDebugFailNextAmmoConsumeSave`, `BowDebugFailNextAmmoRefillSave`, and `ItemDebugVerifyAmmoRefillFixture <DefinitionId>` are non-Shipping validation-only commands for the prepared-candidate, loaded-consume, rest-refill, and malformed-raw-record boundaries.
-- `TODO-04B-B` completed the visible player Bow Mesh, player arrow visual, proper Bow locomotion BlendSpaces and Draw/AimHold/Release authoring. Persistent locomotion remains AnimBP-owned; the Release Montage is only the required one-shot firing gate, not a substitute for AimHold or locomotion.
-- `TODO-04B-C0` introduced the player Skeletal Bow visual; `TODO-04B-D` promotes that visual contract into `ABowBase` so both player and enemy Bow subclasses use the same collision-free Skeletal runtime and Socket query. `LoadedArrowAnchor` and `ProjectileSpawnPoint` no longer exist as authorable components. There is one physical origin: `BowSkeletalVisual.BowArrowSocket`, used by the player nocked fallback, prepared collision-root attachment, player committed launch, and equipped enemy Bow LOS/release. A Bow with an invalid Profile or missing Socket fails closed; player preparation and enemy Projectile release do not silently fall back to an Actor or character-Mesh origin. Non-Bow enemy projectile attacks retain their existing authored Socket / Eyes fallback.
 - `EBowPresentationState` (`Relaxed`, `Aiming`, `Charging`, `Releasing`, `Loading`) is transient Bow-owned presentation state, not an `EActionState` or a SaveGame value. `AMyCharacter` writes it only after existing Aim/Draw/Release/Load presentation gates succeed, restores it after abort/end, and sets `Relaxed` before unified cancellation stops Montages. `UBowAnimInstance` reads only its owning `ABowBase`; `ABP_DarkKnightBow` consumes that value for its `Relaxed -> Aim -> Pull -> FullDrawHold -> Release -> Loading -> Aim` state machine, while Erika's independent Bow AnimBP remains `Relaxed` because enemy AI does not write player Bow presentation states. Neither the Bow AnimBP nor an AnimNotify can consume ammo, spawn/commit a projectile, change input or recover player gameplay state.
 - `BP_DarkKnightBow` and `ABP_DarkKnightBow` live under `/Game/_GAME/BP/Items/Weapons/Bow/`. `DA_Item_DarkKnightBow` and the placed TestMap Bow Pickup directly reference that runtime Blueprint after Redirector fix-up. The root `ABP_DarkKnight` keeps the full-body `DefaultSlot` after its layered pose and before the Parry layer, so Dodge and player Bow one-shot Montages have a real consumer without becoming locomotion or action-state owners.
 - Player Bow reload buffering is local to `AMyCharacter`, not the melee Combo system. `bBowDrawInputHeld` remains the active prepared-Draw state; separate private raw-held and one-intent buffer flags are admitted only while a valid Release/Load end callback still owns a future handoff. Natural `OnBowLoadMontageEnded()` consumes that intent once only after verifying the same equipped Bow, valid Aim, held RMB/LMB, alive player and Loaded ammo, then re-enters the existing `StartBowCharge()` path. Release/Load playback and blend-out remain the sole re-fire gate; release, cancellation, abort, interruption, hit, Guard Break, death, equipment change, Bonfire and EndPlay clear the raw/buffer state. `AMyCharacter` pushes the gate result to `UPlayerHUDWidget`; the widget only paints the existing reticle inner lines red and does not poll or mutate Bow gameplay.
@@ -149,19 +146,7 @@ Core character/combat state-machine enums and small shared combat-flow enums are
 
 ### Stamina / Exhaustion Flow
 
-```mermaid
-flowchart LR
-    A[Attack / dodge / parry / jump / sprint / successful block] -->|UseStamina| B[AttributeComponent]
-    B --> C{Stamina <= 0?}
-    C -->|No| D[Continue current action]
-    C -->|Yes| E[OnExhausted delegate]
-    E --> F[ActionState = Exhausted or delayed exhausted after montage]
-    F --> G[Recovery timer]
-    G --> H[Recover stamina]
-    H --> I[ActionState = UnOccupied]
-
-    J[Stamina below max] -->|after regen delay| K[Tick stamina regen]
-```
+![体力消耗、透支与恢复时序图 (Stamina and Exhaustion Flow)](docs/images/stamina_flow.svg)
 
 - The project intentionally allows a final committed action to overdraw stamina before the public value clamps to zero.
 - Positive-cost successful blocks and jumps reset `StaminaRegenDelay`; sprint resets it continuously only while its normal movement-consumption gate and Combat Presence are both active. Attacks and dodges additionally pause regeneration during their committed montage and reset the delay when they recover.
@@ -178,16 +163,7 @@ flowchart LR
 
 ### Weapon State (`EWeaponState`)
 
-```mermaid
-stateDiagram-v2
-    [*] --> Unequipped
-    Unequipped --> OneHandEquipped : Equip non-Bow MainHand
-    Unequipped --> TwoHandEquipped : Equip Bow
-    OneHandEquipped --> TwoHandEquipped : Select Bow
-    TwoHandEquipped --> OneHandEquipped : Select non-Bow MainHand
-    OneHandEquipped --> Unequipped : Clear MainHand
-    TwoHandEquipped --> Unequipped : Clear MainHand
-```
+![武器装备状态流转图 (Weapon State Flow)](docs/images/weapon_state.svg)
 
 <a name="enemy-state-machine-flow"></a>
 ## Enemy State Machine Flow
@@ -211,46 +187,12 @@ stateDiagram-v2
 <a name="enemy-tick-flow"></a>
 ### Enemy Tick Flow
 
-```mermaid
-flowchart TD
-    A[Tick] --> B[DrawDebugInfo]
-    B --> C{State guard}
-    C -->|Dead / Stunned / Attacking / StanceBreak| D[Return]
-    C -->|Other states| E[CheckCombatTarget]
-    E --> F{Target distance / validity}
-    F -->|Combat range| G[Set EES_Combating]
-    F -->|Chase range| H[Set EES_Chasing]
-    F -->|Invalid or lost| I[Set EES_Searching or Patrolling]
-    G --> J{State Tick}
-    H --> J
-    I --> J
-    J --> K[OnPatrolling]
-    J --> L[OnSearching]
-    J --> M[OnChasing]
-    J --> N[OnCombating]
-    N --> O[TickCombatFacing / speed easing]
-    O --> P[EvaluateCombatSubState]
-    P --> Q[Pending attack intent or TickCombatSubState]
-```
+![敌人 Tick 帧更新与行为派发流 (Enemy Tick and Dispatch Flow)](docs/images/enemy_tick_flow.svg)
 
 <a name="combat-cooldown-coordination-flow"></a>
 ### Combat Cooldown / Coordination Flow
 
-```mermaid
-flowchart LR
-    A[Attack decision / pending intent ready] --> B[Play attack montage]
-    B --> C[Montage ended or interrupted]
-    C --> D[CheckCombatTarget]
-    D --> E[SetEnemyState exits EES_Attacking]
-    E --> F[Start current attack cooldown]
-    F --> G{Cooldown active?}
-    G -->|Yes| H[CooldownSpacing / CoordinatedWaiting]
-    G -->|No| I{Same-target ally attacking?}
-    I -->|Yes| J[CoordinatedWaiting]
-    I -->|No| K{Intent ready and facing?}
-    K -->|Yes| L[Attack]
-    K -->|No| M[Orienting / AttackReadyPressing / PendingPress]
-```
+![敌人攻击冷却与多敌人防群殴协调流程 (Combat Cooldown and Coordination Flow)](docs/images/enemy_coordination_flow.svg)
 
 - **同目标攻击协调**：`IsAllyAttackingNearby()` 只在附近敌人、对方处于 `EES_Attacking` 且双方追逐同一个目标时成立。当前敌人会清除尚未提交的攻击意图，进入 `CoordinatedWaiting`，设置短等待计时并继续做站位；计时结束后解除旧子状态，下一帧重新评估距离、朝向、冷却和友军状态。
 - **边界**：这是单机敌人局部 HFSM 的节奏控制，用于避免多个近战敌人同时重叠出手；它不是网络同步、全局攻击调度器，也不改变共享的外层 `EEnemyState`。
@@ -472,7 +414,7 @@ FCombatTeamHelper (static helper: ShareTeamTag for same-team detection via Actor
   - **Ranged Pending Flow**: a pending Projectile entry presses toward its effective maximum range when too far, retreats or diagonally retreats when closer than `MinDistance`, and uses the existing navigated strafe/reposition plan while `ECC_Visibility` LOS is blocked. It retains the chosen ranged intent and uses the normal pending timeout/retry block if navigation cannot make it executable; it never switches itself into a melee delivery or fires through the first blocking Actor.
   - **Ranged Release**: `UAnimNotify_EnemyProjectileRelease` only asks its owning `AEnemy` to release. A Projectile attack begins only inside its strict tactical `MinDistance` / effective `MaxDistance` window with clear LOS. After that legal commitment, `TryReleaseConfiguredProjectileAttack()` permits a target to leave the tactical maximum only while it remains within `InitialSpeed * MaxLifetime`, and still rechecks active `EES_Attacking`, non-dormancy, target validity, socket/eyes source, LOS and an attack-local one-shot guard before spawning. A stale Notify after hit stun, stance break, death, encounter dormancy, Montage interruption or `EndPlay` is rejected because leaving `EES_Attacking` clears the snapshot and Release/Probe timers. `PossessedBy()` / `UnPossessed()` also refresh the `AAIController::ReceiveMoveCompleted` binding, so dynamically possessed diagnostic enemies cannot retain a callback on an obsolete Controller.
   - **Pre-Release LOS Cancellation**: only `ARangedEnemy` monitors an active, unreleased, non-debug-probe Projectile attack during Draw/AimHold. A clear LOS resets the timer; uninterrupted loss for `0.15 s` first marks the attack Release guard as attempted, then stops the current attack Montage with `0.12 s` blend-out. The existing Montage-end path starts the normal, idempotent cooldown. An already released projectile, melee attack, hit reaction and death Montage are excluded; a late or same-frame release Notify is rejected by the guard.
-  - **Ranged Debug And Class Boundary**: `AEnemy` keeps the non-Shipping `EnemyRangedDebugProbe [ReleaseDelay]`, which exercises shared range, LOS, spacing, state and release guards with a temporary native Enemy/Controller pair; it does not create a map Actor, asset, persistence state or formal archer presentation. `ARangedEnemy` is the only added C++ specialization and must be used only for enemies that share its pure-ranged spacing, Escape and pre-release cancellation contract. `TODO-04D-B` owns the `BP_ErikaArcher` content layer, Montage Release Notify placement, socket, visual bow and TestMap authoring.
+  - **Ranged Debug And Class Boundary**: `AEnemy` keeps the non-Shipping `EnemyRangedDebugProbe [ReleaseDelay]`, which exercises shared range, LOS, spacing, state and release guards with a temporary native Enemy/Controller pair; it does not create a map Actor, asset, persistence state or formal archer presentation. `ARangedEnemy` is the only added C++ specialization and must be used only for enemies that share its pure-ranged spacing, Escape and pre-release cancellation contract. `BP_ErikaArcher`蓝图资源层负责蒙太奇 Release Notify 帧绑定、挂点、可视弓网格与 TestMap 关卡配置。
   - **Cooldown Semantics**: v1.5 后敌人攻击 DataAsset 的 `MinCooldown` / `MaxCooldown` 不包含蒙太奇播放时长；攻击自然结束或被打断并退出 `EES_Attacking` 后才开始计时。
   - **Attack Selection**: `UEnemyAttackConfigDataAsset::ChooseAttackIndex(float DistanceToTarget)` 按距离过滤候选招式后加权随机，用于距离筛选/兜底路径；`UEnemyAttackConfigDataAsset::ChooseAttackIntentIndex(int32 ExcludedAttackIndex)` 忽略距离、只按权重抽取，并可排除一个 index，用于 pending intent + retry block 路径。`AEnemy` 通过 `EnemyAttackConfig->` 调用这两个方法。
   - **Pending Attack Intent**: 未冷却且未协调等待时，`OnCombating()` 先缓存一个 pending attack intent，再尝试执行。抽中近距离攻击但当前距离大于该招式有效 `MaxDistance` 时，敌人使用 `MoveToCombatTarget(AcceptanceRadiusOverride)` 动态追踪目标并继续前压，直到进入该招式距离内再出手。
