@@ -206,21 +206,32 @@ private:
 	/** 仅在角色内部使用的输入意图；不扩展 EActionState，也不向 Blueprint / SaveGame 暴露。 */
 	enum class EPlayerActionIntent : uint8
 	{
-		AttackPress,
-		AttackRelease,
-		AttackCancel,
-		BlockPress,
-		BlockRelease,
-		Dodge,
-		Parry,
-		Potion
+		AttackPress,   // 玩家按下攻击键 (LMB Press)
+		AttackRelease, // 玩家松开攻击键 (LMB Release / 蓄力松开)
+		AttackCancel,  // 攻击被取消 (失去焦点/外部强行打断)
+		BlockPress,    // 玩家按下防御键 (RMB Press / 举盾或弓箭瞄准)
+		BlockRelease,  // 玩家松开防御键 (RMB Release / 结束举盾或退出瞄准)
+		Dodge,         // 玩家按下翻滚键 (Space / Shift)
+		Parry,         // 玩家按下弹反键 (F / Q)
+		Potion         // 玩家按下喝药键 (R / 数字键)
 	};
 
+	/**
+	 * 玩家输入意图决议裁定结果
+	 * 由 ResolvePlayerActionIntent 函数对当前输入意图进行无副作用前置预检后输出的唯一裁定结果。
+	 */
 	enum class EPlayerActionIntentResolution : uint8
 	{
+		/** 立即启动：当前处于空闲常态 (EAS_UnOccupied) 且前置条件全部满足，立即执行目标动作 */
 		StartNow,
+
+		/** 缓冲一次：当前正在攻击动作中，且正处于连招预输入监听窗口 (ComboWindow)，记录单次输入缓冲 (bComboInputReceived = true) */
 		BufferOnce,
+
+		/** 拒绝：非法输入（如受击硬直中、体力不足、举盾中按攻击等），直接丢弃，不产生任何副作用 */
 		Reject,
+
+		/** 结束长按：针对按住蓄力重击或弓箭拉弓动作，玩家松开按键时结束蓄力/触发发射 */
 		EndHeld
 	};
 

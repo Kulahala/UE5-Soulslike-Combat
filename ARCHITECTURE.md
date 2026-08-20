@@ -105,6 +105,7 @@ Language policy: keep stable section titles and HTML anchors in English; use Chi
 - `Idle` 会领取有效预放置参与者并使其进入遭遇待命；Initial Spawn Batch 在此时不创建 Actor。有效玩家必须先被观察到离开安全内区，再走入该内区才可激活，因此 PIE 出生在安全内区不会立即封锁场地。批次激活会先为所有成员解析候选点、NavMesh、地面、胶囊碰撞、批内预约和边界内缩，再 deferred-spawn、领取 owner、绑定死亡委托、Dormant、FinishSpawn 和激活；任一失败都会销毁本批 Actor、解绑/释放 owner，保持 `Idle` 且不关闭边界。预放置路径继续直接激活既有参与者。最后一名已登记的 Active 参与者真实死亡后只会一次性进入 `Cleared`，打开边界并释放所有权。
 - `Rectangle`、`Radial` 和 `Spline` 都是 Controller 内部的边界作者模式。Rectangle 与 Radial 使用各自配置的内部尺寸；Spline 是可编辑、平面、Linear、无自交的简单闭环。所有模式都要求玩家胶囊中心位于作者区域内，且到每一面未来墙体的距离大于 `PlayerCapsuleRadius + SealClearance`，避免边界在玩家贴边时穿过角色封锁。Initial Spawn Batch 以最终地面位置和敌人有效 Capsule 半径做同一内侧边界检查：边界外或胶囊跨界候选只会重试或使整个批次保持 `Idle`，绝不在关闭边界后生成。
 - 每条作者边界都会生成一对运行时段：`UBoxComponent` 只在 `Active` 时阻挡 `Pawn`，无碰撞 Engine Cube 视觉段与其保持同一变换。`Idle`、`Cleared`、无效配置和 `EndPlay` 时视觉隐藏且碰撞为 `NoCollision`。`M_EncounterBoundary` 是当前灰白雾幕材质原型，不是最终 Boss 雾墙美术、开关动画、音频或 Niagara 行为。
+- **封闭战斗语义**：运行时边界提供魂类战斗常见的“进入区域后限制逃脱，参与者清除后解除”语义，可复用于特殊战斗或 Boss 场景；当前 Test 视频展示的是普通 `AEncounterController` 遭遇实例，不额外声称已经实现独立的 Boss 框架、Boss 阶段或 Boss 专属奖励系统。
 - `AEnemy::ClaimEncounterOwner()` / `ReleaseEncounterOwner()` 防止同一参与者被多个 Controller 管理。`SetEncounterDormant()` 是遭遇层的状态屏障，不是第二套 AI：它停止移动、Montage/Timer 驱动的后续路径、战斗瞬态和陈旧导航路径。`ActivateForEncounter()` 以触发玩家为目标恢复既有 `EES_Chasing -> EES_Combating` 路径。`Die()` 只广播一次原生死亡通知；Controller 只在 `Active` 消费该通知。预放置参与者在 teardown 时只解绑/释放，动态批次参与者在 rollback 或 Controller `EndPlay` 时销毁；`AEnemy::EndPlay()` 会幂等清理其运行时巡逻 `SpawnPoint`，但直接 Destroy 不伪造死亡通知或 Encounter Clear。
 - `AEncounterSpawnPoint` 提供作者填写的稳定 `SpawnPointId`、编辑器 Arrow，以及 `Point`、`Circle` 或 `Box` 的局部候选区域。它只计算候选 Transform；不持有敌人类、Controller、批次数据或实际生成逻辑。`AEncounterController` 是唯一的批次解析和 Spawn Owner。
 - `EncounterId` 是作者填写的 `FName` 持久化契约，绝不能使用 Actor object name/label、指针、运行时 GUID 或 External Actor package path。同一 `SaveGame` 中它必须全局唯一；Details 只承诺当前 `UWorld` 内的重复检测，因此首个 Demo 采用 `TestMap_CryptEliteEncounter` 这类全局命名空间 ID。第二张 gameplay map 前必须按 `ROADMAP.md` 决定并版本化 map-scoped identity 迁移。
@@ -146,47 +147,62 @@ Core character/combat state-machine enums and small shared combat-flow enums are
 
 ```mermaid
 stateDiagram-v2
+    classDef neutral fill:#2d5a27,stroke:#52c41a,color:#fff,stroke-width:2px;
+    classDef combat fill:#1d39c4,stroke:#597ef7,color:#fff,stroke-width:2px;
+    classDef control fill:#d4380d,stroke:#ff7875,color:#fff,stroke-width:2px;
+    classDef terminal fill:#434343,stroke:#8c8c8c,color:#fff,stroke-width:2px;
+
+    state "空闲常态 (EAS_UnOccupied)" as UnOccupied :::neutral
+    
+    state "主动动作区 (Combat & Actions)" as Actions {
+        state "攻击 (EAS_Attacking)" as Attacking :::combat
+        state "闪避 (EAS_Dodging)" as Dodging :::combat
+        state "弹反 (EAS_Parrying)" as Parrying :::combat
+        state "喝药 (EAS_UsingPotion)" as Potion :::combat
+        state "弓箭瞄准 (EAS_Aiming)" as Aiming :::combat
+    }
+
+    state "受控与异常区 (Disruptions & Recovery)" as Disruptions {
+        state "受击硬直 (EAS_Stunning)" as Stunning :::control
+        state "破防虚弱 (EAS_GuardBroken)" as GuardBroken :::control
+        state "体力透支 (EAS_Exhausted)" as Exhausted :::control
+    }
+
+    state "死亡终态 (EAS_Dead)" as Dead :::terminal
+
     [*] --> UnOccupied
 
-    UnOccupied --> Attacking : Attack / sprint attack / charged attack
-    UnOccupied --> Stunning : Hit react
-    UnOccupied --> Exhausted : Stamina reaches zero
-    UnOccupied --> GuardBroken : Blocking hit consumes remaining stamina
-    UnOccupied --> Parrying : Parry input
-    UnOccupied --> Dodging : Dodge input
-    UnOccupied --> UsingPotion : Potion input
-    UnOccupied --> Aiming : Bow aim input
+    %% 主动出招流
+    UnOccupied --> Attacking : LMB 出刀 (Light / Sprint / Charge)
+    UnOccupied --> Dodging : Space 翻滚
+    UnOccupied --> Parrying : F 弹反
+    UnOccupied --> Potion : R 喝药
+    UnOccupied --> Aiming : 持弓按住 RMB
 
-    note right of UnOccupied
-        Blocking is a sub-state:
-        bIsBlocking + bBlockInputHeld
-    end note
+    %% 动作取消与连招
+    Attacking --> Attacking : 连招分支跳转 (ComboBranchWindow)
+    Attacking --> Dodging : 后摇取消打断 (ActionCancelWindow)
+    Aiming --> UnOccupied : 松开 / 射出 / 取消
 
-    Attacking --> UnOccupied : Montage ended
-    Attacking --> Exhausted : Montage ended while exhaustion timer active
-    Stunning --> UnOccupied : Hit react recovery
-    Exhausted --> UnOccupied : RecoverFromExhaustion
-    Exhausted --> GuardBroken : Unblocked hit
-    GuardBroken --> UnOccupied : Montage end or interruption
-    Parrying --> UnOccupied : Montage ended + cooldown
-    Dodging --> UnOccupied : Montage ended
-    Dodging --> Exhausted : Montage ended while exhaustion timer active
-    UsingPotion --> UnOccupied : Montage ended
-    UsingPotion --> Exhausted : Potion ended while exhaustion timer active
-    Aiming --> UnOccupied : Release or cancel
+    %% 动作自然收敛
+    Actions --> UnOccupied : 蒙太奇自然结束 (体力充足)
+    Actions --> Exhausted : 蒙太奇结束时体力透支 (延迟 3s 恢复)
 
-    Parrying --> Stunning : Hit during failed parry
-    UsingPotion --> Stunning : Interrupted by hit
+    %% 受击与破防流
+    UnOccupied --> Stunning : 受到未防御命中
+    Actions --> Stunning : 动作中受到强力重击打断
+    UnOccupied --> GuardBroken : 举盾受击导致体力耗尽
+    Exhausted --> GuardBroken : 疲惫中受到未格挡重击
 
-    UnOccupied --> Dead : Health <= 0
-    Attacking --> Dead : Health <= 0
-    Stunning --> Dead : Health <= 0
-    Exhausted --> Dead : Health <= 0
-    GuardBroken --> Dead : Health <= 0
-    Parrying --> Dead : Health <= 0
-    Dodging --> Dead : Health <= 0
-    UsingPotion --> Dead : Health <= 0
-    Aiming --> Dead : Health <= 0
+    %% 状态恢复
+    Stunning --> UnOccupied : 硬直蒙太奇结束
+    GuardBroken --> UnOccupied : 破防硬直结束 (保底恢复 1 点耐力)
+    Exhausted --> UnOccupied : 3秒恢复计时器超时
+
+    %% 死亡流
+    UnOccupied --> Dead : 致命伤害 (Health <= 0)
+    Actions --> Dead : 致命伤害
+    Disruptions --> Dead : 致命伤害
 ```
 
 ### Stamina / Exhaustion Flow
@@ -250,44 +266,64 @@ stateDiagram-v2
 
 ```mermaid
 stateDiagram-v2
+    classDef patrol fill:#237804,stroke:#73d13d,color:#fff,stroke-width:2px;
+    classDef combat fill:#10239e,stroke:#2f54eb,color:#fff,stroke-width:2px;
+    classDef react fill:#ad2102,stroke:#ff4d4f,color:#fff,stroke-width:2px;
+    classDef finish fill:#262626,stroke:#595959,color:#fff,stroke-width:2px;
+
+    state "巡逻探索区 (Exploration Layer)" as AreaPatrol {
+        state "巡逻 (EES_Patrolling)" as Patrolling :::patrol
+        state "警戒搜索 (EES_Searching)" as Searching :::patrol
+    }
+
+    state "交战核心区 (Combat Engagement Layer)" as AreaCombat {
+        state "追击接近 (EES_Chasing)" as Chasing :::combat
+        state "战斗拉扯 (EES_Combating)" as Combating :::combat
+        state "出招攻击 (EES_Attacking)" as Attacking :::combat
+    }
+
+    state "受击破防区 (Hit & Stance Break Layer)" as AreaReact {
+        state "受击硬直 (EES_Stunned)" as Stunned :::react
+        state "失衡处决硬直 (EES_StanceBreak)" as StanceBreak :::react
+    }
+
+    state "目标重检路由 (CheckCombatTarget)" as Router
+    state "死亡终态 (EES_Dead)" as Dead :::finish
+
     [*] --> Patrolling
-    state "CheckCombatTarget()" as Recheck
 
-    Patrolling --> Searching : Reaches patrol point
-    Searching --> Patrolling : Search timer ends
-    Searching --> Chasing : Senses target
+    %% 巡逻与发现
+    Patrolling --> Searching : 到达巡逻点
+    Searching --> Patrolling : 搜索计时结束 (无目标)
+    Patrolling --> Chasing : 感知到玩家 (Visual / Audio)
+    Searching --> Chasing : 重新感知到玩家
 
-    Patrolling --> Chasing : Senses target
-Chasing --> Combating : Enters combat radius
-    Combating --> Chasing : Leaves combat radius + exit buffer
-    Chasing --> Searching : Target lost / leaves chase radius
-    Searching --> Patrolling : Search timer ends (no target)
-    Searching --> Chasing : Senses target again
+    %% 战斗主干流
+    Chasing --> Combating : 进入战斗半径 (CombatRadius)
+    Combating --> Chasing : 超出战斗半径 + 退出缓冲区 (Buffer)
+    Chasing --> Searching : 目标丢失 / 超出追击半径 (ChaseRadius)
+    Combating --> Attacking : 局部 HFSM 决策允许出刀
 
-    Combating --> Attacking : Local HFSM allows attack
-    Attacking --> Recheck : Montage ended
+    %% 受击与破防分流
+    AreaPatrol --> Stunned : 受击 (普通伤害)
+    AreaCombat --> Stunned : 受击 (普通伤害)
+    AreaPatrol --> StanceBreak : 韧性归零 (Poise Depleted)
+    AreaCombat --> StanceBreak : 弹反成功 / 韧性归零
 
-    Patrolling --> Stunned : Hit while alive
-    Chasing --> Stunned : Hit while alive
-    Combating --> Stunned : Hit while alive
-    Attacking --> Stunned : Hit while alive
-    Patrolling --> StanceBreak : Poise depleted
-    Chasing --> StanceBreak : Poise depleted
-    Combating --> StanceBreak : Poise depleted
-    Attacking --> StanceBreak : Parried / poise depleted
+    %% 动作与受击恢复流 (统一接入重检路由)
+    Attacking --> Router : 攻击蒙太奇播放完毕
+    Stunned --> Router : 受击硬直结束
+    StanceBreak --> Router : 失衡蒙太奇结束
 
-    Stunned --> Recheck : Hit react ends
-    StanceBreak --> Recheck : Dedicated StanceBreak Montage ends / interrupted
-    Recheck --> Combating : Still inside combat radius
-    Recheck --> Chasing : Inside chase radius
-    Recheck --> Patrolling : No valid target
+    %% 路由分流
+    Router --> Combating : 玩家仍在战斗半径内
+    Router --> Chasing : 玩家在追击半径内 (拉开距离)
+    Router --> Patrolling : 玩家死亡或丢失
 
-    Patrolling --> Dead : Fatal damage
-    Chasing --> Dead : Fatal damage
-    Combating --> Dead : Fatal damage
-    Attacking --> Dead : Fatal damage
-    Stunned --> Dead : Fatal damage
-    StanceBreak --> Dead : Fatal damage
+    %% 死亡流
+    AreaPatrol --> Dead : 致命伤害 (Health <= 0)
+    AreaCombat --> Dead : 致命伤害
+    AreaReact --> Dead : 致命伤害
 ```
 
 <a name="enemy-tick-flow"></a>
@@ -333,6 +369,9 @@ flowchart LR
     K -->|Yes| L[Attack]
     K -->|No| M[Orienting / AttackReadyPressing / PendingPress]
 ```
+
+- **同目标攻击协调**：`IsAllyAttackingNearby()` 只在附近敌人、对方处于 `EES_Attacking` 且双方追逐同一个目标时成立。当前敌人会清除尚未提交的攻击意图，进入 `CoordinatedWaiting`，设置短等待计时并继续做站位；计时结束后解除旧子状态，下一帧重新评估距离、朝向、冷却和友军状态。
+- **边界**：这是单机敌人局部 HFSM 的节奏控制，用于避免多个近战敌人同时重叠出手；它不是网络同步、全局攻击调度器，也不改变共享的外层 `EEnemyState`。
 
 <a name="key-enemy-method-responsibilities"></a>
 ### Key Enemy Method Responsibilities
@@ -392,6 +431,7 @@ ABP_DarkKnight_MainState / ABP_DarkKnight_IkTrace → UAnimInstance (Linked Anim
 Anim Blueprint / Control Rig assets → `ABP_DarkKnight_IkTrace` + `CR_Slash_foot_ik` (post locomotion foot IK trace and pelvis offset for uneven ground)
 UAnimNotifyState → UAnimNotifyState_ParryActive (marks parry active window in animation)
 UAnimNotifyState → UAnimNotifyState_ComboWindow (marks combo input window in animation)
+UAnimNotifyState → UAnimNotifyState_ComboBranchWindow (opens/closes the combo continuation window)
 UAnimNotifyState → UAnimNotifyState_DodgeInvulnerable (marks dodge invulnerability window)
 UAnimNotifyState → UAnimNotifyState_WeaponCollision (drives weapon trace window)
 UAnimNotifyState → UAnimNotifyState_HyperArmor (drives universal attack hyper armor with stance-break vulnerability)
@@ -401,6 +441,7 @@ UAnimNotify → UAnimNotify_PotionHeal (montage-driven partial potion healing)
 UAnimNotify → UAnimNotify_SetActionState (sets EActionState from AnimNotify)
 UAnimNotify → UAnimNotify_EnemyHitReactEnd (enemy hit react recovery)
 UAnimNotify → UAnimNotify_EnemyAttackEnd (enemy attack end)
+UAnimNotify → UAnimNotify_EnemyProjectileRelease (requests validated ranged projectile release)
 UAnimNotify → UAnimNotify_CharacterHitReactEnd (player hit react recovery)
 UAnimNotify → UAnimNotify_AttachWeapon (attach/detach weapon mesh during montage)
 UDataAsset → UTreasureData (static mesh, gold value, pickup sound, scale)
@@ -608,7 +649,7 @@ FCombatTeamHelper (static helper: ShareTeamTag for same-team detection via Actor
 <a name="poise-stance-break-system"></a>
 ## Poise & Stance Break System (韧性与破防系统)
 
-![Parry and stance break gameplay demo](docs/media/demo-parry-stancebreak.gif)
+![Parry and stance break gameplay demo](https://github.com/user-attachments/assets/d548f406-fc57-4165-aace-720e091b6b97)
 
 - **架构**：Dark Souls 风格的隐藏韧性条系统，统一弹反和韧性破防到 `EES_StanceBreak` 状态。
 - **韧性机制**：敌人持有隐藏韧性条（`MaxPoise` 默认 10，`CurrentPoise` 运行时值），每次受击扣除韧性伤害（`BasePoiseDamage × PoiseDamageMultiplier`），韧性归零触发破防硬直（`EES_StanceBreak`）。
@@ -630,8 +671,6 @@ FCombatTeamHelper (static helper: ShareTeamTag for same-team detection via Actor
 <a name="lock-on-system"></a>
 ## Lock-On System (`AMyCharacter` + `UPlayerLockOnComponent`)
 
-![Lock-on approach and target feedback](docs/media/architecture-lockon-approach.gif)
-
 - **组件架构**：`UPlayerLockOnComponent` 拥有锁定状态、初始目标搜索/评分、屏幕侧候选筛选和所有 `LockOn*` 参数。`AMyCharacter` 保留 facade + 旋转/相机实际写入；`ACharacterController` 拥有 Enhanced Input 的滚轮节流和 UI gate。
 - **目标搜索**：`FindBestTarget()` 遍历所有 `AEnemy`，`ScoreTarget()` 按 `IsAlive()` + 距离 + Camera forward 视角角度评分。锁定内滚轮切换使用独立 `IA_LockTargetSwitch` 的 `Axis1D`：下滚选择当前目标屏幕右侧、上滚选择左侧的最近存活 viewport 候选；候选必须在 `LockOnRadius` 内，不复用初始锁定的视角角度过滤。没有同侧候选时保持当前目标，不环绕也不解锁。
 - **旋转模式切换**：开启时缓存 `bOrientRotationToMovement` / `bUseControllerRotationYaw` / `bUsePawnControlRotation`，切换到锁定模式。普通锁定不再用 `bUseControllerRotationYaw` 硬贴控制器朝向，而是由角色侧独立插值面向目标；解锁时恢复缓存状态。
@@ -639,12 +678,15 @@ FCombatTeamHelper (static helper: ShareTeamTag for same-team detection via Actor
 - **锁定内目标交接**：手动屏幕侧切换和死亡自动重定向都直接调用组件的 `SetLockedTarget()`，只转交旧/新目标标记，不能复用首次锁定用的 `AMyCharacter::SetLockOnTarget()`，否则会污染解除锁定时应恢复的旋转缓存。
 - **死亡与失效**：当前锁定敌人死亡时，`AMyCharacter` 使用既有 `FindBestTarget()` 在当前前方、`LockOnRadius` 内自动选择下一有效敌人；无候选则正常解锁。跑出 `LockOnBreakRadius`、Actor 无效、玩家死亡或玩家硬直均不自动换锁，沿用既有解锁路径。
 - **角色朝向与相机朝向拆分**：`LockOnRotationInterpSpeed` 只控制 Controller/Camera 朝向目标的插值速度；`LockOnFacingTurnRate` 控制非 free-run 锁定状态下角色模型每秒最大转向角度，避免锁定开始或松开 Shift 后瞬间吸回目标 yaw。
+- **非锁定移动**：`ACharacterController::Input_Move()` 以 Controller 的 yaw 将 W/S/A/D 转成镜头相对的前后左右输入；基础角色默认启用 `bOrientRotationToMovement`，因此自由移动时角色会朝当前移动方向转身，而不是固定朝世界坐标轴。
+- **普通锁定移动**：锁定后相机和角色朝向由锁定目标接管，移动输入仍表示相对目标的前后左右方向，形成保持面向目标的八方向移动；这和自由移动时“角色朝移动方向转身”的语义不同。
 - **锁定相机**：默认使用居中后上方构图，`LockOnSocketOffset` 负责 SpringArm 高度偏移，`LockOnCameraPitch` 负责控制器俯视角；只有有效 Bow Aim 临时改用其独立绝对右肩目标，不与 Lock-On 偏移叠加。
 - **相机目标与写入顺序**：`AMyCharacter::GetCameraTargets()` 是唯一逻辑相机目标来源，优先级固定为 `Bow Aim > Lock-On Free-Run / Lock-On > Default`。每帧先完成 Lock-On 的有效性清理、目标交接和旋转写入，再解析 SpringArm 目标；`SocketOffset` 与 `TargetArmLength` 只由该相机路径写入。Bow Aim 的绝对右肩 Offset 不会叠加 Lock-On Offset。
 - **墙体遮挡回弹**：同名原生 `SpringArm` 的实际类型是 `UObstructionRecoverySpringArmComponent`。它不创建第二个 Camera、SpringArm 或 World Trace，而是在引擎既有 Sphere Sweep 的 `BlendLocations(...)` 结果层处理回弹：物理命中立即返回引擎 `TraceHitLocation`；完整目标路径连续清障后，才从当前路径的安全比例平滑回 `DesiredArmLocation`。角色侧始终保留真实目标臂长，不能以碰撞位移反向压短它。`IsPhysicallyObstructed()` 表示实际 Sweep 命中；引擎 `IsCollisionFixApplied()` 在回弹期间只表示相机尚未到完整 Desired 点，不能作为真实墙体命中的新消费入口。
 - **无目标归中让位**：失败锁定后的短归中仍由 `AMyCharacter` 管理，但 `ACharacterController::Input_Look()` 收到非零原始 Look 输入即停止归中。锁定、Bow Aim、Bonfire、死亡、硬直、Guard Break 和 EndPlay 也会停止归中并重置 SpringArm 回弹缓存，因此不会留下迟到的 ControlRotation、短臂或 Offset 写入。
 - **锁定目标反馈**：`AEnemy::SetTargetedByPlayer()` 是敌人被玩家锁定的统一反馈入口；锁定时保持血条可见，并显示 Enemy 自持的 `LockOnMarker` screen-space WidgetComponent，解锁时隐藏标记并恢复血条延迟隐藏流程。
-- **锁定冲刺 Free-Run**：`ShouldUseLockOnFreeRun()` 条件 = `bIsLockingOn && bIsSprinting && EAS_UnOccupied && !IsFalling && 有移动输入`。满足时角色临时恢复自由移动语义，控制器/相机继续盯敌人。
+- **锁定冲刺 Free-Run**：`ShouldUseLockOnFreeRun()` 条件 = `bIsLockingOn && bIsSprinting && EAS_UnOccupied && !IsFalling && 有移动输入`。满足时角色临时恢复自由移动语义，按移动方向转身，控制器/相机继续盯敌人；松开冲刺或进入其他动作后恢复普通锁定的目标朝向。
+- **冲刺攻击朝向**：`PerformSprintAttack()` 读取最后一次有效移动输入并立即面向该方向；没有移动输入时回退到角色当前前向，然后在攻击 Montage 期间锁住旋转模式，避免后续 Tick 覆盖攻击起手方向。
 - **Free-Run 相机让位**：锁定冲刺时会根据本地移动输入添加轻量侧向/后撤相机 offset，避免高速绕行时视野过窄；`LockOnFreeRunCameraInterpSpeed` 默认较慢，避免前后左右切换时镜头频繁抖动。
 
 <a name="foot-ik-trace-animation-system"></a>
@@ -699,8 +741,6 @@ FCombatTeamHelper (static helper: ShareTeamTag for same-team detection via Actor
 
 <a name="dodge-roll-system"></a>
 ## Dodge Roll System（翻滚系统）
-
-![Dodge evade during enemy attack](docs/media/architecture-dodge-evade.gif)
 
 - **状态**：`EAS_Dodging`，无敌帧由 `AnimNotifyState_DodgeInvulnerable` 覆盖全程
 - **方向判定**：无输入时播 `Dodge_B`；非锁定 + 有输入时转向输入方向并播 `Dodge_F`；锁定 + 有输入时保持面向敌人，按角色本地输入方向切 8 个 45° 扇区（`Dodge_F` / `Dodge_FR` / `Dodge_R` / `Dodge_BR` / `Dodge_B` / `Dodge_BL` / `Dodge_L` / `Dodge_FL`）

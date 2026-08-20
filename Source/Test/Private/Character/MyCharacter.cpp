@@ -606,40 +606,54 @@ void AMyCharacter::PerformChargedRelease()
 
 void AMyCharacter::Attack()
 {
+	// 1. 意图决议：将玩家按下的“AttackPress”意图提交给无副作用决议器，得到裁决结果
 	const EPlayerActionIntentResolution Resolution = ResolvePlayerActionIntent(EPlayerActionIntent::AttackPress);
+
+	// 2. 缓冲处理：若当前正在出刀且正处于连招预输入窗口 (ComboWindow)，则记录单次缓冲输入 (bComboInputReceived = true)
 	if (Resolution == EPlayerActionIntentResolution::BufferOnce)
 	{
 		BufferComboInput();
 		return;
 	}
+
+	// 3. 立即启动：若当前处于空闲常态 (EAS_UnOccupied) 且满足前置条件 (有体力/未举盾/落地)，立即执行出刀
 	if (Resolution == EPlayerActionIntentResolution::StartNow)
 	{
 		TryStartAction(EPlayerActionType::Attack);
 	}
+	// 4. 若为 Reject (如举盾中/体力不足/硬直中)，则什么都不做，安全丢弃非法输入
 }
 
+/**
+ * 启动普通攻击动作（首刀）
+ * 包含弓箭排除、冲刺攻击判定、首段连招起播与举盾打断处理
+ */
 bool AMyCharacter::StartAttackAction()
 {
+	// 1. 持弓状态下不走近战攻击
 	if (IsBowEquipped())
 	{
 		return false;
 	}
 
+	// 2. 冲刺移动中按攻击，优先触发冲刺重击
 	if (ShouldUseSprintAttack())
 	{
 		return PerformSprintAttack();
 	}
 
-	Super::Attack();  // 保留
+	Super::Attack();  // 保留基类调用
 
 	if (!CanAttack()) return false;
 
+	// 3. 启动连招首段（从 Segment 0 开始播放）
 	if (!StartComboSegment(ComboCounter, EComboPlaybackMode::NewPlayback))
 	{
 		ResetCombo();
 		return false;
 	}
 
+	// 4. 如果此前正处于举盾状态，攻击将主动打断举盾
 	if (bIsBlocking)
 	{
 		InterruptBlock(false);
@@ -648,6 +662,10 @@ bool AMyCharacter::StartAttackAction()
 	return true;
 }
 
+/**
+ * 提交并应用某一连招段的战斗数值与表现效果
+ * 包含：扣除体力、暂停体力恢复、设置伤害/韧性倍率、应用 Motion Warping、跳转 Section
+ */
 void AMyCharacter::ApplyComboSegmentStartEffects(const FComboSegment& Segment, UAnimInstance* AnimInstance,
 	UAnimMontage* Montage)
 {
@@ -662,6 +680,11 @@ void AMyCharacter::ApplyComboSegmentStartEffects(const FComboSegment& Segment, U
 	AnimInstance->Montage_JumpToSection(Segment.EntrySection, Montage);
 }
 
+/**
+ * 启动指定连招段（包含首段起播与后续段交接）
+ * @param SegmentIndex 连招段下标（0, 1, 2...）
+ * @param PlaybackMode 播放模式（NewPlayback: 首次起手; Continuation: 连招续接跳转）
+ */
 bool AMyCharacter::StartComboSegment(int32 SegmentIndex, EComboPlaybackMode PlaybackMode)
 {
 	UAttackConfigDataAsset* AttackConfig = GetAttackConfig();
@@ -671,6 +694,7 @@ bool AMyCharacter::StartComboSegment(int32 SegmentIndex, EComboPlaybackMode Play
 		return false;
 	}
 
+	// 1. 读取当前段的数据配置 (FComboSegment)
 	const FComboSegment* Segment = AttackConfig->LightAttackCombo->GetSegment(SegmentIndex);
 	if (!Segment)
 	{
@@ -695,6 +719,7 @@ bool AMyCharacter::StartComboSegment(int32 SegmentIndex, EComboPlaybackMode Play
 		return false;
 	}
 
+	// 2. 校验 Motion Warping 配置合法性
 	if (Segment->MotionWarping.bUseMotionWarping
 		&& (!MotionWarpingComponent || Segment->MotionWarping.MaxWarpDistance <= 0.f))
 	{
@@ -704,14 +729,7 @@ bool AMyCharacter::StartComboSegment(int32 SegmentIndex, EComboPlaybackMode Play
 		return false;
 	}
 
-	if (PlaybackMode == EComboPlaybackMode::Continuation && !Attributes->CheckStamina(Segment->StaminaCost))
-	{
-		UE_LOG(LogTemp, Display,
-		       TEXT("%s: StartComboSegment[%d] rejected because stamina %.2f is below cost %.2f."),
-		       *GetName(), SegmentIndex, Attributes->GetCurrentStamina(), Segment->StaminaCost);
-		return false;
-	}
-
+	// 3. 【首段起播模式 (NewPlayback)】
 	if (PlaybackMode == EComboPlaybackMode::NewPlayback)
 	{
 		if (ActionState != EActionState::EAS_UnOccupied)
@@ -728,6 +746,7 @@ bool AMyCharacter::StartComboSegment(int32 SegmentIndex, EComboPlaybackMode Play
 			return false;
 		}
 
+		// 切换到攻击状态，绑定播放 Token
 		ActionState = EActionState::EAS_Attacking;
 		if (!BeginAttackMontagePlayback(AnimInstance, MontageToPlay))
 		{
@@ -736,8 +755,10 @@ bool AMyCharacter::StartComboSegment(int32 SegmentIndex, EComboPlaybackMode Play
 			return false;
 		}
 
+		// 应用当前段体力、倍率、Motion Warping 并跳转 EntrySection
 		ApplyComboSegmentStartEffects(*Segment, AnimInstance, MontageToPlay);
 	}
+	// 4. 【连招续接模式 (Continuation)】
 	else
 	{
 		if (ActionState != EActionState::EAS_Attacking || !ActiveAttackMontage || ActiveAttackPlaybackId == 0)
@@ -750,6 +771,7 @@ bool AMyCharacter::StartComboSegment(int32 SegmentIndex, EComboPlaybackMode Play
 		const uint32 PreviousPlaybackId = ActiveAttackPlaybackId;
 		const bool bSameMontage = PreviousMontage == MontageToPlay;
 
+		// 4.1 【同 Montage 续接】：直接 JumpToSection 并重绑 EndDelegate
 		if (bSameMontage)
 		{
 			if (!AnimInstance->Montage_IsPlaying(PreviousMontage))
@@ -758,6 +780,7 @@ bool AMyCharacter::StartComboSegment(int32 SegmentIndex, EComboPlaybackMode Play
 				return false;
 			}
 
+			// 重绑同一蒙太奇的结束委托，确保播完这一段后能正确接收结束通知
 			if (!RebindActiveAttackMontageEndDelegate(AnimInstance, PreviousMontage))
 			{
 				UE_LOG(LogTemp, Warning, TEXT("%s: StartComboSegment - failed to rebind same-Montage end delegate."), *GetName());
@@ -766,6 +789,7 @@ bool AMyCharacter::StartComboSegment(int32 SegmentIndex, EComboPlaybackMode Play
 
 			ApplyComboSegmentStartEffects(*Segment, AnimInstance, MontageToPlay);
 		}
+		// 4.2 【跨 Montage 续接】：记录 planned 交接 Token，起播新蒙太奇，忽略旧委托
 		else
 		{
 			PlannedAttackHandoffMontage = PreviousMontage;
@@ -809,18 +833,28 @@ bool AMyCharacter::StartComboSegment(int32 SegmentIndex, EComboPlaybackMode Play
 	return true;
 }
 
+/**
+ * 打开连招预输入监听窗口（由 UAnimNotifyState_ComboWindow::NotifyBegin 触发）
+ */
 void AMyCharacter::OpenComboWindow()
 {
 	bComboWindowOpen = true;
 	UE_LOG(LogTemp, Log, TEXT("Combo window opened for segment %d"), ComboCounter);
 }
 
+/**
+ * 关闭连招预输入监听窗口（由 UAnimNotifyState_ComboWindow::NotifyEnd 触发）
+ */
 void AMyCharacter::CloseComboWindow()
 {
 	bComboWindowOpen = false;
 	UE_LOG(LogTemp, Log, TEXT("Combo window closed"));
 }
 
+/**
+ * 打开连招分支跳转窗口（由 UAnimNotifyState_ComboBranchWindow::NotifyBegin 触发）
+ * 在挥刀后的短暂停顿期间，若此前已记录了预输入缓冲，立即尝试消费并跳转下一段
+ */
 void AMyCharacter::OpenComboBranchWindow()
 {
 	if (ActionState != EActionState::EAS_Attacking)
@@ -832,6 +866,10 @@ void AMyCharacter::OpenComboBranchWindow()
 	TryConsumeComboInputAtBranchWindow();
 }
 
+/**
+ * 关闭连招分支跳转窗口（由 UAnimNotifyState_ComboBranchWindow::NotifyEnd 触发）
+ * 若窗口结束仍未触发跳转，清除未使用的缓冲输入
+ */
 void AMyCharacter::CloseComboBranchWindow()
 {
 	if (!bComboBranchWindowOpen)
@@ -843,17 +881,20 @@ void AMyCharacter::CloseComboBranchWindow()
 	bComboInputReceived = false;
 }
 
+/**
+ * 重置连招状态机（在攻击自然结束、被打断、受击、死亡或切换武器时调用）
+ */
 void AMyCharacter::ResetCombo()
 {
-	ComboCounter = 0;
-	bComboWindowOpen = false;
-	bComboBranchWindowOpen = false;
-	bComboInputReceived = false;
-	bActionCancelWindowOpen = false;
-	ClearPlannedAttackHandoff();
-	SetAttackDamageMultiplier(1.0f);
+	ComboCounter = 0;              // 段数归零
+	bComboWindowOpen = false;       // 关闭预输入窗口
+	bComboBranchWindowOpen = false; // 关闭分支窗口
+	bComboInputReceived = false;    // 清空缓冲标记
+	bActionCancelWindowOpen = false;// 关闭后摇取消窗口
+	ClearPlannedAttackHandoff();   // 清空交接令牌
+	SetAttackDamageMultiplier(1.0f);// 恢复基础伤害倍率
 	CurrentPoiseDamage = EquippedWeapon ? EquippedWeapon->GetBasePoiseDamage() : 1.f;
-	ClearAttackMotionWarpTarget();
+	ClearAttackMotionWarpTarget();  // 清空 Motion Warping 目标
 
 	UE_LOG(LogTemp, Log, TEXT("Combo reset"));
 }
@@ -1363,13 +1404,18 @@ void AMyCharacter::TryResumeBlock()
 	}
 }
 
+/**
+ * 受击时的防御裁决接口实现（由 FCombatHitResolver 统一调用）
+ * 包含：弹反有效帧判定、盾牌格挡夹角与体力消耗、破防判定、免伤计算与特效播放
+ */
 FBlockResult AMyCharacter::TryBlockHit(const FCombatHitRequest& Request)
 {
 	FBlockResult Result;
 	Result.DamageAfterBlock = Request.IncomingDamage;
+
+	// 0. 持双手弓状态下禁用副手盾牌防御与弹反
 	if (IsBowEquipped())
 	{
-		// 双手 Bow 不能通过迟到的格挡/弹反状态复用副手防御。
 		return Result;
 	}
 
@@ -1377,15 +1423,16 @@ FBlockResult AMyCharacter::TryBlockHit(const FCombatHitRequest& Request)
 	AActor* Attacker = Request.Attacker;
 	AActor* DamageCauser = Request.DamageCauser;
 
-	// 弹反分支优先（弹反期间不可格挡）
+	// ==================== 1. 弹反分支判定（弹反动作期间拥有最高优先级） ====================
 	if (bIsParrying)
 	{
 		if (!EquippedShield || !Attributes || !Attributes->IsAlive())
 			return Result;
 
+		// 检查条件一：是否正处于动画的弹反有效帧窗口 (由 UAnimNotifyState_ParryActive 开启)
 		if (bParryActive)
 		{
-			// 弹反方向限制（必须面对敌人）
+			// 检查条件二：受击方向限制（必须在盾牌正面防御半角内，背后受击无法弹反）
 			AActor* DirSrc = Attacker ? Attacker : DamageCauser;
 			if (DirSrc)
 			{
@@ -1395,16 +1442,18 @@ FBlockResult AMyCharacter::TryBlockHit(const FCombatHitRequest& Request)
 				if (Dot < CosHalf) return Result; // 角度不匹配，弹反失败
 			}
 
+			// 检查条件三：该招式是否允许被弹反（大招/投技 bCanBeParried = false）
 			if (!Request.bCanBeParried)
 			{
-				return Result; // 该招式不可弹反，按失败弹反处理
+				return Result; // 该招式不可弹反，按弹反失败裸吃伤害处理
 			}
 
-			// 弹反成功！完全免伤 + 攻击方韧性清空
+			// 【弹反成功】：完全免伤 (0 伤害) + 玩家不硬直 + 触发打铁声效与粒子
 			Result.bBlocked = true;
 			Result.bParried = true;
 			Result.DamageAfterBlock = 0.f;
 			Result.bPlayNormalHitReact = false;
+
 			if (EquippedShield->GetParrySound())
 			{
 				UGameplayStatics::PlaySoundAtLocation(this, EquippedShield->GetParrySound(), ImpactPoint);
@@ -1415,33 +1464,38 @@ FBlockResult AMyCharacter::TryBlockHit(const FCombatHitRequest& Request)
 			}
 			return Result;
 		}
-		// 弹反起手/收招帧——裸吃伤害
+
+		// 若处于弹反前摇起手帧或后摇收手帧（bParryActive == false），判定失败，裸吃全额伤害
 		return Result;
 	}
 
+	// ==================== 2. 普通盾牌举盾格挡分支 ====================
 	if (!bIsBlocking || !EquippedShield || !Attributes || !Attributes->IsAlive())
 		return Result;
 
+	// 2.1 校验格挡正面夹角
 	AActor* DirSrc = Attacker ? Attacker : DamageCauser;
 	if (!DirSrc) return Result;
 
 	FVector ToAttacker = (DirSrc->GetActorLocation() - GetActorLocation()).GetSafeNormal2D();
 	float Dot = CalcForwardDot2D(ToAttacker);
 	float CosHalf = FMath::Cos(FMath::DegreesToRadians(EquippedShield->GetBlockHalfAngleDegrees()));
-	if (Dot < CosHalf) return Result;
+	if (Dot < CosHalf) return Result; // 背后或侧面受击，格挡失败
 
+	// 2.2 计算本次格挡的实际体力消耗（基础消耗 * 攻击方破挡倍率）
 	const float StaminaCost = FMath::Max(0.f,
 		EquippedShield->GetBlockStaminaCost() * Request.BlockStaminaDamageMultiplier);
 	const float CurrentStamina = Attributes->GetCurrentStamina();
 	if (StaminaCost > 0.f && CurrentStamina <= 0.f)
 	{
-		return Result;
+		return Result; // 体力已归零，格挡失败
 	}
 
+	// 2.3 破防检测：本次格挡耗体是否会导致体力耗尽归零
 	const bool bWillGuardBreak = StaminaCost > 0.f && CurrentStamina <= StaminaCost;
 	if (bWillGuardBreak)
 	{
-		// UseStamina() 同步广播 OnExhausted，必须先标记破防才能防止旧 Exhausted 计时器抢占状态。
+		// 标记破防请求，防止被普通疲惫 (Exhausted) 计时器抢占
 		bGuardBreakRequested = true;
 		Attributes->UseStamina(CurrentStamina);
 	}
@@ -1449,18 +1503,19 @@ FBlockResult AMyCharacter::TryBlockHit(const FCombatHitRequest& Request)
 	{
 		Attributes->UseStamina(StaminaCost);
 	}
+
 	if (StaminaCost > 0.f)
 	{
-		// 成功格挡的耐力消耗与其他动作一致：命中后重新等待自然恢复。
+		// 成功格挡重置体力自然恢复计时器
 		Attributes->ResetStaminaRegenCooldown();
 	}
 
+	// 2.4 格挡成功：减免伤害、跳过受击硬直、播放格挡金属碰撞反馈
 	Result.bBlocked = true;
 	Result.DamageAfterBlock = Request.IncomingDamage * EquippedShield->GetBlockedDamageMultiplier();
 	Result.bPlayNormalHitReact = false;
-	LastDamageFlashScale = EquippedShield->GetBlockedDamageMultiplier();  // 染红按减伤率缩放
+	LastDamageFlashScale = EquippedShield->GetBlockedDamageMultiplier();
 
-	// 格挡反馈
 	if (EquippedShield->GetBlockSound())
 	{
 		UGameplayStatics::PlaySoundAtLocation(this, EquippedShield->GetBlockSound(), ImpactPoint);
@@ -1472,7 +1527,7 @@ FBlockResult AMyCharacter::TryBlockHit(const FCombatHitRequest& Request)
 	return Result;
 }
 
-// ==================== 弹反 ====================
+// ==================== 弹反生命周期与控制 ====================
 
 bool AMyCharacter::CanStartParry() const
 {
@@ -1480,6 +1535,7 @@ bool AMyCharacter::CanStartParry() const
 		&& IsActionStartPreflightValid(EPlayerActionType::Parry, false);
 }
 
+/** 玩家按下弹反输入入口 */
 void AMyCharacter::Input_Parry()
 {
 	if (ResolvePlayerActionIntent(EPlayerActionIntent::Parry) == EPlayerActionIntentResolution::StartNow)
@@ -1488,16 +1544,19 @@ void AMyCharacter::Input_Parry()
 	}
 }
 
+/** 设置弹反有效帧开关（由 UAnimNotifyState_ParryActive 开启/关闭） */
 void AMyCharacter::SetParryActive(bool bActive)
 {
 	bParryActive = !IsBowEquipped() && bActive;
 }
 
+/** 设置翻滚无敌帧开关（由 UAnimNotifyState_DodgeInvulnerable 开启/关闭） */
 void AMyCharacter::SetDodgeInvulnerable(bool bInvulnerable)
 {
 	bDodgeInvulnerable = bInvulnerable;
 }
 
+/** 开启弹反动作后的冷却计时器（防止无脑狂点弹反按键） */
 void AMyCharacter::StartParryCooldown()
 {
 	const float Cooldown = EquippedShield ? EquippedShield->GetParryCooldown() : 0.4f;
@@ -1558,6 +1617,10 @@ void AMyCharacter::Dodge()
 	}
 }
 
+/**
+ * 计算闪避世界空间方向
+ * 优先读取当前帧移动输入向量，若为空则读取控制器缓存的移动输入
+ */
 FVector AMyCharacter::ComputeDodgeDirection() const
 {
 	FVector InputDir = GetLastMovementInputVector().GetSafeNormal2D();
@@ -1579,63 +1642,77 @@ FVector AMyCharacter::ComputeDodgeDirection() const
 	return FVector::ZeroVector;
 }
 
+/**
+ * 根据世界移动方向与锁定状态，裁决播放哪一个翻滚 Section（支持锁定 8 向翻滚）
+ */
 FName AMyCharacter::SelectDodgeSection(const FVector& WorldDirection) const
 {
-	// 无移动输入：直接后跳（不转身）
+	// 1. 无任何移动输入：原地后撤步（Backstep，不转身）
 	if (WorldDirection.IsNearlyZero())
 	{
 		return FName("Dodge_B");
 	}
 
-	// 非锁定 + 有输入：前滚（会转身面向输入方向）
+	// 2. 非锁定状态 + 有输入：始终前滚（角色已转身朝向输入方向）
 	if (!IsLockingOn())
 	{
 		return FName("Dodge_F");
 	}
 
-	// 锁定 + 有输入：按角色本地朝向切成 8 个 45 度扇区
+	// 3. 锁定状态 + 有输入：将世界移动向量转换至角色本地坐标系，裁决 8 个 45° 扇区
 	const FVector LocalDir = GetActorRotation().UnrotateVector(WorldDirection).GetSafeNormal2D();
 	const float AngleDegrees = FMath::RadiansToDegrees(FMath::Atan2(LocalDir.Y, LocalDir.X));
 
+	// 正前 [-22.5, 22.5)
 	if (AngleDegrees >= -22.5f && AngleDegrees < 22.5f)
 	{
 		return FName("Dodge_F");
 	}
+	// 右前 [22.5, 67.5)
 	if (AngleDegrees >= 22.5f && AngleDegrees < 67.5f)
 	{
 		return FName("Dodge_FR");
 	}
+	// 正右 [67.5, 112.5)
 	if (AngleDegrees >= 67.5f && AngleDegrees < 112.5f)
 	{
 		return FName("Dodge_R");
 	}
+	// 右后 [112.5, 157.5)
 	if (AngleDegrees >= 112.5f && AngleDegrees < 157.5f)
 	{
 		return FName("Dodge_BR");
 	}
+	// 左前 [-67.5, -22.5)
 	if (AngleDegrees >= -67.5f && AngleDegrees < -22.5f)
 	{
 		return FName("Dodge_FL");
 	}
+	// 正左 [-112.5, -67.5)
 	if (AngleDegrees >= -112.5f && AngleDegrees < -67.5f)
 	{
 		return FName("Dodge_L");
 	}
+	// 左后 [-157.5, -112.5)
 	if (AngleDegrees >= -157.5f && AngleDegrees < -112.5f)
 	{
 		return FName("Dodge_BL");
 	}
 
+	// 正后 (绝对值 > 157.5)
 	return FName("Dodge_B");
 }
 
+/** 翻滚蒙太奇播放结束或被打断回调 */
 void AMyCharacter::OnDodgeMontageEnded(UAnimMontage* Montage, bool bInterrupted)
 {
+	// 确保无敌帧关闭并恢复旋转控制
 	bDodgeInvulnerable = false;
 	RestoreRotationMode();
 
 	if (bInterrupted) return;
 
+	// 收敛动作状态机回 EAS_UnOccupied 并恢复体力再生
 	if (RecoverActionStateAfterMontage(EActionState::EAS_Dodging, true) == EActionState::EAS_Exhausted)
 	{
 		return;
@@ -2469,56 +2546,72 @@ AMyCharacter::EPlayerActionIntentResolution AMyCharacter::ResolvePlayerActionInt
 
 	switch (Intent)
 	{
+	// ==================== 1. 玩家按下攻击键 (LMB Press) ====================
 	case EPlayerActionIntent::AttackPress:
+		// [场景 A]：判定当前是否处于弓箭右键瞄准状态 (IsBowAiming)
 		if (IsBowAiming())
 		{
+			// 如果正处于上一箭刚射出或刚装填的后摇门卫中 (IsBowReFireGateBlocked)
 			if (IsBowReFireGateBlocked())
 			{
+				// 检查是否允许缓冲下一次拉弓输入（支持按住连续拉弓射击）
 				return CanBufferBowChargeInput()
 					? EPlayerActionIntentResolution::BufferOnce
 					: EPlayerActionIntentResolution::Reject;
 			}
 
+			// 如果当前未在拉弓 (bBowDrawInputHeld) 且没有已就绪未发射的实体箭矢，则判定为允许立即开始拉弓蓄力
 			return !bBowDrawInputHeld && !IsValid(PreparedBowProjectile)
 				? EPlayerActionIntentResolution::StartNow
 				: EPlayerActionIntentResolution::Reject;
 		}
 
-		// Block 是可逆 held 状态；不能因其 ActionState 仍为 UnOccupied 而让 LMB 绕过防御。
+		// [场景 B]：判定是否正在举盾防御 (Block / bIsBlocking)
+		// 防御是长按状态，持盾防御时禁止直接按左键出刀（必须松开右键），直接拒绝
 		if (CurrentAction == EPlayerActionType::Block || bIsBlocking)
 		{
 			return EPlayerActionIntentResolution::Reject;
 		}
 
+		// [场景 C]：判定当前是否已经在进行普通攻击 (Attack)
 		if (CurrentAction == EPlayerActionType::Attack)
 		{
+			// 只有当动画正处于连招预输入监听窗口 (bComboWindowOpen) 且此前未记录过缓冲时，才记录 BufferOnce
 			return bComboWindowOpen && !bComboInputReceived
 				? EPlayerActionIntentResolution::BufferOnce
 				: EPlayerActionIntentResolution::Reject;
 		}
 
+		// [场景 D]：空闲常态下的首次普通出刀
+		// 校验状态机处于空闲常态 (EAS_UnOccupied) 且前置条件预检通过 (有体力/已落地/非硬直)
 		return ActionState == EActionState::EAS_UnOccupied
 			&& IsActionStartPreflightValid(EPlayerActionType::Attack, false)
 			? EPlayerActionIntentResolution::StartNow
 			: EPlayerActionIntentResolution::Reject;
 
+	// ==================== 2. 玩家松开攻击键 (LMB Release) ====================
 	case EPlayerActionIntent::AttackRelease:
+		// [场景 A]：弓箭模式下的按键松开（处于瞄准或有蓄力/拉弓状态）
 		if (IsBowAiming() || bBowChargeInputHeld || bBowChargeInputBuffered || bBowDrawInputHeld)
 		{
+			// 若未在瞄准、未拉弓或拉弓未满蓄力 (bBowDrawReady 为 false)，则仅结束按住状态，不发射箭矢
 			if (!IsBowAiming() || !bBowDrawInputHeld || !bBowDrawReady)
 			{
 				return EPlayerActionIntentResolution::EndHeld;
 			}
 
+			// 满蓄力松开：前置预检通过则立即触发远程发射 (RangedRelease)
 			return IsActionStartPreflightValid(EPlayerActionType::RangedRelease, false)
 				? EPlayerActionIntentResolution::StartNow
 				: EPlayerActionIntentResolution::EndHeld;
 		}
 
+		// [场景 B]：近战蓄力重击松开（按住左键蓄力一段时间后松开）
 		return (bAttackInputHeld || bIsChargingAttack)
 			? EPlayerActionIntentResolution::EndHeld
 			: EPlayerActionIntentResolution::Reject;
 
+	// ==================== 3. 攻击取消 (Attack Cancel，如失去焦点或被强行打断) ====================
 	case EPlayerActionIntent::AttackCancel:
 		if (IsBowAiming())
 		{
@@ -2529,16 +2622,21 @@ AMyCharacter::EPlayerActionIntentResolution AMyCharacter::ResolvePlayerActionInt
 			? EPlayerActionIntentResolution::EndHeld
 			: EPlayerActionIntentResolution::Reject;
 
+	// ==================== 4. 玩家按下防御键 (RMB Press) ====================
 	case EPlayerActionIntent::BlockPress:
 	{
+		// 根据装备武器决定目标动作：持弓时为瞄准 (RangedAim)，持近战武器/盾牌时为防御 (Block)
 		const EPlayerActionType TargetAction = IsBowEquipped()
 			? EPlayerActionType::RangedAim
 			: EPlayerActionType::Block;
+
+		// 已经在防御/瞄准中，直接保持
 		if (CurrentAction == TargetAction)
 		{
 			return EPlayerActionIntentResolution::StartNow;
 		}
 
+		// 空闲常态下：状态为 EAS_UnOccupied 且前置条件满足，立即启动防御/瞄准
 		if (CurrentAction == EPlayerActionType::None)
 		{
 			return ActionState == EActionState::EAS_UnOccupied
@@ -2547,6 +2645,7 @@ AMyCharacter::EPlayerActionIntentResolution AMyCharacter::ResolvePlayerActionInt
 				: EPlayerActionIntentResolution::Reject;
 		}
 
+		// 攻击后摇阶段：若正处于后摇取消窗口 (bActionCancelWindowOpen)，允许举盾/瞄准打断后摇
 		if (CurrentAction == EPlayerActionType::Attack && bActionCancelWindowOpen)
 		{
 			return IsActionStartPreflightValid(TargetAction, true)
@@ -2557,11 +2656,14 @@ AMyCharacter::EPlayerActionIntentResolution AMyCharacter::ResolvePlayerActionInt
 		return EPlayerActionIntentResolution::Reject;
 	}
 
+	// ==================== 5. 玩家松开防御键 (RMB Release) ====================
 	case EPlayerActionIntent::BlockRelease:
+		// 若当前正在举盾防御或弓箭瞄准，松开按键则结束按住状态 (EndHeld)
 		return CurrentAction == EPlayerActionType::Block || CurrentAction == EPlayerActionType::RangedAim
 			? EPlayerActionIntentResolution::EndHeld
 			: EPlayerActionIntentResolution::Reject;
 
+	// ==================== 6. 翻滚 (Dodge) / 弹反 (Parry) / 喝药 (Potion) ====================
 	case EPlayerActionIntent::Dodge:
 	case EPlayerActionIntent::Parry:
 	case EPlayerActionIntent::Potion:
@@ -2572,6 +2674,7 @@ AMyCharacter::EPlayerActionIntentResolution AMyCharacter::ResolvePlayerActionInt
 				? EPlayerActionType::Parry
 				: EPlayerActionType::Potion;
 
+		// [场景 A]：空闲常态下启动（喝药 Potion 允许在体力耗尽 EAS_Exhausted 状态下使用）
 		if (CurrentAction == EPlayerActionType::None)
 		{
 			const bool bStateAllowsStart = TargetAction == EPlayerActionType::Potion
@@ -2582,6 +2685,7 @@ AMyCharacter::EPlayerActionIntentResolution AMyCharacter::ResolvePlayerActionInt
 				: EPlayerActionIntentResolution::Reject;
 		}
 
+		// [场景 B]：攻击后摇打断（处于 bActionCancelWindowOpen 窗口时，允许翻滚/弹反/喝药打断后摇）
 		if (CurrentAction == EPlayerActionType::Attack)
 		{
 			return bActionCancelWindowOpen && IsActionStartPreflightValid(TargetAction, true)
@@ -2589,6 +2693,7 @@ AMyCharacter::EPlayerActionIntentResolution AMyCharacter::ResolvePlayerActionInt
 				: EPlayerActionIntentResolution::Reject;
 		}
 
+		// [场景 C]：举盾防御中主动打断（举盾时允许直接按翻滚或弹反打断防御）
 		if (TargetAction != EPlayerActionType::Potion && CurrentAction == EPlayerActionType::Block)
 		{
 			return IsActionStartPreflightValid(TargetAction, true)
@@ -2596,6 +2701,7 @@ AMyCharacter::EPlayerActionIntentResolution AMyCharacter::ResolvePlayerActionInt
 				: EPlayerActionIntentResolution::Reject;
 		}
 
+		// [场景 D]：弓箭瞄准中主动打断（瞄准中只要没有进入无法取消的射箭发射承诺阶段，允许翻滚/弹反打断瞄准）
 		if (TargetAction != EPlayerActionType::Potion && CurrentAction == EPlayerActionType::RangedAim
 			&& !IsBowCommittedActionActive())
 		{
@@ -2828,6 +2934,9 @@ bool AMyCharacter::StartBowCharge()
 		return false;
 	}
 
+	// 蓄力阶段沿用已作者化校正的 LoadedArrowVisual；候选 Projectile 只保留为后台投递实体。
+	// 松弦时才显示它，避免 Projectile Blueprint 自身的 Mesh 轴参与搭箭表现。
+	Projectile->SetActorHiddenInGame(true);
 	PreparedBowProjectile = Projectile;
 	Projectile->GetOnImpactResolved().AddUObject(this, &AMyCharacter::HandleBowProjectileImpactResolved);
 	bBowDrawInputHeld = true;
@@ -2902,6 +3011,7 @@ bool AMyCharacter::ReleaseBowArrow()
 	Projectile->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
 	Projectile->SetActorLocationAndRotation(SpawnLocation, LaunchDirection.Rotation(), false, nullptr,
 		ETeleportType::TeleportPhysics);
+	Projectile->SetActorHiddenInGame(false);
 	PreparedBowProjectile = nullptr;
 	ClearBowChargeInputState();
 	bBowDrawInputHeld = false;
@@ -3580,7 +3690,6 @@ void AMyCharacter::RefreshBowPresentation()
 	ABow* Bow = GetEquippedBow();
 	const bool bShouldShowLoadedArrow = Bow && ItemOwnershipComponent && IsBowAiming()
 		&& !bBowReleasePresentationPending
-		&& !IsValid(PreparedBowProjectile)
 		&& ItemOwnershipComponent->GetLoadedAmmoQuantity(Bow->GetAmmoDefinitionId()) > 0;
 	if (Bow)
 	{

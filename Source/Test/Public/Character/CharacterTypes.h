@@ -19,7 +19,6 @@ enum class EActionState : uint8
 	EAS_UsingPotion UMETA(DisplayName = "UsingPotion"),
 	EAS_Dead UMETA(DisplayName = "Dead"),
 	EAS_Aiming UMETA(DisplayName = "Aiming"),
-	// 新状态必须追加，避免已有 Blueprint / AnimNotify 序列化的枚举数值发生漂移。
 	EAS_GuardBroken UMETA(DisplayName = "GuardBroken")
 };
 
@@ -33,16 +32,16 @@ enum class EComboPlaybackMode : uint8
 UENUM(BlueprintType)
 enum class EPlayerActionType : uint8
 {
-	None UMETA(DisplayName = "None"),
-	Attack UMETA(DisplayName = "Attack"),
-	Dodge UMETA(DisplayName = "Dodge"),
-	Block UMETA(DisplayName = "Block"),
-	Parry UMETA(DisplayName = "Parry"),
-	Potion UMETA(DisplayName = "Potion"),
-	HitReact UMETA(DisplayName = "HitReact"),
-	Death UMETA(DisplayName = "Death"),
-	RangedAim UMETA(DisplayName = "RangedAim"),
-	RangedRelease UMETA(DisplayName = "RangedRelease")
+	None UMETA(DisplayName = "None"),  //默认
+	Attack UMETA(DisplayName = "Attack"),  //攻击
+	Dodge UMETA(DisplayName = "Dodge"),  //翻滚
+	Block UMETA(DisplayName = "Block"),  //防御
+	Parry UMETA(DisplayName = "Parry"),  //弹反
+	Potion UMETA(DisplayName = "Potion"),  //喝药
+	HitReact UMETA(DisplayName = "HitReact"),  //受击 
+	Death UMETA(DisplayName = "Death"),  //死亡
+	RangedAim UMETA(DisplayName = "RangedAim"),  //瞄准
+	RangedRelease UMETA(DisplayName = "RangedRelease")  //发射
 };
 
 UENUM()
