@@ -1,0 +1,143 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 620" width="100%" height="100%" style="background-color: #0d1117; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif;">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#8b949e"/>
+    </marker>
+    <marker id="arrow-green" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#3fb950"/>
+    </marker>
+    <marker id="arrow-red" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#f85149"/>
+    </marker>
+    <filter id="shadow" x="-5%" y="-5%" width="110%" height="110%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#000000" flood-opacity="0.5"/>
+    </filter>
+  </defs>
+
+  <!-- 标题 -->
+  <text x="500" y="45" font-size="20" font-weight="bold" fill="#58a6ff" text-anchor="middle">主角核心动作状态机流转图 (Player Action FSM)</text>
+  <text x="500" y="70" font-size="12" fill="#8b949e" text-anchor="middle">EActionState 拓扑与受控/中断收敛机制</text>
+
+  <!-- 1. 常态中枢 -->
+  <g filter="url(#shadow)">
+    <rect x="410" y="110" width="180" height="75" rx="10" fill="#161b22" stroke="#58a6ff" stroke-width="2.5"/>
+    <text x="500" y="142" font-size="15" font-weight="bold" fill="#ffffff" text-anchor="middle">空闲常态</text>
+    <text x="500" y="165" font-size="12" fill="#58a6ff" text-anchor="middle">EAS_UnOccupied</text>
+    
+    <!-- 举盾子状态 -->
+    <rect x="425" y="195" width="150" height="32" rx="6" fill="#161b22" stroke="#388bfd" stroke-width="1.5" stroke-dasharray="4"/>
+    <text x="500" y="216" font-size="11" fill="#79c0ff" text-anchor="middle">🛡️ 举盾: bIsBlocking</text>
+  </g>
+
+  <!-- 2. 主动动作区 (左侧) -->
+  <rect x="40" y="100" width="280" height="400" rx="12" fill="#161b22" stroke="#238636" stroke-width="1.5" stroke-dasharray="6" opacity="0.6"/>
+  <text x="55" y="125" font-size="12" font-weight="bold" fill="#3fb950">【主动动作区 (Combat Actions)】</text>
+
+  <!-- 攻击 -->
+  <g filter="url(#shadow)">
+    <rect x="70" y="145" width="220" height="55" rx="8" fill="#21262d" stroke="#3fb950" stroke-width="2"/>
+    <text x="180" y="172" font-size="13" font-weight="bold" fill="#ffffff" text-anchor="middle">轻 / 冲刺 / 蓄力攻击</text>
+    <text x="180" y="190" font-size="11" fill="#7ee787" text-anchor="middle">EAS_Attacking</text>
+  </g>
+
+  <!-- 翻滚 -->
+  <g filter="url(#shadow)">
+    <rect x="70" y="235" width="220" height="55" rx="8" fill="#21262d" stroke="#3fb950" stroke-width="2"/>
+    <text x="180" y="262" font-size="13" font-weight="bold" fill="#ffffff" text-anchor="middle">8向翻滚 (无敌帧)</text>
+    <text x="180" y="280" font-size="11" fill="#7ee787" text-anchor="middle">EAS_Dodging</text>
+  </g>
+
+  <!-- 弹反 -->
+  <g filter="url(#shadow)">
+    <rect x="70" y="325" width="220" height="55" rx="8" fill="#21262d" stroke="#3fb950" stroke-width="2"/>
+    <text x="180" y="352" font-size="13" font-weight="bold" fill="#ffffff" text-anchor="middle">时机弹反</text>
+    <text x="180" y="370" font-size="11" fill="#7ee787" text-anchor="middle">EAS_Parrying</text>
+  </g>
+
+  <!-- 喝药 & 瞄准 -->
+  <g filter="url(#shadow)">
+    <rect x="70" y="415" width="105" height="55" rx="8" fill="#21262d" stroke="#3fb950" stroke-width="2"/>
+    <text x="122" y="442" font-size="12" font-weight="bold" fill="#ffffff" text-anchor="middle">喝药恢复</text>
+    <text x="122" y="460" font-size="10" fill="#7ee787" text-anchor="middle">EAS_UsingPotion</text>
+
+    <rect x="185" y="415" width="105" height="55" rx="8" fill="#21262d" stroke="#3fb950" stroke-width="2"/>
+    <text x="237" y="442" font-size="12" font-weight="bold" fill="#ffffff" text-anchor="middle">持弓瞄准</text>
+    <text x="237" y="460" font-size="10" fill="#7ee787" text-anchor="middle">EAS_Aiming</text>
+  </g>
+
+  <!-- 3. 受控与异常区 (右侧) -->
+  <rect x="680" y="100" width="280" height="400" rx="12" fill="#161b22" stroke="#da3633" stroke-width="1.5" stroke-dasharray="6" opacity="0.6"/>
+  <text x="695" y="125" font-size="12" font-weight="bold" fill="#f85149">【受控与异常恢复区】</text>
+
+  <!-- 受击硬直 -->
+  <g filter="url(#shadow)">
+    <rect x="710" y="150" width="220" height="55" rx="8" fill="#21262d" stroke="#f85149" stroke-width="2"/>
+    <text x="820" y="177" font-size="13" font-weight="bold" fill="#ffffff" text-anchor="middle">受击硬直</text>
+    <text x="820" y="195" font-size="11" fill="#ff7b72" text-anchor="middle">EAS_Stunning</text>
+  </g>
+
+  <!-- 破防硬直 -->
+  <g filter="url(#shadow)">
+    <rect x="710" y="250" width="220" height="55" rx="8" fill="#21262d" stroke="#f85149" stroke-width="2"/>
+    <text x="820" y="277" font-size="13" font-weight="bold" fill="#ffffff" text-anchor="middle">破防虚弱 (耐力被打空)</text>
+    <text x="820" y="295" font-size="11" fill="#ff7b72" text-anchor="middle">EAS_GuardBroken</text>
+  </g>
+
+  <!-- 体力透支 -->
+  <g filter="url(#shadow)">
+    <rect x="710" y="350" width="220" height="55" rx="8" fill="#21262d" stroke="#d29922" stroke-width="2"/>
+    <text x="820" y="377" font-size="13" font-weight="bold" fill="#ffffff" text-anchor="middle">体力透支 (延迟3秒恢复)</text>
+    <text x="820" y="395" font-size="11" fill="#e3b341" text-anchor="middle">EAS_Exhausted</text>
+  </g>
+
+  <!-- 4. 死亡终态 (底部) -->
+  <g filter="url(#shadow)">
+    <rect x="420" y="525" width="160" height="55" rx="8" fill="#21262d" stroke="#8b949e" stroke-width="2"/>
+    <text x="500" y="552" font-size="14" font-weight="bold" fill="#ffffff" text-anchor="middle">死亡终态</text>
+    <text x="500" y="570" font-size="11" fill="#8b949e" text-anchor="middle">EAS_Dead</text>
+  </g>
+
+  <!-- 连线与文字 -->
+  <!-- 常态 <-> 攻击 -->
+  <path d="M 410 145 L 290 145" fill="none" stroke="#8b949e" stroke-width="1.8" marker-end="url(#arrow)"/>
+  <text x="350" y="138" font-size="11" fill="#c9d1d9" text-anchor="middle">LMB 出刀</text>
+
+  <path d="M 290 175 L 410 175" fill="none" stroke="#8b949e" stroke-width="1.8" marker-end="url(#arrow)"/>
+  <text x="350" y="192" font-size="11" fill="#8b949e" text-anchor="middle">出招结束</text>
+
+  <!-- 常态 -> 翻滚 / 弹反 -->
+  <path d="M 410 160 Q 350 220 290 250" fill="none" stroke="#8b949e" stroke-width="1.8" marker-end="url(#arrow)"/>
+  <text x="345" y="225" font-size="11" fill="#c9d1d9" text-anchor="middle">Space 翻滚</text>
+
+  <path d="M 415 180 Q 360 300 290 340" fill="none" stroke="#8b949e" stroke-width="1.8" marker-end="url(#arrow)"/>
+  <text x="340" y="305" font-size="11" fill="#c9d1d9" text-anchor="middle">F 弹反</text>
+
+  <!-- 连招与后摇打断 -->
+  <path d="M 180 145 C 180 115, 250 115, 250 145" fill="none" stroke="#3fb950" stroke-width="1.8" marker-end="url(#arrow-green)"/>
+  <text x="215" y="110" font-size="10" fill="#7ee787" text-anchor="middle">连招分支 (ComboBranch)</text>
+
+  <path d="M 130 200 L 130 235" fill="none" stroke="#3fb950" stroke-width="1.8" marker-end="url(#arrow-green)"/>
+  <text x="80" y="220" font-size="10" fill="#7ee787" text-anchor="middle">后摇翻滚取消</text>
+
+  <!-- 常态 <-> 受击 -->
+  <path d="M 590 150 L 710 150" fill="none" stroke="#f85149" stroke-width="1.8" marker-end="url(#arrow-red)"/>
+  <text x="650" y="142" font-size="11" fill="#ff7b72" text-anchor="middle">受到未格挡命中</text>
+
+  <path d="M 710 180 L 590 180" fill="none" stroke="#8b949e" stroke-width="1.8" marker-end="url(#arrow)"/>
+  <text x="650" y="196" font-size="11" fill="#8b949e" text-anchor="middle">硬直自然结束</text>
+
+  <!-- 破防与耐力透支 -->
+  <path d="M 575 210 Q 640 230 710 260" fill="none" stroke="#f85149" stroke-width="1.8" marker-end="url(#arrow-red)"/>
+  <text x="640" y="235" font-size="10" fill="#ff7b72" text-anchor="middle">防御耐力被打空</text>
+
+  <path d="M 500 230 Q 550 340 710 370" fill="none" stroke="#d29922" stroke-width="1.8" marker-end="url(#arrow)"/>
+  <text x="610" y="325" font-size="10" fill="#e3b341" text-anchor="middle">出招透支体力归零</text>
+
+  <path d="M 710 390 Q 560 420 520 230" fill="none" stroke="#8b949e" stroke-width="1.8" marker-end="url(#arrow)"/>
+  <text x="635" y="420" font-size="10" fill="#8b949e" text-anchor="middle">3秒恢复超时</text>
+
+  <!-- 死亡连线 -->
+  <path d="M 500 230 L 500 525" fill="none" stroke="#8b949e" stroke-width="2" stroke-dasharray="4" marker-end="url(#arrow)"/>
+  <text x="500" y="475" font-size="11" fill="#f85149" text-anchor="middle" bgcolor="#161b22">致命伤害 (Health &lt;= 0)</text>
+
+</svg>

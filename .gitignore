@@ -1,0 +1,54 @@
+# Unreal Engine ignored files
+Binaries/
+DerivedDataCache/
+Intermediate/
+Saved/
+Build/
+.vscode/
+.vs/
+.idea/
+*.sln
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+*.suo
+*.user
+*.vsconfig
+*.userosscache
+*.sln.doccache
+*.opendb
+*.db
+
+# Engine / UBT Root Caches
+CachedAssetRegistryDiscovery*.bin
+TargetInfo*.json
+AutoScreenshot.png
+push_to_github.bat
+
+# Plugins
+plugins/
+
+# AI CLI Configs
+.codex/
+.codegraph/
+.serena/
+compile_commands.json
+.playwright-mcp/
+.learnings/
+todo.md
+.geminiignore
+.claude/
+.claudeignore
+.antigravitycli/
+output/
+GameplayCpp_Interview_Preparation.md
+
+# Git-LFS S3 Adapter
+lfs-s3.exe
+lfs-s3.tar.gz
+#setup_lfs.ps1
+/test.xlsx
+/test.csv
+.learn/
+/docs/Recommand/
+/docs/Demo/

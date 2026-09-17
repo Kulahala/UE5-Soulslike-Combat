@@ -1,0 +1,144 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 620" width="100%" height="100%" style="background-color: #0d1117; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif;">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#8b949e"/>
+    </marker>
+    <marker id="arrow-blue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#58a6ff"/>
+    </marker>
+    <marker id="arrow-green" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#3fb950"/>
+    </marker>
+    <marker id="arrow-red" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#f85149"/>
+    </marker>
+    <marker id="arrow-purple" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#bc8cff"/>
+    </marker>
+    <filter id="shadow" x="-5%" y="-5%" width="110%" height="110%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#000000" flood-opacity="0.5"/>
+    </filter>
+  </defs>
+
+  <!-- 标题 -->
+  <text x="500" y="45" font-size="20" font-weight="bold" fill="#58a6ff" text-anchor="middle">敌人战斗 AI 分层状态机流转图 (Enemy AI Hierarchical FSM)</text>
+  <text x="500" y="70" font-size="12" fill="#8b949e" text-anchor="middle">外层 FSM 探索/追击 + 内层 Combat HFSM 决策与重检路由</text>
+
+  <!-- 1. 探索巡逻区 (左上) -->
+  <rect x="40" y="100" width="280" height="230" rx="12" fill="#161b22" stroke="#238636" stroke-width="1.5" stroke-dasharray="6" opacity="0.6"/>
+  <text x="55" y="125" font-size="12" font-weight="bold" fill="#3fb950">【探索巡逻层】</text>
+
+  <g filter="url(#shadow)">
+    <rect x="70" y="145" width="220" height="55" rx="8" fill="#21262d" stroke="#3fb950" stroke-width="2"/>
+    <text x="180" y="172" font-size="13" font-weight="bold" fill="#ffffff" text-anchor="middle">巡逻移动</text>
+    <text x="180" y="190" font-size="11" fill="#7ee787" text-anchor="middle">EES_Patrolling</text>
+
+    <rect x="70" y="245" width="220" height="55" rx="8" fill="#21262d" stroke="#3fb950" stroke-width="2"/>
+    <text x="180" y="272" font-size="13" font-weight="bold" fill="#ffffff" text-anchor="middle">警戒搜索</text>
+    <text x="180" y="290" font-size="11" fill="#7ee787" text-anchor="middle">EES_Searching</text>
+  </g>
+
+  <!-- 2. 交战核心区 (右上) -->
+  <rect x="380" y="100" width="580" height="260" rx="12" fill="#161b22" stroke="#1f6feb" stroke-width="1.5" stroke-dasharray="6" opacity="0.6"/>
+  <text x="395" y="125" font-size="12" font-weight="bold" fill="#58a6ff">【交战核心层 (Combat Engagement HFSM)】</text>
+
+  <g filter="url(#shadow)">
+    <!-- 追击 -->
+    <rect x="410" y="145" width="160" height="55" rx="8" fill="#21262d" stroke="#58a6ff" stroke-width="2"/>
+    <text x="490" y="172" font-size="13" font-weight="bold" fill="#ffffff" text-anchor="middle">追击接近</text>
+    <text x="490" y="190" font-size="11" fill="#79c0ff" text-anchor="middle">EES_Chasing</text>
+
+    <!-- 战斗拉扯 -->
+    <rect x="630" y="145" width="160" height="55" rx="8" fill="#21262d" stroke="#58a6ff" stroke-width="2"/>
+    <text x="710" y="172" font-size="13" font-weight="bold" fill="#ffffff" text-anchor="middle">战斗拉扯</text>
+    <text x="710" y="190" font-size="11" fill="#79c0ff" text-anchor="middle">EES_Combating</text>
+
+    <!-- 出招攻击 -->
+    <rect x="770" y="270" width="160" height="55" rx="8" fill="#21262d" stroke="#58a6ff" stroke-width="2"/>
+    <text x="850" y="297" font-size="13" font-weight="bold" fill="#ffffff" text-anchor="middle">出招攻击</text>
+    <text x="850" y="315" font-size="11" fill="#79c0ff" text-anchor="middle">EES_Attacking</text>
+
+    <!-- 局部子状态 -->
+    <rect x="430" y="275" width="310" height="45" rx="6" fill="#161b22" stroke="#388bfd" stroke-width="1.2" stroke-dasharray="4"/>
+    <text x="585" y="302" font-size="11" fill="#79c0ff" text-anchor="middle">🎯 局部子状态: 面向 / 压迫 / 等待协调 / 间距拉扯</text>
+  </g>
+
+  <!-- 3. 受击破防区 (左下) -->
+  <rect x="40" y="390" width="420" height="190" rx="12" fill="#161b22" stroke="#da3633" stroke-width="1.5" stroke-dasharray="6" opacity="0.6"/>
+  <text x="55" y="415" font-size="12" font-weight="bold" fill="#f85149">【受击与失衡处决区】</text>
+
+  <g filter="url(#shadow)">
+    <!-- 普通受击 -->
+    <rect x="70" y="440" width="160" height="55" rx="8" fill="#21262d" stroke="#f85149" stroke-width="2"/>
+    <text x="150" y="467" font-size="13" font-weight="bold" fill="#ffffff" text-anchor="middle">受击硬直</text>
+    <text x="150" y="485" font-size="11" fill="#ff7b72" text-anchor="middle">EES_Stunned</text>
+
+    <!-- 失衡破防 -->
+    <rect x="260" y="440" width="175" height="55" rx="8" fill="#21262d" stroke="#f85149" stroke-width="2"/>
+    <text x="347" y="467" font-size="13" font-weight="bold" fill="#ffffff" text-anchor="middle">失衡破防 (处决大硬直)</text>
+    <text x="347" y="485" font-size="11" fill="#ff7b72" text-anchor="middle">EES_StanceBreak</text>
+  </g>
+
+  <!-- 4. 目标重检路由 (中下) -->
+  <g filter="url(#shadow)">
+    <rect x="520" y="420" width="220" height="65" rx="10" fill="#161b22" stroke="#bc8cff" stroke-width="2"/>
+    <text x="630" y="448" font-size="14" font-weight="bold" fill="#ffffff" text-anchor="middle">目标重检路由中枢</text>
+    <text x="630" y="470" font-size="11" fill="#d2a8ff" text-anchor="middle">CheckCombatTarget()</text>
+  </g>
+
+  <!-- 5. 死亡终态 (右下) -->
+  <g filter="url(#shadow)">
+    <rect x="800" y="425" width="150" height="55" rx="8" fill="#21262d" stroke="#8b949e" stroke-width="2"/>
+    <text x="875" y="452" font-size="14" font-weight="bold" fill="#ffffff" text-anchor="middle">死亡终态</text>
+    <text x="875" y="470" font-size="11" fill="#8b949e" text-anchor="middle">EES_Dead</text>
+  </g>
+
+  <!-- 连线 -->
+  <!-- 巡逻 <-> 搜索 -->
+  <path d="M 150 200 L 150 245" fill="none" stroke="#3fb950" stroke-width="1.8" marker-end="url(#arrow-green)"/>
+  <text x="110" y="225" font-size="10" fill="#7ee787" text-anchor="middle">到达巡逻点</text>
+
+  <path d="M 210 245 L 210 200" fill="none" stroke="#3fb950" stroke-width="1.8" marker-end="url(#arrow-green)"/>
+  <text x="250" y="225" font-size="10" fill="#7ee787" text-anchor="middle">搜索超时</text>
+
+  <!-- 发现玩家 -> 追击 -->
+  <path d="M 290 172 L 410 172" fill="none" stroke="#58a6ff" stroke-width="1.8" marker-end="url(#arrow-blue)"/>
+  <text x="350" y="162" font-size="11" fill="#79c0ff" text-anchor="middle">感知到玩家</text>
+
+  <!-- 追击 <-> 战斗 -->
+  <path d="M 570 160 L 630 160" fill="none" stroke="#58a6ff" stroke-width="1.8" marker-end="url(#arrow-blue)"/>
+  <text x="600" y="150" font-size="10" fill="#79c0ff" text-anchor="middle">进入战斗圈</text>
+
+  <path d="M 630 185 L 570 185" fill="none" stroke="#58a6ff" stroke-width="1.8" marker-end="url(#arrow-blue)"/>
+  <text x="600" y="200" font-size="10" fill="#79c0ff" text-anchor="middle">超出Buffer</text>
+
+  <!-- 战斗 -> 出招 -->
+  <path d="M 770 200 Q 820 220 840 270" fill="none" stroke="#58a6ff" stroke-width="1.8" marker-end="url(#arrow-blue)"/>
+  <text x="835" y="235" font-size="10" fill="#79c0ff" text-anchor="middle">允许出招</text>
+
+  <!-- 受击与破防流 -->
+  <path d="M 490 200 Q 300 350 170 440" fill="none" stroke="#f85149" stroke-width="1.8" marker-end="url(#arrow-red)"/>
+  <text x="260" y="375" font-size="10" fill="#ff7b72" text-anchor="middle">受击 (普通伤害)</text>
+
+  <path d="M 710 200 Q 550 350 370 440" fill="none" stroke="#f85149" stroke-width="1.8" marker-end="url(#arrow-red)"/>
+  <text x="470" y="370" font-size="10" fill="#ff7b72" text-anchor="middle">弹反成功 / 韧性清空</text>
+
+  <!-- 动作与受击结束 -> 路由中枢 -->
+  <path d="M 850 325 L 740 425" fill="none" stroke="#bc8cff" stroke-width="1.8" marker-end="url(#arrow-purple)"/>
+  <text x="825" y="380" font-size="10" fill="#d2a8ff" text-anchor="middle">攻击结束</text>
+
+  <path d="M 230 467 L 520 467" fill="none" stroke="#bc8cff" stroke-width="1.8" marker-end="url(#arrow-purple)"/>
+  <text x="470" y="460" font-size="10" fill="#d2a8ff" text-anchor="middle">硬直/失衡结束</text>
+
+  <!-- 路由分流回战斗 / 追击 / 巡逻 -->
+  <path d="M 630 420 Q 640 300 700 200" fill="none" stroke="#bc8cff" stroke-width="1.8" marker-end="url(#arrow-purple)"/>
+  <text x="695" y="325" font-size="10" fill="#d2a8ff" text-anchor="middle">在战斗圈内</text>
+
+  <path d="M 590 420 Q 520 300 500 200" fill="none" stroke="#bc8cff" stroke-width="1.8" marker-end="url(#arrow-purple)"/>
+  <text x="480" y="330" font-size="10" fill="#d2a8ff" text-anchor="middle">在追击圈内</text>
+
+  <!-- 死亡 -->
+  <path d="M 875 325 L 875 425" fill="none" stroke="#8b949e" stroke-width="1.8" stroke-dasharray="4" marker-end="url(#arrow)"/>
+  <text x="915" y="375" font-size="10" fill="#f85149" text-anchor="middle">致命伤害</text>
+
+</svg>
