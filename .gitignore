@@ -52,3 +52,7 @@ lfs-s3.tar.gz
 .learn/
 /docs/Recommand/
 /docs/Demo/
+
+# Assets managed via GitHub Releases
+Content/
+*.zip

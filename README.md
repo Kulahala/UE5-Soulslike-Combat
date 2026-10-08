@@ -108,10 +108,11 @@ This README is a project overview. For implementation details, state machines, c
 ### 🚀 Getting Started
 
 1. Clone the repository into your Unreal projects folder.
-2. Right-click `Test.uproject` and choose **Generate Visual Studio project files**.
-3. Open `Test.sln`.
-4. Build the `TestEditor` target in **Development Editor** configuration.
-5. Open `Test.uproject` to launch the editor.
+2. Download the project assets package (`Content.zip`) from [Releases](https://github.com/Kulahala/UE5-Soulslike-Combat/releases) and extract it into the project root directory (merging into `Content/`).
+3. Right-click `Test.uproject` and choose **Generate Visual Studio project files**.
+4. Open `Test.sln`.
+5. Build the `TestEditor` target in **Development Editor** configuration.
+6. Open `Test.uproject` to launch the editor.
 
 ---
 
@@ -210,7 +211,8 @@ This README is a project overview. For implementation details, state machines, c
 ### 🚀 快速开始
 
 1. 将仓库克隆到 Unreal 项目目录。
-2. 右键 `Test.uproject`，选择 **Generate Visual Studio project files**。
-3. 打开 `Test.sln`。
-4. 使用 **Development Editor** 配置编译 `TestEditor` 目标。
-5. 打开 `Test.uproject` 启动编辑器。
+2. 前往 [Releases](https://github.com/Kulahala/UE5-Soulslike-Combat/releases) 下载最新的美术与动画资产包 `Content.zip`，并解压合并到项目根目录下的 `Content/` 文件夹中。
+3. 右键 `Test.uproject`，选择 **Generate Visual Studio project files**。
+4. 打开 `Test.sln`。
+5. 使用 **Development Editor** 配置编译 `TestEditor` 目标。
+6. 打开 `Test.uproject` 启动编辑器。
